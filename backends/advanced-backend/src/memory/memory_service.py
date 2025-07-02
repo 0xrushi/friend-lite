@@ -102,32 +102,54 @@ def init_memory_config(
     project_id: Optional[str] = None,
     app_id: Optional[str] = None,
 ) -> dict:
-    """Initialize and return memory configuration with optional overrides."""
-    global MEM0_CONFIG, MEM0_ORGANIZATION_ID, MEM0_PROJECT_ID, MEM0_APP_ID
+    """
+    Initialize and return memory configuration with optional overrides.
 
-    memory_logger.info(f"Initializing MemoryService with Qdrant URL: {qdrant_base_url} and Ollama base URL: {ollama_base_url}")
-    
+    Args:
+        ollama_base_url (Optional[str]): Base URL for Ollama LLM service.
+        qdrant_base_url (Optional[str]): Base URL for Qdrant vector store.
+        organization_id (Optional[str]): Organization ID for memory metadata.
+        project_id (Optional[str]): Project ID for memory metadata.
+        app_id (Optional[str]): App ID for memory metadata.
+
+    Returns:
+        dict: The memory configuration dictionary.
+    """
+    if ollama_base_url is not None and not isinstance(ollama_base_url, str):
+        raise TypeError("ollama_base_url must be a string or None")
+    if qdrant_base_url is not None and not isinstance(qdrant_base_url, str):
+        raise TypeError("qdrant_base_url must be a string or None")
+    if organization_id is not None and not isinstance(organization_id, str):
+        raise TypeError("organization_id must be a string or None")
+    if project_id is not None and not isinstance(project_id, str):
+        raise TypeError("project_id must be a string or None")
+    if app_id is not None and not isinstance(app_id, str):
+        raise TypeError("app_id must be a string or None")
+    global MEM0_CONFIG, MEM0_ORGANIZATION_ID, MEM0_PROJECT_ID, MEM0_APP_ID
+    memory_logger.info(
+        f"Initializing MemoryService with Qdrant URL: {qdrant_base_url} and Ollama base URL: {ollama_base_url}"
+    )
     if ollama_base_url:
         MEM0_CONFIG["llm"]["config"]["ollama_base_url"] = ollama_base_url
         MEM0_CONFIG["embedder"]["config"]["ollama_base_url"] = ollama_base_url
-    
     if qdrant_base_url:
         MEM0_CONFIG["vector_store"]["config"]["host"] = qdrant_base_url
-    
     if organization_id:
         MEM0_ORGANIZATION_ID = organization_id
-    
     if project_id:
         MEM0_PROJECT_ID = project_id
-        
     if app_id:
         MEM0_APP_ID = app_id
-    
     return MEM0_CONFIG
 
 
-def _init_process_memory():
-    """Initialize memory instance once per worker process."""
+def _init_process_memory() -> Memory:
+    """
+    Initialize memory instance once per worker process.
+
+    Returns:
+        Memory: The initialized memory instance for the process.
+    """
     global _process_memory
     if _process_memory is None:
         _process_memory = Memory.from_config(MEM0_CONFIG)
@@ -139,7 +161,21 @@ def _add_memory_to_store(transcript: str, client_id: str, audio_uuid: str) -> bo
     Function to add memory in a separate process.
     This function will be pickled and run in a process pool.
     Uses a persistent memory instance per process.
+
+    Args:
+        transcript (str): The transcript text to store as memory.
+        client_id (str): The user/client ID.
+        audio_uuid (str): The audio UUID for the memory.
+
+    Returns:
+        bool: True if memory was added successfully, False otherwise.
     """
+    if not isinstance(transcript, str):
+        raise TypeError("transcript must be a string")
+    if not isinstance(client_id, str):
+        raise TypeError("client_id must be a string")
+    if not isinstance(audio_uuid, str):
+        raise TypeError("audio_uuid must be a string")
     try:
         # Get or create the persistent memory instance for this process
         process_memory = _init_process_memory()
@@ -163,95 +199,128 @@ def _add_memory_to_store(transcript: str, client_id: str, audio_uuid: str) -> bo
         return False
 
 
-def _extract_action_items_from_transcript(transcript: str, client_id: str, audio_uuid: str) -> List[Dict[str, Any]]:
+def _extract_action_items_from_transcript(
+    transcript: str, client_id: str, audio_uuid: str
+) -> List[Dict[str, Any]]:
     """
     Extract action items from transcript using Ollama.
     This function will be used in the processing pipeline.
+
+    Args:
+        transcript (str): The transcript text to analyze.
+        client_id (str): The user/client ID.
+        audio_uuid (str): The audio UUID for the memory.
+
+    Returns:
+        List[Dict[str, Any]]: List of extracted action items (may be empty).
     """
+    if not isinstance(transcript, str):
+        raise TypeError("transcript must be a string")
+    if not isinstance(client_id, str):
+        raise TypeError("client_id must be a string")
+    if not isinstance(audio_uuid, str):
+        raise TypeError("audio_uuid must be a string")
     try:
         # Get or create the persistent memory instance for this process
         process_memory = _init_process_memory()
-        
         # Initialize Ollama client with the same config as Mem0
         ollama_client = ollama.Client(host=OLLAMA_BASE_URL)
-        
         # Format the prompt with the transcript
         prompt = ACTION_ITEM_EXTRACTION_PROMPT.format(transcript=transcript)
-        
         # Call Ollama to extract action items
         response = ollama_client.chat(
             model="llama3.1:latest",
             messages=[
-                {"role": "system", "content": "You are an expert at extracting action items from conversations. Always return valid JSON."},
-                {"role": "user", "content": prompt}
+                {
+                    "role": "system",
+                    "content": "You are an expert at extracting action items from conversations. Always return valid JSON.",
+                },
+                {"role": "user", "content": prompt},
             ],
             options={
                 "temperature": 0.1,  # Low temperature for consistent extraction
                 "num_predict": 1000,  # Enough tokens for multiple action items
-            }
+            },
         )
-        
         # Parse the response
-        response_text = response['message']['content'].strip()
-        
+        response_text = response["message"]["content"].strip()
         # Try to parse JSON from the response
         try:
             # Clean up the response if it has markdown formatting
-            if response_text.startswith('```json'):
-                response_text = response_text.replace('```json', '').replace('```', '').strip()
-            elif response_text.startswith('```'):
-                response_text = response_text.replace('```', '').strip()
-            
+            if response_text.startswith("```json"):
+                response_text = (
+                    response_text.replace("```json", "").replace("```", "").strip()
+                )
+            elif response_text.startswith("```"):
+                response_text = response_text.replace("```", "").strip()
             action_items = json.loads(response_text)
-            
             # Validate that we got a list
             if not isinstance(action_items, list):
-                memory_logger.warning(f"Action item extraction returned non-list for {audio_uuid}: {type(action_items)}")
+                memory_logger.warning(
+                    f"Action item extraction returned non-list for {audio_uuid}: {type(action_items)}"
+                )
                 return []
-            
             # Add metadata to each action item
             for item in action_items:
                 if isinstance(item, dict):
-                    item.update({
-                        "audio_uuid": audio_uuid,
-                        "client_id": client_id,
-                        "created_at": int(time.time()),
-                        "source": "transcript_extraction",
-                        "id": f"action_{audio_uuid}_{len(action_items)}_{int(time.time())}"
-                    })
-            
-            memory_logger.info(f"Extracted {len(action_items)} action items from {audio_uuid}")
+                    item.update(
+                        {
+                            "audio_uuid": audio_uuid,
+                            "client_id": client_id,
+                            "created_at": int(time.time()),
+                            "source": "transcript_extraction",
+                            "id": f"action_{audio_uuid}_{len(action_items)}_{int(time.time())}",
+                        }
+                    )
+            memory_logger.info(
+                f"Extracted {len(action_items)} action items from {audio_uuid}"
+            )
             return action_items
-            
         except json.JSONDecodeError as e:
-            memory_logger.error(f"Failed to parse action items JSON for {audio_uuid}: {e}")
+            memory_logger.error(
+                f"Failed to parse action items JSON for {audio_uuid}: {e}"
+            )
             memory_logger.error(f"Raw response: {response_text}")
             return []
-            
     except Exception as e:
         memory_logger.error(f"Error extracting action items for {audio_uuid}: {e}")
         return []
 
 
-def _add_action_items_to_store(action_items: List[Dict[str, Any]], client_id: str, audio_uuid: str) -> bool:
+def _add_action_items_to_store(
+    action_items: List[Dict[str, Any]], client_id: str, audio_uuid: str
+) -> bool:
     """
     Store extracted action items in Mem0 with proper metadata.
+
+    Args:
+        action_items (List[Dict[str, Any]]): List of action items to store.
+        client_id (str): The user/client ID.
+        audio_uuid (str): The audio UUID for the memory.
+
+    Returns:
+        bool: True if all action items were stored successfully, False otherwise.
     """
+    if not isinstance(action_items, list):
+        raise TypeError("action_items must be a list of dicts")
+    if not isinstance(client_id, str):
+        raise TypeError("client_id must be a string")
+    if not isinstance(audio_uuid, str):
+        raise TypeError("audio_uuid must be a string")
     try:
         if not action_items:
             return True  # Nothing to store, but not an error
-        
         # Get or create the persistent memory instance for this process
         process_memory = _init_process_memory()
-        
         for item in action_items:
+            if not isinstance(item, dict):
+                raise TypeError("Each action item must be a dict")
             # Format the action item as a message for Mem0
             action_text = f"Action Item: {item.get('description', 'No description')}"
-            if item.get('assignee') and item.get('assignee') != 'unassigned':
+            if item.get("assignee") and item.get("assignee") != "unassigned":
                 action_text += f" (Assigned to: {item['assignee']})"
-            if item.get('due_date') and item.get('due_date') != 'not_specified':
+            if item.get("due_date") and item.get("due_date") != "not_specified":
                 action_text += f" (Due: {item['due_date']})"
-            
             # Store in Mem0 with infer=False to preserve exact content
             process_memory.add(
                 action_text,
@@ -266,12 +335,10 @@ def _add_action_items_to_store(action_items: List[Dict[str, Any]], client_id: st
                     "project_id": MEM0_PROJECT_ID,
                     "app_id": MEM0_APP_ID,
                 },
-                infer=False  # Don't let Mem0 modify our action items
+                infer=False,  # Don't let Mem0 modify our action items
             )
-        
         memory_logger.info(f"Stored {len(action_items)} action items for {audio_uuid}")
         return True
-        
     except Exception as e:
         memory_logger.error(f"Error storing action items for {audio_uuid}: {e}")
         return False
@@ -279,24 +346,26 @@ def _add_action_items_to_store(action_items: List[Dict[str, Any]], client_id: st
 
 class MemoryService:
     """Service class for managing memory operations."""
-    
+
     def __init__(self):
         self.memory = None
         self._initialized = False
-    
+
     def initialize(self):
         """Initialize the memory service."""
         if self._initialized:
             return
-        
+
         try:
             # Log Qdrant and Ollama URLs
-            memory_logger.info(f"Initializing MemoryService with Qdrant URL: {MEM0_CONFIG['vector_store']['config']['host']} and Ollama base URL: {MEM0_CONFIG['llm']['config']['ollama_base_url']}")
+            memory_logger.info(
+                f"Initializing MemoryService with Qdrant URL: {MEM0_CONFIG['vector_store']['config']['host']} and Ollama base URL: {MEM0_CONFIG['llm']['config']['ollama_base_url']}"
+            )
             # Initialize main memory instance
             self.memory = Memory.from_config(MEM0_CONFIG)
             self._initialized = True
             memory_logger.info("Memory service initialized successfully")
-            
+
         except Exception as e:
             memory_logger.error(f"Failed to initialize memory service: {e}")
             raise
@@ -305,63 +374,77 @@ class MemoryService:
         """Add memory in background process (non-blocking)."""
         if not self._initialized:
             self.initialize()
-        
+
         try:
             success = _add_memory_to_store(transcript, client_id, audio_uuid)
             if success:
-                memory_logger.info(f"Added transcript for {audio_uuid} to mem0 (client: {client_id})")
+                memory_logger.info(
+                    f"Added transcript for {audio_uuid} to mem0 (client: {client_id})"
+                )
             else:
                 memory_logger.error(f"Failed to add memory for {audio_uuid}")
             return success
         except Exception as e:
             memory_logger.error(f"Error adding memory for {audio_uuid}: {e}")
             return False
-    
-    def extract_and_store_action_items(self, transcript: str, client_id: str, audio_uuid: str) -> int:
+
+    def extract_and_store_action_items(
+        self, transcript: str, client_id: str, audio_uuid: str
+    ) -> int:
         """
         Extract action items from transcript and store them in Mem0.
         Returns the number of action items extracted and stored.
         """
         if not self._initialized:
             self.initialize()
-        
+
         try:
             # Extract action items from the transcript
-            action_items = _extract_action_items_from_transcript(transcript, client_id, audio_uuid)
-            
+            action_items = _extract_action_items_from_transcript(
+                transcript, client_id, audio_uuid
+            )
+
             if not action_items:
-                memory_logger.info(f"No action items found in transcript for {audio_uuid}")
+                memory_logger.info(
+                    f"No action items found in transcript for {audio_uuid}"
+                )
                 return 0
-            
+
             # Store action items in Mem0
             success = _add_action_items_to_store(action_items, client_id, audio_uuid)
-            
+
             if success:
-                memory_logger.info(f"Successfully extracted and stored {len(action_items)} action items for {audio_uuid}")
+                memory_logger.info(
+                    f"Successfully extracted and stored {len(action_items)} action items for {audio_uuid}"
+                )
                 return len(action_items)
             else:
                 memory_logger.error(f"Failed to store action items for {audio_uuid}")
                 return 0
-                
+
         except Exception as e:
             memory_logger.error(f"Error extracting action items for {audio_uuid}: {e}")
             return 0
-    
-    def get_action_items(self, user_id: str, limit: int = 50, status_filter: Optional[str] = None) -> List[Dict[str, Any]]:
+
+    def get_action_items(
+        self, user_id: str, limit: int = 50, status_filter: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
         """
         Get action items for a user with optional status filtering.
         """
         if not self._initialized:
             self.initialize()
-        
+
         assert self.memory is not None, "Memory service not initialized"
         try:
             # First, let's try to get all memories and filter manually to debug the issue
             all_memories = self.memory.get_all(user_id=user_id, limit=200)
-            
+
             memory_logger.info(f"All memories response type: {type(all_memories)}")
-            memory_logger.info(f"All memories keys: {list(all_memories.keys()) if isinstance(all_memories, dict) else 'not a dict'}")
-            
+            memory_logger.info(
+                f"All memories keys: {list(all_memories.keys()) if isinstance(all_memories, dict) else 'not a dict'}"
+            )
+
             # Handle different formats
             if isinstance(all_memories, dict):
                 if "results" in all_memories:
@@ -370,119 +453,146 @@ class MemoryService:
                     memories_list = list(all_memories.values())
             else:
                 memories_list = all_memories if isinstance(all_memories, list) else []
-            
-            memory_logger.info(f"Found {len(memories_list)} total memories for user {user_id}")
-            
+
+            memory_logger.info(
+                f"Found {len(memories_list)} total memories for user {user_id}"
+            )
+
             # Filter for action items manually
             action_item_memories = []
             for memory in memories_list:
                 if isinstance(memory, dict):
-                    metadata = memory.get('metadata', {})
-                    memory_logger.info(f"Memory {memory.get('id', 'unknown')}: metadata = {metadata}")
-                    
-                    if metadata.get('type') == 'action_item':
+                    metadata = memory.get("metadata", {})
+                    memory_logger.info(
+                        f"Memory {memory.get('id', 'unknown')}: metadata = {metadata}"
+                    )
+
+                    if metadata.get("type") == "action_item":
                         action_item_memories.append(memory)
-                        memory_logger.info(f"Found action item memory: {memory.get('memory', '')}")
-            
-            memory_logger.info(f"Found {len(action_item_memories)} action item memories")
-            
+                        memory_logger.info(
+                            f"Found action item memory: {memory.get('memory', '')}"
+                        )
+
+            memory_logger.info(
+                f"Found {len(action_item_memories)} action item memories"
+            )
+
             # Extract action item data from memories
             action_items = []
-            
+
             for memory in action_item_memories:
-                metadata = memory.get('metadata', {})
-                action_item_data = metadata.get('action_item_data', {})
-                
+                metadata = memory.get("metadata", {})
+                action_item_data = metadata.get("action_item_data", {})
+
                 # If no action_item_data, try to parse from memory text
                 if not action_item_data:
-                    memory_logger.warning(f"No action_item_data found in metadata for memory {memory.get('id')}")
+                    memory_logger.warning(
+                        f"No action_item_data found in metadata for memory {memory.get('id')}"
+                    )
                     # Try to create basic action item from memory text
-                    memory_text = memory.get('memory', '')
-                    if memory_text.startswith('Action Item:'):
+                    memory_text = memory.get("memory", "")
+                    if memory_text.startswith("Action Item:"):
                         action_item_data = {
-                            'description': memory_text.replace('Action Item:', '').strip(),
-                            'status': 'open',
-                            'assignee': 'unassigned',
-                            'due_date': 'not_specified',
-                            'priority': 'not_specified'
+                            "description": memory_text.replace(
+                                "Action Item:", ""
+                            ).strip(),
+                            "status": "open",
+                            "assignee": "unassigned",
+                            "due_date": "not_specified",
+                            "priority": "not_specified",
                         }
-                
+
                 # Apply status filter if specified
-                if status_filter and action_item_data.get('status') != status_filter:
+                if status_filter and action_item_data.get("status") != status_filter:
                     continue
-                
+
                 # Enrich with memory metadata
-                action_item_data.update({
-                    "memory_id": memory.get('id'),
-                    "memory_text": memory.get('memory'),
-                    "created_at": metadata.get('timestamp'),
-                    "audio_uuid": metadata.get('audio_uuid')
-                })
-                
+                action_item_data.update(
+                    {
+                        "memory_id": memory.get("id"),
+                        "memory_text": memory.get("memory"),
+                        "created_at": metadata.get("timestamp"),
+                        "audio_uuid": metadata.get("audio_uuid"),
+                    }
+                )
+
                 action_items.append(action_item_data)
-            
-            memory_logger.info(f"Returning {len(action_items)} action items after filtering")
+
+            memory_logger.info(
+                f"Returning {len(action_items)} action items after filtering"
+            )
             return action_items
-            
+
         except Exception as e:
             memory_logger.error(f"Error fetching action items for user {user_id}: {e}")
             raise
-    
-    def update_action_item_status(self, memory_id: str, new_status: str, user_id: Optional[str] = None) -> bool:
+
+    def update_action_item_status(
+        self, memory_id: str, new_status: str, user_id: Optional[str] = None
+    ) -> bool:
         """
         Update the status of an action item using proper Mem0 API.
         """
         if not self._initialized:
             self.initialize()
-        
+
         assert self.memory is not None, "Memory service not initialized"
         try:
             # First, get the current memory to retrieve its metadata
             target_memory = self.memory.get(memory_id=memory_id)
-            
+
             if not target_memory:
                 memory_logger.error(f"Action item with memory_id {memory_id} not found")
                 return False
-            
+
             # Extract and update the action item data in metadata
-            metadata = target_memory.get('metadata', {})
-            action_item_data = metadata.get('action_item_data', {})
-            
+            metadata = target_memory.get("metadata", {})
+            action_item_data = metadata.get("action_item_data", {})
+
             if not action_item_data:
                 memory_logger.error(f"No action_item_data found in memory {memory_id}")
                 return False
-            
+
             # Update the status in action_item_data
-            action_item_data['status'] = new_status
-            action_item_data['updated_at'] = int(time.time())
-            
+            action_item_data["status"] = new_status
+            action_item_data["updated_at"] = int(time.time())
+
             # Create updated memory text with the new status
             updated_memory_text = f"Action Item: {action_item_data.get('description', 'No description')} (Status: {new_status})"
-            if action_item_data.get('assignee') and action_item_data.get('assignee') != 'unassigned':
+            if (
+                action_item_data.get("assignee")
+                and action_item_data.get("assignee") != "unassigned"
+            ):
                 updated_memory_text += f" (Assigned to: {action_item_data['assignee']})"
-            if action_item_data.get('due_date') and action_item_data.get('due_date') != 'not_specified':
+            if (
+                action_item_data.get("due_date")
+                and action_item_data.get("due_date") != "not_specified"
+            ):
                 updated_memory_text += f" (Due: {action_item_data['due_date']})"
-            
+
             # Use Mem0's proper update method
-            result = self.memory.update(
-                memory_id=memory_id,
-                data=updated_memory_text
+            result = self.memory.update(memory_id=memory_id, data=updated_memory_text)
+
+            memory_logger.info(
+                f"Updated action item {memory_id} status to {new_status}"
             )
-            
-            memory_logger.info(f"Updated action item {memory_id} status to {new_status}")
             return True
-            
+
         except Exception as e:
-            memory_logger.error(f"Error updating action item status for {memory_id}: {e}")
+            memory_logger.error(
+                f"Error updating action item status for {memory_id}: {e}"
+            )
             return False
-    
-    def search_action_items(self, query: str, user_id: str, limit: int = 20) -> List[Dict[str, Any]]:
+
+    def search_action_items(
+        self, query: str, user_id: str, limit: int = 20
+    ) -> List[Dict[str, Any]]:
         """
         Search action items by text query using proper Mem0 search with filters.
         """
         if not self._initialized:
             self.initialize()
-        
+
         assert self.memory is not None, "Memory service not initialized"
         try:
             # Use Mem0's search with filters to find action items
@@ -491,83 +601,95 @@ class MemoryService:
                 query=query,
                 user_id=user_id,
                 limit=limit,
-                filters={"metadata.type": "action_item"}
+                filters={"metadata.type": "action_item"},
             )
-            
+
             # Extract action item data
             action_items = []
-            
+
             # Handle different response formats from Mem0 search
             if isinstance(memories, dict) and "results" in memories:
                 memories_list = memories["results"]
             elif isinstance(memories, list):
                 memories_list = memories
             else:
-                memory_logger.warning(f"Unexpected search response format: {type(memories)}")
+                memory_logger.warning(
+                    f"Unexpected search response format: {type(memories)}"
+                )
                 memories_list = []
-            
+
             for memory in memories_list:
                 if not isinstance(memory, dict):
                     memory_logger.warning(f"Skipping non-dict memory: {type(memory)}")
                     continue
-                
-                metadata = memory.get('metadata', {})
-                
+
+                metadata = memory.get("metadata", {})
+
                 # Double-check it's an action item
-                if metadata.get('type') != 'action_item':
+                if metadata.get("type") != "action_item":
                     continue
-                
-                action_item_data = metadata.get('action_item_data', {})
-                
+
+                action_item_data = metadata.get("action_item_data", {})
+
                 # If no structured action item data, try to parse from memory text
                 if not action_item_data:
-                    memory_text = memory.get('memory', '')
-                    if memory_text.startswith('Action Item:'):
+                    memory_text = memory.get("memory", "")
+                    if memory_text.startswith("Action Item:"):
                         action_item_data = {
-                            'description': memory_text.replace('Action Item:', '').strip(),
-                            'status': 'open',
-                            'assignee': 'unassigned',
-                            'due_date': 'not_specified',
-                            'priority': 'not_specified'
+                            "description": memory_text.replace(
+                                "Action Item:", ""
+                            ).strip(),
+                            "status": "open",
+                            "assignee": "unassigned",
+                            "due_date": "not_specified",
+                            "priority": "not_specified",
                         }
-                
+
                 # Enrich with memory metadata
-                action_item_data.update({
-                    "memory_id": memory.get('id'),
-                    "memory_text": memory.get('memory'),
-                    "relevance_score": memory.get('score', 0),
-                    "created_at": metadata.get('timestamp'),
-                    "audio_uuid": metadata.get('audio_uuid')
-                })
-                
+                action_item_data.update(
+                    {
+                        "memory_id": memory.get("id"),
+                        "memory_text": memory.get("memory"),
+                        "relevance_score": memory.get("score", 0),
+                        "created_at": metadata.get("timestamp"),
+                        "audio_uuid": metadata.get("audio_uuid"),
+                    }
+                )
+
                 action_items.append(action_item_data)
-            
-            memory_logger.info(f"Search found {len(action_items)} action items for query '{query}'")
+
+            memory_logger.info(
+                f"Search found {len(action_items)} action items for query '{query}'"
+            )
             return action_items
-            
+
         except Exception as e:
-            memory_logger.error(f"Error searching action items for user {user_id} with query '{query}': {e}")
+            memory_logger.error(
+                f"Error searching action items for user {user_id} with query '{query}': {e}"
+            )
             # Fallback: get all action items and do basic text matching
             try:
                 all_action_items = self.get_action_items(user_id=user_id, limit=100)
-                
+
                 if not all_action_items:
                     return []
-                
+
                 # Simple text matching fallback
                 search_results = []
                 query_lower = query.lower()
-                
+
                 for item in all_action_items:
-                    description = item.get('description', '').lower()
-                    assignee = item.get('assignee', '').lower()
-                    context = item.get('context', '').lower()
-                    
+                    description = item.get("description", "").lower()
+                    assignee = item.get("assignee", "").lower()
+                    context = item.get("context", "").lower()
+
                     # Check if query appears in any field
-                    if (query_lower in description or 
-                        query_lower in assignee or 
-                        query_lower in context):
-                        
+                    if (
+                        query_lower in description
+                        or query_lower in assignee
+                        or query_lower in context
+                    ):
+
                         # Add relevance score based on where the match was found
                         relevance_score = 0.0
                         if query_lower in description:
@@ -576,24 +698,28 @@ class MemoryService:
                             relevance_score += 0.2
                         if query_lower in context:
                             relevance_score += 0.1
-                        
-                        item['relevance_score'] = relevance_score
+
+                        item["relevance_score"] = relevance_score
                         search_results.append(item)
-                
+
                 # Sort by relevance score (highest first) and limit results
-                search_results.sort(key=lambda x: x.get('relevance_score', 0), reverse=True)
-                memory_logger.info(f"Fallback search found {len(search_results)} matches")
+                search_results.sort(
+                    key=lambda x: x.get("relevance_score", 0), reverse=True
+                )
+                memory_logger.info(
+                    f"Fallback search found {len(search_results)} matches"
+                )
                 return search_results[:limit]
-                
+
             except Exception as fallback_e:
                 memory_logger.error(f"Fallback search also failed: {fallback_e}")
                 return []
-    
+
     def delete_action_item(self, memory_id: str) -> bool:
         """Delete a specific action item by memory ID."""
         if not self._initialized:
             self.initialize()
-        
+
         assert self.memory is not None, "Memory service not initialized"
         try:
             self.memory.delete(memory_id=memory_id)
@@ -607,7 +733,7 @@ class MemoryService:
         """Get all memories for a user."""
         if not self._initialized:
             self.initialize()
-        
+
         assert self.memory is not None, "Memory service not initialized"
         try:
             memories = self.memory.get_all(user_id=user_id, limit=limit)
@@ -615,12 +741,12 @@ class MemoryService:
         except Exception as e:
             memory_logger.error(f"Error fetching memories for user {user_id}: {e}")
             raise
-    
+
     def search_memories(self, query: str, user_id: str, limit: int = 10) -> dict:
         """Search memories using semantic similarity."""
         if not self._initialized:
             self.initialize()
-        
+
         assert self.memory is not None, "Memory service not initialized"
         try:
             memories = self.memory.search(query=query, user_id=user_id, limit=limit)
@@ -628,12 +754,12 @@ class MemoryService:
         except Exception as e:
             memory_logger.error(f"Error searching memories for user {user_id}: {e}")
             raise
-    
+
     def delete_memory(self, memory_id: str) -> bool:
         """Delete a specific memory by ID."""
         if not self._initialized:
             self.initialize()
-        
+
         assert self.memory is not None, "Memory service not initialized"
         try:
             self.memory.delete(memory_id=memory_id)
@@ -642,18 +768,18 @@ class MemoryService:
         except Exception as e:
             memory_logger.error(f"Error deleting memory {memory_id}: {e}")
             raise
-    
+
     def delete_all_user_memories(self, user_id: str) -> int:
         """Delete all memories for a user and return count of deleted memories."""
         if not self._initialized:
             self.initialize()
-        
+
         try:
             assert self.memory is not None, "Memory service not initialized"
             # Get all memories first to count them
             user_memories_response = self.memory.get_all(user_id=user_id)
             memory_count = 0
-            
+
             # Handle different response formats from get_all
             if isinstance(user_memories_response, dict):
                 if "results" in user_memories_response:
@@ -667,18 +793,20 @@ class MemoryService:
                 memory_count = len(user_memories_response)
             else:
                 memory_count = 0
-            
+
             # Delete all memories for this user
             if memory_count > 0:
                 self.memory.delete_all(user_id=user_id)
-                memory_logger.info(f"Deleted {memory_count} memories for user {user_id}")
-            
+                memory_logger.info(
+                    f"Deleted {memory_count} memories for user {user_id}"
+                )
+
             return memory_count
-            
+
         except Exception as e:
             memory_logger.error(f"Error deleting memories for user {user_id}: {e}")
             raise
-    
+
     def test_connection(self) -> bool:
         """Test memory service connection."""
         try:
@@ -688,7 +816,7 @@ class MemoryService:
         except Exception as e:
             memory_logger.error(f"Memory service connection test failed: {e}")
             return False
-    
+
     def shutdown(self):
         """Shutdown the memory service."""
         self._initialized = False
@@ -696,17 +824,24 @@ class MemoryService:
 
 
 # Global service instance
-def get_memory_service() -> MemoryService:
-    """Get the global memory service instance."""
+def get_memory_service() -> "MemoryService":
+    """
+    Get the global memory service instance.
+
+    Returns:
+        MemoryService: The global memory service instance.
+    """
     global _memory_service
     if _memory_service is None:
         _memory_service = MemoryService()
     return _memory_service
 
 
-def shutdown_memory_service():
-    """Shutdown the global memory service."""
+def shutdown_memory_service() -> None:
+    """
+    Shutdown the global memory service.
+    """
     global _memory_service
     if _memory_service:
         _memory_service.shutdown()
-        _memory_service = None 
+        _memory_service = None
