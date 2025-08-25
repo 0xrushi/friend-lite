@@ -127,7 +127,6 @@ CHUNK_DIR.mkdir(parents=True, exist_ok=True)
 TRANSCRIPTION_PROVIDER = os.getenv("TRANSCRIPTION_PROVIDER")
 DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_API_KEY")
 MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY")
-OFFLINE_ASR_TCP_URI = os.getenv("OFFLINE_ASR_TCP_URI", "tcp://localhost:8765")
 
 # Get configured transcription provider (online or offline)
 transcription_provider = get_transcription_provider(TRANSCRIPTION_PROVIDER)
@@ -364,7 +363,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 # Configure CORS with configurable origins (includes Tailscale support by default)
-default_origins = "http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000","http://127.0.0.1:3002"
+default_origins = "http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000,http://127.0.0.1:3002"
 cors_origins = os.getenv("CORS_ORIGINS", default_origins)
 allowed_origins = [origin.strip() for origin in cors_origins.split(",") if origin.strip()]
 
@@ -622,90 +621,126 @@ async def ws_endpoint_pcm(
         audio_streaming = False  # Track if audio session is active
 
         while True:
-            # Parse Wyoming protocol or fall back to raw audio
-            header, payload = await parse_wyoming_protocol(ws)
+            try:
+                # Parse Wyoming protocol or fall back to raw audio
+                header, payload = await parse_wyoming_protocol(ws)
 
-            if header["type"] == "audio-start":
-                # Handle audio session start
-                audio_streaming = True
-                audio_format = header.get("data", {})
-                application_logger.info(
-                    f"🎙️ Audio session started for {client_id} - "
-                    f"Format: {audio_format.get('rate')}Hz, "
-                    f"{audio_format.get('width')}bytes, "
-                    f"{audio_format.get('channels')}ch"
-                )
-
-            elif header["type"] == "audio-chunk" and payload:
-                packet_count += 1
-                total_bytes += len(payload)
-
-                if audio_streaming:
-                    application_logger.debug(
-                        f"🎵 Received audio chunk #{packet_count}: {len(payload)} bytes"
-                    )
-
-                    # Extract audio format from header
-                    audio_data = header.get("data", {})
-                    chunk = AudioChunk(
-                        audio=payload,
-                        rate=audio_data.get("rate", 16000),
-                        width=audio_data.get("width", 2),
-                        channels=audio_data.get("channels", 1),
-                        timestamp=audio_data.get("timestamp", int(time.time())),
-                    )
-
-                    # Queue to application-level processor
-                    await processor_manager.queue_audio(
-                        AudioProcessingItem(
-                            client_id=client_id,
-                            user_id=user.user_id,
-                            audio_chunk=chunk,
-                            timestamp=chunk.timestamp,
-                        )
-                    )
-
-                    # Update client state for tracking purposes
-                    client_state.update_audio_received(chunk)
-
-                    # Log every 1000th packet to avoid spam
-                    if packet_count % 1000 == 0:
-                        application_logger.info(
-                            f"📊 Processed {packet_count} audio chunks ({total_bytes} bytes total) for client {client_id}"
-                        )
-                else:
-                    application_logger.warning(
-                        f"⚠️ Received audio chunk without audio-start for {client_id}"
-                    )
-
-            elif header["type"] == "audio-stop":
-                # Handle audio session stop
-                audio_streaming = False
-                application_logger.info(
-                    f"🛑 Audio session stopped for {client_id} - "
-                    f"Total chunks: {packet_count}, Total bytes: {total_bytes}"
-                )
-
-                # Signal end of audio stream to processor
-                await processor_manager.close_client_audio(client_id)
-
-                # Close current conversation to trigger memory processing
-                if client_state:
+                if header["type"] == "audio-start":
+                    # Handle audio session start
+                    audio_streaming = True
+                    audio_format = header.get("data", {})
                     application_logger.info(
-                        f"📝 Closing conversation for {client_id} on audio-stop"
+                        f"🎙️ Audio session started for {client_id} - "
+                        f"Format: {audio_format.get('rate')}Hz, "
+                        f"{audio_format.get('width')}bytes, "
+                        f"{audio_format.get('channels')}ch"
                     )
-                    await client_state.close_current_conversation()
+                    
+                    # Create transcription manager early for this client
+                    processor_manager = get_processor_manager()
+                    try:
+                        await processor_manager.ensure_transcription_manager(client_id)
+                        application_logger.info(
+                            f"🔌 Created transcription manager for {client_id} on audio-start"
+                        )
+                    except Exception as tm_error:
+                        application_logger.error(
+                            f"❌ Failed to create transcription manager for {client_id}: {tm_error}"
+                        )
 
-                # Reset counters for next session
-                packet_count = 0
-                total_bytes = 0
+                elif header["type"] == "audio-chunk" and payload:
+                    packet_count += 1
+                    total_bytes += len(payload)
 
-            else:
-                # Unknown event type
-                application_logger.debug(
-                    f"Ignoring Wyoming event type '{header['type']}' for {client_id}"
+                    if audio_streaming:
+                        application_logger.debug(
+                            f"🎵 Received audio chunk #{packet_count}: {len(payload)} bytes"
+                        )
+
+                        # Extract audio format from header
+                        audio_data = header.get("data", {})
+                        chunk = AudioChunk(
+                            audio=payload,
+                            rate=audio_data.get("rate", 16000),
+                            width=audio_data.get("width", 2),
+                            channels=audio_data.get("channels", 1),
+                            timestamp=audio_data.get("timestamp", int(time.time())),
+                        )
+
+                        # Queue to application-level processor
+                        await processor_manager.queue_audio(
+                            AudioProcessingItem(
+                                client_id=client_id,
+                                user_id=user.user_id,
+                                audio_chunk=chunk,
+                                timestamp=chunk.timestamp,
+                            )
+                        )
+
+                        # Update client state for tracking purposes
+                        client_state.update_audio_received(chunk)
+
+                        # Log every 1000th packet to avoid spam
+                        if packet_count % 1000 == 0:
+                            application_logger.info(
+                                f"📊 Processed {packet_count} audio chunks ({total_bytes} bytes total) for client {client_id}"
+                            )
+                    else:
+                        application_logger.warning(
+                            f"⚠️ Received audio chunk without audio-start for {client_id}"
+                        )
+
+                elif header["type"] == "audio-stop":
+                    # Handle audio session stop
+                    audio_streaming = False
+                    application_logger.info(
+                        f"🛑 Audio session stopped for {client_id} - "
+                        f"Total chunks: {packet_count}, Total bytes: {total_bytes}"
+                    )
+
+                    # Signal end of audio stream to processor
+                    await processor_manager.close_client_audio(client_id)
+
+                    # Close current conversation to trigger memory processing
+                    if client_state:
+                        application_logger.info(
+                            f"📝 Closing conversation for {client_id} on audio-stop"
+                        )
+                        await client_state.close_current_conversation()
+
+                    # Reset counters for next session
+                    packet_count = 0
+                    total_bytes = 0
+
+                elif header["type"] == "ping":
+                    # Handle keepalive ping from frontend
+                    application_logger.debug(f"🏓 Received ping from {client_id}")
+                    # Optional: Send pong response if needed
+                    # await ws.send_text(json.dumps({"type": "pong"}) + "\n")
+                
+                else:
+                    # Unknown event type
+                    application_logger.debug(
+                        f"Ignoring Wyoming event type '{header['type']}' for {client_id}"
+                    )
+
+            except json.JSONDecodeError as e:
+                application_logger.error(
+                    f"❌ JSON decode error in Wyoming protocol for {client_id}: {e}"
                 )
-
+                continue  # Skip this message but don't disconnect
+            except ValueError as e:
+                application_logger.error(
+                    f"❌ Protocol error for {client_id}: {e}"
+                )
+                continue  # Skip this message but don't disconnect
+            except Exception as e:
+                application_logger.error(
+                    f"❌ Unexpected error processing message for {client_id}: {e}", exc_info=True
+                )
+                # Continue processing instead of breaking
+                continue
+                
     except WebSocketDisconnect:
         application_logger.info(
             f"🔌 PCM WebSocket disconnected - Client: {client_id}, Packets: {packet_count}, Total bytes: {total_bytes}"

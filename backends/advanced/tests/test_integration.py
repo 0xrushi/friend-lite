@@ -31,6 +31,7 @@ Test Environment:
 import json
 import logging
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -188,65 +189,30 @@ class IntegrationTestRunner:
             return []
     
     def cleanup_test_data(self):
-        """Clean up test-specific data directories (preserve development data)."""
+        """Clean up test-specific data directories using lightweight Docker container."""
         if not self.fresh_run:
             logger.info("🗂️ Skipping test data cleanup (reusing existing data)")
             return
             
         logger.info("🗂️ Cleaning up test-specific data directories...")
         
-        # Test data directories to clean (match docker-compose-test.yml mount paths)
-        test_directories = [
-            "./data/test_audio_chunks/",
-            "./data/test_data/", 
-            "./data/test_debug_dir/",
-            "./data/test_mongo_data/",
-            "./data/test_qdrant_data/",
-            "./data/test_neo4j/"
-        ]
-        
-        # Try container-based cleanup first for root-owned files
+        # Use lightweight Docker container to clean root-owned files
         try:
-            # First check if container exists
-            check_result = subprocess.run(
-                ["docker", "ps", "-q", "-f", "name=advanced-backend-friend-backend-test-1"],
-                capture_output=True,
-                text=True
-            )
+            result = subprocess.run([
+                "docker", "run", "--rm",
+                "-v", f"{Path.cwd()}/data:/data",
+                "alpine:latest",
+                "sh", "-c", "rm -rf /data/test_*"
+            ], capture_output=True, text=True, timeout=30)
             
-            if check_result.stdout.strip():
-                logger.info("🐳 Container exists, attempting container-based cleanup for root-owned test data...")
-                # Use docker exec to clean from within a test container if available
-                result = subprocess.run(
-                    ["docker", "exec", "advanced-backend-friend-backend-test-1", "rm", "-rf"] + 
-                    [f"/app/{test_dir.lstrip('./')}" for test_dir in test_directories],
-                    capture_output=True,
-                    text=True
-                )
-                logger.info(f"Container cleanup result: {result}")
-                if result.returncode == 0:
-                    logger.info("✅ Container-based cleanup successful")
-                    return
-                else:
-                    logger.info(f"Container cleanup failed: {result.stderr}")
+            if result.returncode == 0:
+                logger.info("✅ Docker cleanup successful")
             else:
-                logger.info("Container not running yet, will use local cleanup")
+                logger.warning(f"Error during Docker cleanup: {result.stderr}")
+                            
         except Exception as e:
-            logger.debug(f"Container cleanup not available: {e}")
-        
-        # Fallback to local cleanup
-        for test_dir in test_directories:
-            test_path = Path(test_dir)
-            if test_path.exists():
-                try:
-                    import shutil
-                    shutil.rmtree(test_path)
-                    logger.info(f"✓ Cleaned {test_dir}")
-                except Exception as e:
-                    logger.warning(f"⚠️ Failed to clean {test_dir}: {e}")
-                    logger.warning(f"💡 You may need to run: sudo rm -rf {test_dir}")
-            else:
-                logger.debug(f"📁 {test_dir} does not exist, skipping")
+            logger.warning(f"⚠️ Docker cleanup failed: {e}")
+            logger.warning("💡 Ensure Docker is running and accessible")
                 
         logger.info("✓ Test data cleanup complete")
         
@@ -435,7 +401,6 @@ class IntegrationTestRunner:
         # Log environment readiness based on provider type
         deepgram_key = os.environ.get('DEEPGRAM_API_KEY')
         openai_key = os.environ.get('OPENAI_API_KEY')
-        offline_asr_uri = os.environ.get('OFFLINE_ASR_TCP_URI')
         
         # Validate based on transcription provider (streaming/batch architecture)
         if self.provider == "deepgram":
@@ -517,6 +482,13 @@ class IntegrationTestRunner:
                 # Stop existing test services and remove volumes for fresh start
                 subprocess.run(["docker", "compose", "-f", "docker-compose-test.yml", "down", "-v"], capture_output=True)
             
+            # Ensure memory_config.yaml exists by copying from template
+            memory_config_path = "memory_config.yaml"
+            memory_template_path = "memory_config.yaml.template"
+            if not os.path.exists(memory_config_path) and os.path.exists(memory_template_path):
+                logger.info(f"📋 Creating {memory_config_path} from template...")
+                shutil.copy2(memory_template_path, memory_config_path)
+            
             # Check if we're in CI environment
             is_ci = os.environ.get("CI") == "true" or os.environ.get("GITHUB_ACTIONS") == "true"
             
@@ -593,24 +565,8 @@ class IntegrationTestRunner:
                 except Exception as e:
                     logger.warning(f"Could not fetch container status: {e}")
                 
-                # Try alternative approach for macOS
-                if "permission denied" in result.stderr.lower():
-                    logger.info("Permission issue detected, trying alternative approach...")
-                    alt_result = subprocess.run(
-                        ["docker", "compose", "-f", "docker-compose-test.yml", "up", "-d", "--no-build"],
-                        capture_output=True,
-                        text=True
-                    )
-                    if alt_result.returncode == 0:
-                        logger.info("Alternative approach successful")
-                        result = alt_result
-                    else:
-                        logger.error("Alternative approach also failed")
-                        raise RuntimeError("Docker compose failed to start - try running:\n" +
-                                         "  sudo chown -R $(whoami):staff \"$HOME/.docker/buildx\"\n" +
-                                         "  sudo chmod -R 755 \"$HOME/.docker/buildx\"")
-                else:
-                    raise RuntimeError("Docker compose failed to start")
+                # Fail fast - no retry attempts
+                raise RuntimeError("Docker compose failed to start")
                 
             self.services_started = True
             self.services_started_by_test = True  # Mark that we started the services
