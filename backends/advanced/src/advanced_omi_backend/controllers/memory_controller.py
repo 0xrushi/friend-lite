@@ -196,3 +196,86 @@ async def get_all_memories_admin(user: User, limit: int):
         return JSONResponse(
             status_code=500, content={"message": f"Error fetching admin memories: {str(e)}"}
         )
+
+
+async def regenerate_memories(audio_uuid: str, user: User):
+    """Regenerate memories for a specific conversation. Users can only regenerate memories for their own conversations."""
+    try:
+        # Import here to avoid circular imports
+        from advanced_omi_backend.conversation_repository import get_conversation_repository
+        from advanced_omi_backend.database import chunks_col
+        from advanced_omi_backend.processors import MemoryProcessingItem, get_processor_manager
+        
+        # Get the conversation to verify ownership
+        conversation = await chunks_col.find_one({"audio_uuid": audio_uuid})
+        if not conversation:
+            return JSONResponse(
+                status_code=404,
+                content={"message": f"Conversation with audio_uuid {audio_uuid} not found"}
+            )
+        
+        # Check if user owns this conversation (unless they're admin)
+        if not user.is_superuser and conversation.get("user_id") != user.user_id:
+            return JSONResponse(
+                status_code=403,
+                content={"message": "Access forbidden. You can only regenerate memories for your own conversations."}
+            )
+        
+        # Get the conversation repository to extract transcript
+        conversation_repo = get_conversation_repository()
+        full_transcript = await conversation_repo.get_full_conversation_text(audio_uuid)
+        
+        if not full_transcript or len(full_transcript.strip()) < 10:
+            return JSONResponse(
+                status_code=400,
+                content={"message": "Cannot regenerate memories: transcript is empty or too short"}
+            )
+        
+        # Get memory service and processor manager
+        memory_service = get_memory_service()
+        processor_manager = get_processor_manager()
+        
+        # First, delete existing memories for this conversation
+        # Get existing memories to find their IDs
+        existing_memories = await memory_service.search_memories(
+            full_transcript, 
+            user.user_id, 
+            limit=100
+        )
+        
+        # Delete memories that reference this audio_uuid
+        deleted_count = 0
+        for memory in existing_memories:
+            metadata = memory.get("metadata", {})
+            if metadata.get("audio_uuid") == audio_uuid:
+                try:
+                    await memory_service.delete_memory(memory["id"])
+                    deleted_count += 1
+                except Exception as e:
+                    audio_logger.warning(f"Failed to delete existing memory {memory['id']}: {e}")
+        
+        audio_logger.info(f"Deleted {deleted_count} existing memories for {audio_uuid}")
+        
+        # Queue memory processing for regeneration
+        memory_item = MemoryProcessingItem(
+            client_id=conversation.get("client_id", "unknown"),
+            user_id=conversation.get("user_id", user.user_id),
+            user_email=conversation.get("user_email", user.email),
+            audio_uuid=audio_uuid,
+        )
+        
+        await processor_manager.queue_memory(memory_item)
+        
+        return {
+            "message": f"Memory regeneration queued for conversation {audio_uuid}",
+            "deleted_existing": deleted_count,
+            "audio_uuid": audio_uuid,
+            "status": "queued"
+        }
+        
+    except Exception as e:
+        audio_logger.error(f"Error regenerating memories for {audio_uuid}: {e}", exc_info=True)
+        return JSONResponse(
+            status_code=500,
+            content={"message": f"Error regenerating memories: {str(e)}"}
+        )

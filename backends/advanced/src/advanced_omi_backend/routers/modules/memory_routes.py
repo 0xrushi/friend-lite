@@ -69,3 +69,12 @@ async def get_memories_unfiltered(
 async def get_all_memories_admin(current_user: User = Depends(current_superuser), limit: int = 200):
     """Get all memories across all users for admin review. Admin only."""
     return await memory_controller.get_all_memories_admin(current_user, limit)
+
+
+@router.post("/{audio_uuid}/regenerate")
+async def regenerate_memories(
+    audio_uuid: str,
+    current_user: User = Depends(current_active_user)
+):
+    """Regenerate memories for a specific conversation. Users can only regenerate memories for their own conversations."""
+    return await memory_controller.regenerate_memories(audio_uuid, current_user)

@@ -55,6 +55,7 @@ export const memoriesApi = {
   getAll: (userId?: string) => api.get('/api/memories', { params: userId ? { user_id: userId } : {} }),
   getUnfiltered: (userId?: string) => api.get('/api/memories/unfiltered', { params: userId ? { user_id: userId } : {} }),
   delete: (id: string) => api.delete(`/api/memories/${id}`),
+  regenerate: (audioUuid: string) => api.post(`/api/memories/${audioUuid}/regenerate`),
 }
 
 export const usersApi = {

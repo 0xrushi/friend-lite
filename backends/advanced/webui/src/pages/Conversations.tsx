@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
-import { MessageSquare, RefreshCw, Calendar, User, Play, Pause } from 'lucide-react'
-import { conversationsApi, BACKEND_URL } from '../services/api'
+import { MessageSquare, RefreshCw, Calendar, User, Play, Pause, Brain } from 'lucide-react'
+import { conversationsApi, memoriesApi, BACKEND_URL } from '../services/api'
 
 interface Conversation {
   audio_uuid: string
@@ -45,6 +45,9 @@ export default function Conversations() {
   const [playingSegment, setPlayingSegment] = useState<string | null>(null) // Format: "audioUuid-segmentIndex"
   const audioRefs = useRef<{ [key: string]: HTMLAudioElement }>({})
   const segmentTimerRef = useRef<number | null>(null)
+  
+  // Memory regeneration state
+  const [regeneratingMemories, setRegeneratingMemories] = useState<{ [key: string]: boolean }>({})
 
   const loadConversations = async () => {
     try {
@@ -137,6 +140,28 @@ export default function Conversations() {
       console.error('Error playing audio segment:', err);
       setPlayingSegment(null);
     });
+  }
+
+  const handleRegenerateMemories = async (audioUuid: string) => {
+    try {
+      setRegeneratingMemories(prev => ({ ...prev, [audioUuid]: true }))
+      
+      const response = await memoriesApi.regenerate(audioUuid)
+      
+      if (response.status === 200) {
+        // Show success message
+        alert(`Memories regeneration queued successfully! Deleted ${response.data.deleted_existing} existing memories.`)
+        // Refresh conversations to show updated status
+        loadConversations()
+      } else {
+        alert('Failed to regenerate memories. Please try again.')
+      }
+    } catch (err: any) {
+      console.error('Error regenerating memories:', err)
+      alert(err.response?.data?.message || 'Failed to regenerate memories. Please try again.')
+    } finally {
+      setRegeneratingMemories(prev => ({ ...prev, [audioUuid]: false }))
+    }
   }
 
   // Cleanup audio on unmount
@@ -232,7 +257,7 @@ export default function Conversations() {
                   </div>
                 </div>
                 
-{/* Audio Player */}
+                {/* Audio Player */}
                 <div className="space-y-2">
                   {(conversation.audio_path || conversation.cropped_audio_path) && (
                     <>
@@ -267,12 +292,56 @@ export default function Conversations() {
                       )}
                     </>
                   )}
+                  
+
                 </div>
               </div>
 
               {/* Transcript */}
               <div className="space-y-2">
-                <h3 className="font-medium text-gray-900 dark:text-gray-100 mb-2">Transcript:</h3>
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="font-medium text-gray-900 dark:text-gray-100">Transcript:</h3>
+                  <button
+                    onClick={() => handleRegenerateMemories(conversation.audio_uuid)}
+                    disabled={regeneratingMemories[conversation.audio_uuid]}
+                    className={`flex items-center space-x-2 px-3 py-2 text-sm rounded-md transition-colors ${
+                      regeneratingMemories[conversation.audio_uuid]
+                        ? 'bg-gray-300 dark:bg-gray-600 text-gray-500 dark:text-gray-400 cursor-not-allowed'
+                        : 'bg-purple-600 hover:bg-purple-700 text-white'
+                    }`}
+                    title="Regenerate memories from this conversation's transcript"
+                  >
+                    <Brain className={`h-4 w-4 ${regeneratingMemories[conversation.audio_uuid] ? 'animate-pulse' : ''}`} />
+                    <span>
+                      {regeneratingMemories[conversation.audio_uuid] 
+                        ? 'Regenerating...' 
+                        : 'Regenerate Memory'
+                      }
+                    </span>
+                  </button>
+                </div>
+                
+                {/* Memory Processing Status */}
+                {conversation.memory_processing_status && (
+                  <div className="mb-3">
+                    <div className="flex items-center space-x-2 text-sm">
+                      <Brain className="h-4 w-4 text-purple-600" />
+                      <span className="text-gray-700 dark:text-gray-300">Memory Status:</span>
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                        conversation.memory_processing_status === 'COMPLETED' 
+                          ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
+                          : conversation.memory_processing_status === 'PENDING'
+                          ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200'
+                          : conversation.memory_processing_status === 'FAILED'
+                          ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
+                          : 'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200'
+                      }`}>
+                        {conversation.memory_processing_status}
+                      </span>
+                    </div>
+                  </div>
+                )}
+                
                 {conversation.transcript && conversation.transcript.length > 0 ? (
                   <div className="p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600">
                     <div className="space-y-1">
