@@ -73,3 +73,12 @@ backends/charts/advanced-backend/env-configmap.yaml
 extras/openmemory-mcp/data/*
 .env.backup.*
 
+backends/advanced/nginx.conf
+backends/advanced/Caddyfile
+
+app/ios/Pods
+results
+log.html
+output.xml
+report.html
+.secrets

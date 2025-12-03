@@ -15,3 +15,7 @@
 !ssl
 !nginx.conf
 !nginx.conf.template
+!start.sh
+!start-k8s.sh
+!start-workers.sh
+!Caddyfile

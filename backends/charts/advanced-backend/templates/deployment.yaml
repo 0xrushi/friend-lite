@@ -15,6 +15,7 @@ spec:
         {{- include "advanced-backend.selectorLabels" . | nindent 8 }}
     spec:
       containers:
+        # Main FastAPI backend
         - name: {{ .Chart.Name }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
@@ -60,6 +61,37 @@ spec:
               mountPath: /etc/ssl/certs/mem0-ca.crt
               subPath: ca.crt
               readOnly: true
+
+        {{- if .Values.workers.sidecar.enabled }}
+        # Workers sidecar container (optional)
+        - name: {{ .Chart.Name }}-workers
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["./start-workers.sh"]
+          envFrom:
+            - configMapRef:
+                name: friend-lite-config
+            - secretRef:
+                name: friend-lite-secrets
+          env:
+            {{- range $key, $value := .Values.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.workers.resources | default .Values.resources | nindent 12 }}
+          volumeMounts:
+            {{- if .Values.persistence.enabled }}
+            - name: data-volume
+              mountPath: {{ .Values.persistence.mountPath }}
+            - name: data-volume
+              mountPath: /app/audio_chunks
+            {{- end }}
+            - name: mem0-ca-cert
+              mountPath: /etc/ssl/certs/mem0-ca.crt
+              subPath: ca.crt
+              readOnly: true
+        {{- end }}
       volumes:
         {{- if .Values.persistence.enabled }}
         - name: data-volume

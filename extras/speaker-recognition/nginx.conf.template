@@ -46,12 +46,13 @@ http {
     }
     
     upstream web_ui {
-        server web-ui:5175;
+        server web-ui:WEB_UI_PORT_PLACEHOLDER;
     }
     
     # HTTPS Server
     server {
-        listen 443 ssl http2;
+        listen 443 ssl;
+        http2 on;
         server_name localhost TAILSCALE_IP;
         
         # SSL Configuration

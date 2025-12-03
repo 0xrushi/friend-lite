@@ -39,5 +39,10 @@ COPY memory_config.yaml* ./
 COPY diarization_config.json* ./
 
 
-# Run the application
-CMD ["uv", "run", "--extra", "deepgram", "python3", "src/advanced_omi_backend/main.py"]
+# Copy and make startup scripts executable
+COPY start.sh ./
+COPY start-workers.sh ./
+RUN chmod +x start.sh start-workers.sh
+
+# Run the application with workers
+CMD ["./start.sh"]

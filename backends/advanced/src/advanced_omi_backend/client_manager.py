@@ -104,7 +104,7 @@ class ClientManager:
         """
         return len(self._active_clients)
 
-    def create_client(self, client_id: str, ac_repository, chunk_dir, user_id: str, user_email: Optional[str] = None) -> "ClientState":
+    def create_client(self, client_id: str, chunk_dir, user_id: str, user_email: Optional[str] = None) -> "ClientState":
         """
         Atomically create and register a new client.
 
@@ -113,7 +113,6 @@ class ClientManager:
 
         Args:
             client_id: Unique client identifier
-            ac_repository: Audio chunks repository
             chunk_dir: Directory for audio chunks
             user_id: User ID who owns this client
             user_email: Optional user email
@@ -131,7 +130,7 @@ class ClientManager:
         from advanced_omi_backend.client import ClientState
 
         # Create client state
-        client_state = ClientState(client_id, ac_repository, chunk_dir, user_id, user_email)
+        client_state = ClientState(client_id, chunk_dir, user_id, user_email)
 
         # Atomically add to internal storage and register mapping
         self._active_clients[client_id] = client_state

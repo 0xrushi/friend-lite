@@ -12,8 +12,6 @@ import time
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from advanced_omi_backend.conversation_manager import get_conversation_manager
-from advanced_omi_backend.database import AudioChunksRepository
 from advanced_omi_backend.task_manager import get_task_manager
 from wyoming.audio import AudioChunk
 
@@ -30,14 +28,12 @@ class ClientState:
     def __init__(
         self,
         client_id: str,
-        ac_db_collection_helper: AudioChunksRepository,
         chunk_dir: Path,
         user_id: str,
         user_email: Optional[str] = None,
     ):
         self.client_id = client_id
         self.connected = True
-        self.db_helper = ac_db_collection_helper
         self.chunk_dir = chunk_dir
 
         # Store user data for memory processing
@@ -133,33 +129,19 @@ class ClientState:
             audio_logger.info(f"🔒 No active conversation to close for client {self.client_id}")
             return
 
-        # Debug logging for memory processing investigation
-        audio_logger.info(f"🔍 ClientState close_current_conversation debug for {self.client_id}:")
-        audio_logger.info(f"    - current_audio_uuid: {self.current_audio_uuid}")
-        audio_logger.info(f"    - user_id: {self.user_id}")
-        audio_logger.info(f"    - user_email: {self.user_email}")
-        audio_logger.info(f"    - client_id: {self.client_id}")
+        # NOTE: ClientState is legacy V1 code. In V2 architecture, conversation closure
+        # is handled by the websocket controllers using RQ jobs directly.
+        # This method is kept minimal for backward compatibility.
 
-        # Use ConversationManager for clean separation of concerns
-        conversation_manager = get_conversation_manager()
-        success = await conversation_manager.close_conversation(
-            client_id=self.client_id,
-            audio_uuid=self.current_audio_uuid,
-            user_id=self.user_id,
-            user_email=self.user_email,
-            conversation_start_time=self.conversation_start_time,
-            speech_segments=self.speech_segments,
-            chunk_dir=self.chunk_dir,
-        )
+        audio_logger.info(f"🔒 Closing conversation for client {self.client_id}, audio_uuid: {self.current_audio_uuid}")
 
-        if success:
-            # Clean up speech segments for this conversation
-            if self.current_audio_uuid in self.speech_segments:
-                del self.speech_segments[self.current_audio_uuid]
-            if self.current_audio_uuid in self.current_speech_start:
-                del self.current_speech_start[self.current_audio_uuid]
-        else:
-            audio_logger.warning(f"⚠️ Conversation closure had issues for {self.current_audio_uuid}")
+        # Clean up speech segments for this conversation
+        if self.current_audio_uuid in self.speech_segments:
+            del self.speech_segments[self.current_audio_uuid]
+        if self.current_audio_uuid in self.current_speech_start:
+            del self.current_speech_start[self.current_audio_uuid]
+
+        audio_logger.info(f"✅ Cleaned up state for {self.current_audio_uuid}")
 
     async def start_new_conversation(self):
         """Start a new conversation by closing current and resetting state."""
@@ -186,10 +168,6 @@ class ClientState:
 
         # Close current conversation
         await self.close_current_conversation()
-
-        # Cancel any tasks for this client
-        task_manager = get_task_manager()
-        await task_manager.cancel_tasks_for_client(self.client_id)
 
         # Clean up state
         self.speech_segments.clear()

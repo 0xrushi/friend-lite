@@ -19,7 +19,7 @@ export $(shell sed 's/=.*//' config.env | grep -v '^\s*$$' | grep -v '^\s*\#')
 SCRIPTS_DIR := scripts
 K8S_SCRIPTS_DIR := $(SCRIPTS_DIR)/k8s
 
-.PHONY: help menu setup-k8s setup-infrastructure setup-rbac setup-storage-pvc config config-docker config-k8s config-all clean deploy deploy-docker deploy-k8s deploy-k8s-full deploy-infrastructure deploy-apps check-infrastructure check-apps build-backend up-backend down-backend k8s-status k8s-cleanup k8s-purge audio-manage
+.PHONY: help menu setup-k8s setup-infrastructure setup-rbac setup-storage-pvc config config-docker config-k8s config-all clean deploy deploy-docker deploy-k8s deploy-k8s-full deploy-infrastructure deploy-apps check-infrastructure check-apps build-backend up-backend down-backend k8s-status k8s-cleanup k8s-purge audio-manage test-robot test-robot-integration test-robot-unit test-robot-endpoints test-robot-specific test-robot-clean
 
 # Default target
 .DEFAULT_GOAL := menu
@@ -29,12 +29,18 @@ menu: ## Show interactive menu (default)
 	@echo "================================"
 	@echo
 	@echo "📋 Quick Actions:"
+	@echo "  setup-dev          🛠️  Setup development environment (git hooks, pre-commit)"
 	@echo "  setup-k8s          🏗️  Complete Kubernetes setup (registry + infrastructure + RBAC)"
 	@echo "  config             📝 Generate all configuration files"
 	@echo "  deploy             🚀 Deploy using configured mode ($(DEPLOYMENT_MODE))"
 	@echo "  k8s-status         📊 Check Kubernetes cluster status"
 	@echo "  k8s-cleanup        🧹 Clean up Kubernetes resources"
 	@echo "  audio-manage       🎵 Manage audio files"
+	@echo
+	@echo "🧪 Testing:"
+	@echo "  test-robot         🧪 Run all Robot Framework tests"
+	@echo "  test-robot-integration 🔬 Run integration tests only"
+	@echo "  test-robot-endpoints 🌐 Run endpoint tests only"
 	@echo
 	@echo "📝 Configuration:"
 	@echo "  config-docker      🐳 Generate Docker Compose .env files"
@@ -95,12 +101,42 @@ help: ## Show detailed help for all targets
 	@echo "🎵 AUDIO MANAGEMENT:"
 	@echo "  audio-manage       Interactive audio file management"
 	@echo
+	@echo "🧪 ROBOT FRAMEWORK TESTING:"
+	@echo "  test-robot         Run all Robot Framework tests"
+	@echo "  test-robot-integration Run integration tests only"
+	@echo "  test-robot-endpoints Run endpoint tests only"
+	@echo "  test-robot-specific FILE=path Run specific test file"
+	@echo "  test-robot-clean   Clean up test results"
+	@echo
 	@echo "🔍 MONITORING:"
 	@echo "  check-infrastructure Check if infrastructure services are running"
 	@echo "  check-apps         Check if application services are running"
 	@echo
 	@echo "🧹 CLEANUP:"
 	@echo "  clean              Clean up generated configuration files"
+
+# ========================================
+# DEVELOPMENT SETUP
+# ========================================
+
+setup-dev: ## Setup development environment (git hooks, pre-commit)
+	@echo "🛠️  Setting up development environment..."
+	@echo ""
+	@echo "📦 Installing pre-commit..."
+	@pip install pre-commit 2>/dev/null || pip3 install pre-commit
+	@echo ""
+	@echo "🔧 Installing git hooks..."
+	@pre-commit install --hook-type pre-push
+	@pre-commit install --hook-type pre-commit
+	@echo ""
+	@echo "✅ Development environment setup complete!"
+	@echo ""
+	@echo "💡 Hooks installed:"
+	@echo "  • Robot Framework tests run before push"
+	@echo "  • Black/isort format Python code on commit"
+	@echo "  • Code quality checks on commit"
+	@echo ""
+	@echo "⚙️  To skip hooks: git push --no-verify / git commit --no-verify"
 
 # ========================================
 # KUBERNETES SETUP
@@ -170,12 +206,11 @@ config: config-all ## Generate all configuration files
 
 config-docker: ## Generate Docker Compose configuration files
 	@echo "🐳 Generating Docker Compose configuration files..."
-	@python3 scripts/generate-docker-configs.py
+	@CONFIG_FILE=config.env.dev python3 scripts/generate-docker-configs.py
 	@echo "✅ Docker Compose configuration files generated"
 
-config-k8s: ## Generate Kubernetes configuration files (Skaffold env + ConfigMap/Secret)
+config-k8s: ## Generate Kubernetes configuration files (ConfigMap/Secret only - no .env files)
 	@echo "☸️  Generating Kubernetes configuration files..."
-	@python3 scripts/generate-docker-configs.py
 	@python3 scripts/generate-k8s-configs.py
 	@echo "📦 Applying ConfigMap and Secret to Kubernetes..."
 	@kubectl apply -f k8s-manifests/configmap.yaml -n $(APPLICATION_NAMESPACE) 2>/dev/null || echo "⚠️  ConfigMap not applied (cluster not available?)"
@@ -297,3 +332,49 @@ k8s-purge: ## Purge unused images (registry + container)
 audio-manage: ## Interactive audio file management
 	@echo "🎵 Starting audio file management..."
 	@$(SCRIPTS_DIR)/manage-audio-files.sh
+
+# ========================================
+# TESTING TARGETS
+# ========================================
+
+# Define test environment variables
+TEST_ENV := BACKEND_URL=http://localhost:8001 ADMIN_EMAIL=test-admin@example.com ADMIN_PASSWORD=test-admin-password-123
+
+test-robot: ## Run all Robot Framework tests
+	@echo "🧪 Running all Robot Framework tests..."
+	@cd tests && $(TEST_ENV) robot --outputdir ../results .
+	@echo "✅ All Robot Framework tests completed"
+	@echo "📊 Results available in: results/"
+
+test-robot-integration: ## Run integration tests only
+	@echo "🧪 Running Robot Framework integration tests..."
+	@cd tests && $(TEST_ENV) robot --outputdir ../results integration/
+	@echo "✅ Robot Framework integration tests completed"
+	@echo "📊 Results available in: results/"
+
+test-robot-unit: ## Run unit tests only
+	@echo "🧪 Running Robot Framework unit tests..."
+	@cd tests && $(TEST_ENV) robot --outputdir ../results unit/ || echo "⚠️  No unit tests directory found"
+	@echo "✅ Robot Framework unit tests completed"
+	@echo "📊 Results available in: results/"
+
+test-robot-endpoints: ## Run endpoint tests only
+	@echo "🧪 Running Robot Framework endpoint tests..."
+	@cd tests && $(TEST_ENV) robot --outputdir ../results endpoints/
+	@echo "✅ Robot Framework endpoint tests completed"
+	@echo "📊 Results available in: results/"
+
+test-robot-specific: ## Run specific Robot Framework test file (usage: make test-robot-specific FILE=path/to/test.robot)
+	@echo "🧪 Running specific Robot Framework test: $(FILE)"
+	@if [ -z "$(FILE)" ]; then \
+		echo "❌ FILE parameter is required. Usage: make test-robot-specific FILE=path/to/test.robot"; \
+		exit 1; \
+	fi
+	@cd tests && $(TEST_ENV) robot --outputdir ../results $(FILE)
+	@echo "✅ Robot Framework test completed: $(FILE)"
+	@echo "📊 Results available in: results/"
+
+test-robot-clean: ## Clean up Robot Framework test results
+	@echo "🧹 Cleaning up Robot Framework test results..."
+	@rm -rf results/
+	@echo "✅ Test results cleaned"

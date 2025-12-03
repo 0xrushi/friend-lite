@@ -15,9 +15,10 @@ from advanced_omi_backend.auth import (
     UserManager,
 )
 from advanced_omi_backend.client_manager import get_user_clients_all
-from advanced_omi_backend.database import chunks_col, db, users_col
+from advanced_omi_backend.database import db, users_col
 from advanced_omi_backend.memory import get_memory_service
-from advanced_omi_backend.users import User, UserCreate
+from advanced_omi_backend.models.conversation import Conversation
+from advanced_omi_backend.users import User, UserCreate, UserUpdate
 
 logger = logging.getLogger(__name__)
 
@@ -58,13 +59,13 @@ async def create_user(user_data: UserCreate):
         # Create the user through the user manager
         user = await user_manager.create(user_data)
 
+        # Return the full user object (serialized via UserRead schema)
+        from advanced_omi_backend.models.user import UserRead
+        user_read = UserRead.model_validate(user)
+
         return JSONResponse(
             status_code=201,
-            content={
-                "message": f"User {user.email} created successfully",
-                "user_id": str(user.id),
-                "user_email": user.email,
-            },
+            content=user_read.model_dump(mode='json'),
         )
 
     except Exception as e:
@@ -78,7 +79,7 @@ async def create_user(user_data: UserCreate):
         )
 
 
-async def update_user(user_id: str, user_data: UserCreate):
+async def update_user(user_id: str, user_data: UserUpdate):
     """Update an existing user."""
     try:
         # Validate ObjectId format
@@ -106,31 +107,18 @@ async def update_user(user_id: str, user_data: UserCreate):
 
         # Convert to User object for the manager
         user_obj = User(**existing_user)
-        
-        # Prepare update data - only include non-None fields
-        update_data = {}
-        if user_data.email:
-            update_data["email"] = user_data.email
-        if user_data.display_name is not None:
-            update_data["display_name"] = user_data.display_name
-        if hasattr(user_data, 'is_superuser'):
-            update_data["is_superuser"] = user_data.is_superuser
-        if hasattr(user_data, 'is_active'):
-            update_data["is_active"] = user_data.is_active
-        if user_data.password:
-            # Hash the password if provided
-            update_data["hashed_password"] = user_manager.password_helper.hash(user_data.password)
 
-        # Update the user
-        updated_user = await user_manager.update(user_obj, update_data)
+        # Update the user using the fastapi-users manager
+        # Note: signature is update(user_update, user) - update data first, then user object
+        updated_user = await user_manager.update(user_data, user_obj)
+
+        # Return the full user object (serialized via UserRead schema)
+        from advanced_omi_backend.models.user import UserRead
+        user_read = UserRead.model_validate(updated_user)
 
         return JSONResponse(
             status_code=200,
-            content={
-                "message": f"User {updated_user.email} updated successfully",
-                "user_id": str(updated_user.id),
-                "user_email": updated_user.email,
-            },
+            content=user_read.model_dump(mode='json'),
         )
 
     except Exception as e:
@@ -187,8 +175,8 @@ async def delete_user(
         deleted_data["user_deleted"] = user_result.deleted_count > 0
 
         if delete_conversations:
-            # Delete all conversations (audio chunks) for this user
-            conversations_result = await chunks_col.delete_many({"client_id": user_id})
+            # Delete all conversations for this user
+            conversations_result = await Conversation.find(Conversation.user_id == user_id).delete()
             deleted_data["conversations_deleted"] = conversations_result.deleted_count
 
         if delete_memories:

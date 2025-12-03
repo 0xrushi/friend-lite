@@ -82,7 +82,7 @@ async def get_user_manager(user_db=Depends(get_user_db)):
 
 # Transport configurations
 cookie_transport = CookieTransport(
-    cookie_max_age=3600,  # 1 hour
+    cookie_max_age=86400,  # 24 hours (matches JWT lifetime)
     cookie_secure=COOKIE_SECURE,  # Set to False in development if not using HTTPS
     cookie_httponly=True,
     cookie_samesite="lax",
@@ -119,7 +119,36 @@ fastapi_users = FastAPIUsers[User, PydanticObjectId](
 
 # User dependencies for protecting endpoints
 current_active_user = fastapi_users.current_user(active=True)
+current_active_user_optional = fastapi_users.current_user(active=True, optional=True)
 current_superuser = fastapi_users.current_user(active=True, superuser=True)
+
+
+async def get_user_from_token_param(token: str) -> Optional[User]:
+    """
+    Get user from JWT token string (for query parameter authentication).
+
+    This is useful for endpoints that need to support token-based auth via query params,
+    such as HTML audio elements that can't set custom headers.
+
+    Args:
+        token: JWT token string
+
+    Returns:
+        User object if token is valid and user is active, None otherwise
+    """
+    if not token:
+        return None
+    try:
+        strategy = get_jwt_strategy()
+        user_db_gen = get_user_db()
+        user_db = await user_db_gen.__anext__()
+        user_manager = UserManager(user_db)
+        user = await strategy.read_token(token, user_manager)
+        if user and user.is_active:
+            return user
+    except Exception:
+        pass
+    return None
 
 
 def get_accessible_user_ids(user: User) -> list[str] | None:
@@ -171,7 +200,7 @@ async def create_admin_user_if_needed():
         )
 
     except Exception as e:
-        logger.error(f"Failed to create admin user: {e}")
+        logger.error(f"Failed to create admin user: {e}", exc_info=True)
 
 
 async def websocket_auth(websocket, token: Optional[str] = None) -> Optional[User]:
@@ -183,7 +212,7 @@ async def websocket_auth(websocket, token: Optional[str] = None) -> Optional[Use
 
     # Try JWT token from query parameter first
     if token:
-        logger.debug("Attempting WebSocket auth with query token.")
+        logger.info(f"Attempting WebSocket auth with query token (first 20 chars): {token[:20]}...")
         try:
             user_db_gen = get_user_db()
             user_db = await user_db_gen.__anext__()
@@ -192,8 +221,10 @@ async def websocket_auth(websocket, token: Optional[str] = None) -> Optional[Use
             if user and user.is_active:
                 logger.info(f"WebSocket auth successful for user {user.user_id} using query token.")
                 return user
+            else:
+                logger.warning(f"Token validated but user inactive or not found: user={user}")
         except Exception as e:
-            logger.warning(f"WebSocket auth with query token failed: {e}")
+            logger.error(f"WebSocket auth with query token failed: {type(e).__name__}: {e}", exc_info=True)
 
     # Try cookie authentication
     logger.debug("Attempting WebSocket auth with cookie.")

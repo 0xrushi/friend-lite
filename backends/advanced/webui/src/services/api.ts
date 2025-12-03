@@ -3,7 +3,7 @@ import axios from 'axios'
 // Get backend URL from environment or auto-detect based on current location
 const getBackendUrl = () => {
   // If explicitly set in environment, use that
-  if (import.meta.env.VITE_BACKEND_URL !== undefined) {
+  if (import.meta.env.VITE_BACKEND_URL !== undefined && import.meta.env.VITE_BACKEND_URL !== '') {
     return import.meta.env.VITE_BACKEND_URL
   }
   
@@ -34,7 +34,7 @@ export { BACKEND_URL }
 
 export const api = axios.create({
   baseURL: BACKEND_URL,
-  timeout: 30000,
+  timeout: 60000,  // Increased to 60 seconds for heavy processing scenarios
 })
 
 // Add request interceptor to include auth token
@@ -50,10 +50,18 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (response) => response,
   (error) => {
+    // Only clear token and redirect on actual 401 responses, not on timeouts
     if (error.response?.status === 401) {
       // Token expired or invalid, redirect to login
+      console.warn('🔐 API: 401 Unauthorized - clearing token and redirecting to login')
       localStorage.removeItem('token')
       window.location.href = '/login'
+    } else if (error.code === 'ECONNABORTED') {
+      // Request timeout - don't logout, just log it
+      console.warn('⏱️ API: Request timeout - server may be busy')
+    } else if (!error.response) {
+      // Network error - don't logout
+      console.warn('🌐 API: Network error - server may be unreachable')
     }
     return Promise.reject(error)
   }
@@ -61,11 +69,19 @@ api.interceptors.response.use(
 
 // API endpoints
 export const authApi = {
-  login: (email: string, password: string) => {
+  login: async (email: string, password: string) => {
     const formData = new FormData()
     formData.append('username', email)
     formData.append('password', password)
-    return api.post('/auth/jwt/login', formData)
+    // Login with JWT for API calls
+    const jwtResponse = await api.post('/auth/jwt/login', formData)
+    // Also try to set cookie for audio file access (may fail cross-origin, that's ok)
+    try {
+      await api.post('/auth/cookie/login', formData)
+    } catch {
+      // Cookie auth may fail cross-origin, audio playback will use token fallback
+    }
+    return jwtResponse
   },
   getMe: () => api.get('/users/me'),
 }
@@ -133,9 +149,38 @@ export const systemApi = {
   reloadMemoryConfig: () => api.post('/api/admin/memory/config/reload'),
 }
 
+export const queueApi = {
+  // Consolidated dashboard endpoint - replaces individual getJobs, getStats, getStreamingStatus calls
+  getDashboard: (expandedSessions: string[] = []) => api.get('/api/queue/dashboard', {
+    params: { expanded_sessions: expandedSessions.join(',') }
+  }),
+
+  // Individual endpoints (kept for debugging and specific use cases)
+  getJob: (jobId: string) => api.get(`/api/queue/jobs/${jobId}`),
+  retryJob: (jobId: string, force: boolean = false) =>
+    api.post(`/api/queue/jobs/${jobId}/retry`, { force }),
+  cancelJob: (jobId: string) => api.delete(`/api/queue/jobs/${jobId}`),
+
+  // Cleanup operations
+  cleanupStuckWorkers: () => api.post('/api/streaming/cleanup'),
+  cleanupOldSessions: (maxAgeSeconds: number = 3600) => api.post(`/api/streaming/cleanup-sessions?max_age_seconds=${maxAgeSeconds}`),
+
+  // Job flush operations
+  flushJobs: (flushAll: boolean, body: any) => {
+    const endpoint = flushAll ? '/api/queue/flush-all' : '/api/queue/flush'
+    return api.post(endpoint, body)
+  },
+
+  // Legacy endpoints - kept for backward compatibility but not used in Queue page
+  // getJobs: (params: URLSearchParams) => api.get(`/api/queue/jobs?${params}`),
+  // getJobsBySession: (sessionId: string) => api.get(`/api/queue/jobs/by-session/${sessionId}`),
+  // getStats: () => api.get('/api/queue/stats'),
+  // getStreamingStatus: () => api.get('/api/streaming/status'),
+}
+
 export const uploadApi = {
   uploadAudioFiles: (files: FormData, onProgress?: (progress: number) => void) => 
-    api.post('/api/process-audio-files', files, {
+    api.post('/api/audio/upload', files, {
       headers: { 'Content-Type': 'multipart/form-data' },
       timeout: 300000, // 5 minutes
       onUploadProgress: (progressEvent) => {

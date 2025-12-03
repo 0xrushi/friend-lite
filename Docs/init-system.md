@@ -12,7 +12,7 @@
 
 Friend-Lite uses a unified initialization system with clean separation of concerns:
 
-- **Configuration** (`init.py`) - Set up service configurations, API keys, and .env files
+- **Configuration** (`wizard.py`) - Set up service configurations, API keys, and .env files
 - **Service Management** (`services.py`) - Start, stop, and manage running services
 
 The root orchestrator handles service selection and delegates configuration to individual service scripts. In general, setup scripts only configure and do not start services automatically. Exceptions: `extras/asr-services` and `extras/openmemory-mcp` are startup scripts. This prevents unnecessary resource usage and gives you control over when services actually run.
@@ -22,14 +22,14 @@ The root orchestrator handles service selection and delegates configuration to i
 ## Architecture
 
 ### Root Orchestrator
-- **Location**: `/init.py`
+- **Location**: `/wizard.py`
 - **Purpose**: Service selection and delegation only
 - **Does NOT**: Handle service-specific configuration or duplicate setup logic
 
 ### Service Scripts
 - **Backend**: `backends/advanced/init.py` - Complete Python-based interactive setup
-- **Speaker Recognition**: `extras/speaker-recognition/setup.sh` - Simple bash setup
-- **ASR Services**: `extras/asr-services/setup.sh` - Service startup script  
+- **Speaker Recognition**: `extras/speaker-recognition/init.sh` - Python-based interactive setup
+- **ASR Services**: `extras/asr-services/setup.sh` - Service startup script
 - **OpenMemory MCP**: `extras/openmemory-mcp/setup.sh` - External server startup
 
 ## Usage
@@ -39,7 +39,7 @@ Set up multiple services together with automatic URL coordination:
 
 ```bash
 # From project root
-uv run --with-requirements setup-requirements.txt python init.py
+uv run --with-requirements setup-requirements.txt python wizard.py
 ```
 
 The orchestrator will:
@@ -127,7 +127,7 @@ Note (Linux): If `host.docker.internal` is unavailable, add `extra_hosts: - "hos
 
 ### Container-to-Container Communication
 Services use `host.docker.internal` for inter-container communication:
-- `http://host.docker.internal:8085` - Speaker Recognition
+- `http://127.0.0.1:8085` - Speaker Recognition
 - `http://host.docker.internal:8767` - Parakeet ASR  
 - `http://host.docker.internal:8765` - OpenMemory MCP
 

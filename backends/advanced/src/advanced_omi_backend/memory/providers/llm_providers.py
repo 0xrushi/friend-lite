@@ -10,6 +10,8 @@ memory action proposals using their respective APIs.
 
 import json
 import logging
+import os
+import httpx
 from typing import Any, Dict, List, Optional
 
 # TODO: Re-enable spacy when Docker build is fixed
@@ -29,6 +31,42 @@ from ..update_memory_utils import (
 from ..utils import extract_json_from_text
 
 memory_logger = logging.getLogger("memory_service")
+
+
+def _is_langfuse_enabled() -> bool:
+    """Check if Langfuse is properly configured."""
+    return bool(
+        os.getenv("LANGFUSE_PUBLIC_KEY")
+        and os.getenv("LANGFUSE_SECRET_KEY")
+        and os.getenv("LANGFUSE_HOST")
+    )
+
+
+def _get_openai_client(api_key: str, base_url: str, is_async: bool = False):
+    """Get OpenAI client with optional Langfuse tracing.
+
+    Args:
+        api_key: OpenAI API key
+        base_url: OpenAI API base URL
+        is_async: Whether to return async or sync client
+
+    Returns:
+        OpenAI client instance (with or without Langfuse tracing)
+    """
+    if _is_langfuse_enabled():
+        # Use Langfuse-wrapped OpenAI for tracing
+        import langfuse.openai as openai
+        memory_logger.debug("Using OpenAI client with Langfuse tracing")
+    else:
+        # Use regular OpenAI client without tracing
+        from openai import OpenAI, AsyncOpenAI
+        openai = type('OpenAI', (), {'OpenAI': OpenAI, 'AsyncOpenAI': AsyncOpenAI})()
+        memory_logger.debug("Using OpenAI client without tracing")
+
+    if is_async:
+        return openai.AsyncOpenAI(api_key=api_key, base_url=base_url)
+    else:
+        return openai.OpenAI(api_key=api_key, base_url=base_url)
 
 # TODO: Re-enable spacy when Docker build is fixed
 # try:
@@ -119,20 +157,19 @@ class OpenAIProvider(LLMProviderBase):
 
     async def extract_memories(self, text: str, prompt: str) -> List[str]:
         """Extract memories using OpenAI API with the enhanced fact retrieval prompt.
-        
+
         Args:
             text: Input text to extract memories from
             prompt: System prompt to guide extraction (uses default if empty)
-            
+
         Returns:
             List of extracted memory strings
         """
         try:
-            import langfuse.openai as openai
-            
-            client = openai.AsyncOpenAI(
+            client = _get_openai_client(
                 api_key=self.api_key,
-                base_url=self.base_url
+                base_url=self.base_url,
+                is_async=True
             )
             
             # Use the provided prompt or fall back to default
@@ -204,19 +241,18 @@ class OpenAIProvider(LLMProviderBase):
 
     async def generate_embeddings(self, texts: List[str]) -> List[List[float]]:
         """Generate embeddings using OpenAI API.
-        
+
         Args:
             texts: List of texts to generate embeddings for
-            
+
         Returns:
             List of embedding vectors, one per input text
         """
         try:
-            import langfuse.openai as openai
-            
-            client = openai.AsyncOpenAI(
+            client = _get_openai_client(
                 api_key=self.api_key,
-                base_url=self.base_url
+                base_url=self.base_url,
+                is_async=True
             )
             
             response = await client.embeddings.create(
@@ -232,16 +268,24 @@ class OpenAIProvider(LLMProviderBase):
 
     async def test_connection(self) -> bool:
         """Test OpenAI connection.
-        
+
         Returns:
             True if connection successful, False otherwise
         """
         try:
-            import langfuse.openai as openai
-            
-            client = openai.AsyncOpenAI(
+            # For Ollama, just check if the base URL is reachable
+            if os.getenv("LLM_PROVIDER", "openai").lower() == "ollama":
+                import httpx
+                async with httpx.AsyncClient() as client:
+                    # For Ollama, test connection by hitting the /v1/models endpoint
+                    response = await client.get(f"{self.base_url}/models")
+                    response.raise_for_status()
+                return True
+
+            client = _get_openai_client(
                 api_key=self.api_key,
-                base_url=self.base_url
+                base_url=self.base_url,
+                is_async=True
             )
             
             await client.models.list()
@@ -258,30 +302,29 @@ class OpenAIProvider(LLMProviderBase):
         custom_prompt: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Use OpenAI chat completion with enhanced prompt to propose memory actions.
-        
+
         Args:
             retrieved_old_memory: List of existing memories for context
             new_facts: List of new facts to process
             custom_prompt: Optional custom prompt to override default
-            
+
         Returns:
             Dictionary containing proposed memory actions
         """
         try:
-            import langfuse.openai as openai
-
             # Generate the complete prompt using the helper function
             memory_logger.debug(f"🧠 Facts passed to prompt builder: {new_facts}")
             update_memory_messages = build_update_memory_messages(
-                retrieved_old_memory, 
-                new_facts, 
+                retrieved_old_memory,
+                new_facts,
                 custom_prompt
             )
             memory_logger.debug(f"🧠 Generated prompt user content: {update_memory_messages[1]['content'][:200]}...")
 
-            client = openai.AsyncOpenAI(
+            client = _get_openai_client(
                 api_key=self.api_key,
                 base_url=self.base_url,
+                is_async=True
             )
 
             response = await client.chat.completions.create(

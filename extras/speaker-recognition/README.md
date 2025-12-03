@@ -31,18 +31,54 @@ uv sync --group gpu
 
 If you choose GPU, uncomment the deploy section with GPU requirements from docker-compose.yml
 
-### 3. Initialize HTTPS (Required for Microphone Access)
+### 3. Run Setup Script
 
 ```bash
 cd extras/speaker-recognition
-./init.sh 100.83.66.30  # Replace with your Tailscale/network IP
+./init.sh
 ```
 
-This generates SSL certificates and configures nginx for your IP address.
+This interactive setup will guide you through:
+- Configuring your Hugging Face token
+- Choosing compute mode (CPU/GPU)
+- Setting up HTTPS for remote access (optional)
 
-### 4. Start the system
+For non-interactive setup:
 ```bash
-docker-compose up --build -d
+./init.sh --hf-token YOUR_TOKEN --compute-mode cpu
+# Or for HTTPS with specific IP:
+./init.sh --hf-token YOUR_TOKEN --compute-mode gpu --enable-https --server-ip 100.83.66.30
+```
+
+### 4. Generate SSL Certificates (Required for Nginx)
+
+**⚠️ Important**: The nginx proxy requires SSL certificates to start. SSL certificates are optional through `wizard.sh`. If you haven't generated them during setup, you must create them manually:
+
+```bash
+cd extras/speaker-recognition
+# Generate certificates for localhost (default)
+bash ssl/generate-ssl.sh localhost
+
+# Or generate for a specific IP/domain (e.g., Tailscale IP)
+bash ssl/generate-ssl.sh 100.83.66.30
+```
+
+This creates:
+- `ssl/server.crt` - SSL certificate
+- `ssl/server.key` - Private key
+
+**Note**: If SSL certificates are missing, nginx will fail to start with errors like:
+```
+cannot load certificate "/etc/nginx/ssl/server.crt": BIO_new_file() failed
+```
+
+### 5. Start the system
+```bash
+# For CPU-only
+docker compose --profile cpu up --build -d
+
+# For GPU acceleration
+docker compose --profile gpu up --build -d
 ```
 
 This starts three services:
@@ -50,7 +86,16 @@ This starts three services:
 - **React web UI** on port configured by REACT_UI_PORT (defaults vary by mode)
 - **Nginx proxy** on ports 8444 (HTTPS) and 8081 (HTTP redirect)
 
-### 5. Access the Web UI
+**⚠️ Important**: Use the same profile when stopping:
+```bash
+# Stop CPU services
+docker compose --profile cpu down
+
+# Stop GPU services
+docker compose --profile gpu down
+```
+
+### 6. Access the Web UI
 
 **HTTPS Mode (Recommended for microphone access):**
 - **Secure Access**: https://localhost:8444/ or https://your-ip:8444/
@@ -62,7 +107,7 @@ This starts three services:
 
 **Microphone access requires HTTPS for network connections (not just localhost).**
 
-### 6. Get Started
+### 7. Get Started
 1. **Create a user** using the sidebar
 2. **Upload audio** in the "Audio Viewer" page
 3. **Annotate segments** in the "Annotation" page
@@ -370,12 +415,23 @@ The React UI is configured with HTTPS enabled by default (`REACT_UI_HTTPS=true`)
 
 ## 🚨 Troubleshooting
 
+**Nginx failing to start with SSL certificate errors?**
+- Error: `cannot load certificate "/etc/nginx/ssl/server.crt": BIO_new_file() failed`
+- **Solution**: Generate SSL certificates (see step 4 in Quick Start):
+  ```bash
+  cd extras/speaker-recognition
+  bash ssl/generate-ssl.sh localhost
+  ```
+- Verify certificates exist: `ls -la ssl/server.crt ssl/server.key`
+- Restart nginx: `docker compose --profile cpu restart nginx` (or `--profile gpu`)
+
 **Can't access the web UI?**
-- Check if services are running: `docker-compose ps`
-- View logs: `docker-compose logs web-ui`
+- Check if services are running: `docker compose --profile cpu ps` (or `--profile gpu`)
+- View logs: `docker compose --profile cpu logs web-ui`
+- Check nginx logs: `docker compose --profile cpu logs nginx`
 
 **Speaker service not responding?**
-- Check backend logs: `docker-compose logs speaker-service`
+- Check backend logs: `docker compose --profile cpu logs speaker-service`
 - Verify HF_TOKEN is set correctly
 
 **Models not downloading?**
@@ -795,7 +851,7 @@ pip install pyaudio
 
 ```bash
 # Start the speaker service first
-docker-compose up -d
+docker compose --profile cpu up -d
 
 # Enroll a new speaker (records 10 seconds)
 python laptop_client.py enroll --speaker-id "john" --speaker-name "John Doe" --duration 10
