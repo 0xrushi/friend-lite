@@ -21,6 +21,7 @@ Variables        ../setup/test_env.py
 
 Get User Memories
     [Documentation]    Get memories for authenticated user using session
+    ...                Returns the list of memory objects directly.
     [Arguments]    ${session}    ${limit}=50    ${user_id}=${None}
 
     &{params}=     Create Dictionary    limit=${limit}
@@ -30,59 +31,77 @@ Get User Memories
     END
 
     ${response}=    GET On Session    ${session}    /api/memories    params=${params}
-    RETURN    ${response}
+    Should Be Equal As Integers    ${response.status_code}    200
+    ${data}=    Set Variable    ${response.json()}
+    ${memories}=    Set Variable    ${data}[memories]
+    RETURN    ${memories}
 
 Get Memories With Transcripts
     [Documentation]    Get memories with their source transcripts using session
+    ...                Returns the list of memory objects with transcript data.
     [Arguments]    ${session}    ${limit}=50
 
     &{params}=     Create Dictionary    limit=${limit}
 
     ${response}=    GET On Session    ${session}    /api/memories/with-transcripts    params=${params}
-    RETURN    ${response}
+    Should Be Equal As Integers    ${response.status_code}    200
+    ${data}=    Set Variable    ${response.json()}
+    ${memories}=    Set Variable    ${data}[memories]
+    RETURN    ${memories}
 
 Search Memories
     [Documentation]    Search memories by query using session
+    ...                Returns the list of search results directly.
     [Arguments]    ${session}    ${query}    ${limit}=20    ${score_threshold}=0.0
 
     &{params}=     Create Dictionary    query=${query}    limit=${limit}    score_threshold=${score_threshold}
 
     ${response}=    GET On Session    ${session}    /api/memories/search    params=${params}
-    RETURN    ${response}
+    Should Be Equal As Integers    ${response.status_code}    200
+    ${data}=    Set Variable    ${response.json()}
+    ${results}=    Set Variable    ${data}[results]
+    RETURN    ${results}
 
 Delete Memory
     [Documentation]    Delete a specific memory using session
+    ...                Returns True if deletion was successful, False otherwise.
     [Arguments]    ${session}    ${memory_id}
 
     ${response}=    DELETE On Session    ${session}    /api/memories/${memory_id}
-    RETURN    ${response}
+    ${success}=    Evaluate    ${response.status_code} == 200
+    RETURN    ${success}
 
 Get Unfiltered Memories
     [Documentation]    Get all memories including fallback transcript memories using session
+    ...                Returns the list of unfiltered memory objects directly.
     [Arguments]    ${session}    ${limit}=50
 
     &{params}=     Create Dictionary    limit=${limit}
 
     ${response}=    GET On Session    ${session}    /api/memories/unfiltered    params=${params}
-    RETURN    ${response}
+    Should Be Equal As Integers    ${response.status_code}    200
+    ${data}=    Set Variable    ${response.json()}
+    ${memories}=    Set Variable    ${data}[memories]
+    RETURN    ${memories}
 
 Get All Memories Admin
     [Documentation]    Get all memories across all users (admin only) using session
+    ...                Returns the list of all memory objects across all users.
     [Arguments]    ${session}    ${limit}=200
 
     &{params}=     Create Dictionary    limit=${limit}
 
     ${response}=    GET On Session    ${session}    /api/memories/admin    params=${params}
-    RETURN    ${response}
+    Should Be Equal As Integers    ${response.status_code}    200
+    ${data}=    Set Variable    ${response.json()}
+    ${memories}=    Set Variable    ${data}[memories]
+    RETURN    ${memories}
 
 Count User Memories
     [Documentation]    Count memories for a user using session
     [Arguments]    ${session}
 
-    ${response}=    Get User Memories    ${session}    1000
-    Should Be Equal As Integers    ${response.status_code}    200
-    ${memories_data}=    Set Variable    ${response.json()}
-    ${memories}=    Set Variable    ${memories_data}[memories]
+    ${memories}=    Get User Memories    ${session}    1000
     ${count}=       Get Length    ${memories}
     RETURN    ${count}
 

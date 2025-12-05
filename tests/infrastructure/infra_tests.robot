@@ -259,7 +259,7 @@ WebSocket Disconnect Conversation End Reason Test
     ${stream_id}=    Open Audio Stream    device_name=${device_name}
 
     # Send audio fast (no realtime pacing) to simulate disconnect before END signal
-    Send Audio Chunks To Stream    ${stream_id}    ${TEST_AUDIO_FILE}    num_chunks=100 
+    Send Audio Chunks To Stream    ${stream_id}    ${TEST_AUDIO_FILE}    num_chunks=200 
 
     # Wait for conversation job to be created and conversation_id to be populated
     ${conv_jobs}=    Wait Until Keyword Succeeds    30s    2s

@@ -19,11 +19,13 @@ Library          Process
 Library          String
 Library          Collections
 Library          DateTime
+Library          RequestsLibrary
 Variables        test_env.py
 Resource         ../resources/audio_keywords.robot
 Resource         ../resources/conversation_keywords.robot
 Resource         ../resources/websocket_keywords.robot
 Resource         ../resources/queue_keywords.robot
+Resource         ../resources/session_keywords.robot
 
 
 *** Keywords ***
@@ -53,11 +55,8 @@ Clear Test Databases
     # Clear admin user's registered_clients dict to prevent client_id counter increments
     Run Process    docker exec advanced-mongo-test-1 mongosh test_db --eval "db.users.updateOne({'email':'${ADMIN_EMAIL}'}, {\\$set: {'registered_clients': {}}})"    shell=True
 
-    # Clear Qdrant collections
-    # Note: Fixture memories will be lost here unless we implement Qdrant metadata filtering
-    Run Process    curl    -s    -X    DELETE    http://localhost:6337/collections/memories    shell=True
-    Run Process    curl    -s    -X    DELETE    http://localhost:6337/collections/conversations    shell=True
-    Log To Console    Qdrant collections cleared
+    # Clear memory provider data (Qdrant or Mycelia)
+    Clear Memory Provider Data
 
     # Clear audio files (except fixtures subfolder)
     Run Process    bash    -c    find ${EXECDIR}/backends/advanced/data/test_audio_chunks -maxdepth 1 -name "*.wav" -delete || true    shell=True
@@ -172,3 +171,73 @@ Test Cleanup
     # Try to cleanup audio streams if the keyword exists (websocket tests)
     Run Keyword And Ignore Error    Cleanup All Audio Streams
     Flush In Progress Jobs
+
+Clear Memory Provider Data
+    [Documentation]    Clear memory data based on the current memory provider
+    ...                Automatically detects provider and clears appropriately:
+    ...                - friend_lite: Clears Qdrant collections
+    ...                - mycelia: Deletes all memories via Mycelia API
+
+    # Check current provider from health endpoint
+    TRY
+        Create Session    provider_check_session    ${API_URL}    verify=False
+        ${response}=    GET On Session    provider_check_session    /health
+        ${health_data}=    Set Variable    ${response.json()}
+        ${memory_service}=    Get From Dictionary    ${health_data}[services]    memory_service
+        ${provider}=    Set Variable    ${memory_service}[provider]
+        Delete All Sessions
+
+        IF    '${provider}' == 'mycelia'
+            Log To Console    Clearing Mycelia memories...
+            Clear Mycelia Memories
+        ELSE IF    '${provider}' == 'friend_lite'
+            Log To Console    Clearing Qdrant collections...
+            Clear Qdrant Collections
+        ELSE
+            Log To Console    Unknown provider '${provider}', attempting to clear both Qdrant and Mycelia...
+            Clear Qdrant Collections
+            Run Keyword And Ignore Error    Clear Mycelia Memories
+        END
+    EXCEPT
+        Log To Console    Could not determine memory provider, clearing Qdrant as fallback
+        Clear Qdrant Collections
+    END
+
+Clear Qdrant Collections
+    [Documentation]    Clear Qdrant vector collections
+    Run Process    curl    -s    -X    DELETE    http://localhost:6337/collections/memories    shell=True
+    Run Process    curl    -s    -X    DELETE    http://localhost:6337/collections/conversations    shell=True
+    Log To Console    ✓ Qdrant collections cleared
+
+Clear Mycelia Memories
+    [Documentation]    Clear all Mycelia memories for the admin user via backend API
+    ...                Uses the backend's delete endpoint which calls Mycelia's delete_all_user_memories
+
+    # Create admin session for API calls
+    Create API Session    mycelia_cleanup_session
+
+    # Get admin user ID
+    ${response}=    GET On Session    mycelia_cleanup_session    /api/users/me
+    Should Be Equal As Integers    ${response.status_code}    200
+    ${user_data}=    Set Variable    ${response.json()}
+    ${user_id}=    Set Variable    ${user_data}[id]
+
+    # Get all memories to delete
+    ${memories_response}=    GET On Session    mycelia_cleanup_session    /api/memories?limit=1000
+    Should Be Equal As Integers    ${memories_response.status_code}    200
+    ${memories_data}=    Set Variable    ${memories_response.json()}
+    ${memories}=    Set Variable    ${memories_data}[memories]
+    ${memory_count}=    Get Length    ${memories}
+
+    # Delete each memory
+    ${deleted_count}=    Set Variable    0
+    FOR    ${memory}    IN    @{memories}
+        ${memory_id}=    Set Variable    ${memory}[id]
+        ${delete_response}=    DELETE On Session    mycelia_cleanup_session    /api/memories/${memory_id}    expected_status=any
+        IF    ${delete_response.status_code} == 200
+            ${deleted_count}=    Evaluate    ${deleted_count} + 1
+        END
+    END
+
+    Delete All Sessions
+    Log To Console    ✓ Cleared ${deleted_count} Mycelia memories for admin user

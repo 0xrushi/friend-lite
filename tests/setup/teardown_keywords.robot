@@ -38,7 +38,7 @@ Dev Mode Teardown
     Log To Console    \n=== Dev Mode Teardown (Default) ===
     Log To Console    ✓ Keeping containers running for next test run
     Log To Console    Tip: Use 'TEST_MODE=prod' for full cleanup or run manually:
-    Log To Console         docker compose -f backends/advanced/docker-compose-ci.yml down -v
+    Log To Console         docker compose -f backends/advanced/docker-compose-test.yml down -v
 
     # Only delete HTTP sessions
     Delete All Sessions

@@ -4,6 +4,7 @@ Library          RequestsLibrary
 Library          Collections
 Variables        ../setup/test_env.py
 Resource         session_keywords.robot
+Resource         ../setup/setup_keywords.robot
 
 *** Keywords ***
 
