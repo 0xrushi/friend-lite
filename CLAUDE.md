@@ -209,6 +209,29 @@ Optional:
 - **API Security**: JWT tokens required for all endpoints and WebSocket connections
 - **Admin Bootstrap**: Automatic admin account creation with ADMIN_EMAIL/ADMIN_PASSWORD
 
+## Quick Setup
+
+Friend-Lite includes an interactive setup wizard that guides you through complete configuration:
+
+```bash
+make wizard
+```
+
+This single command will:
+1. 🔐 Configure secrets (API keys, passwords)
+2. 🌐 Optionally setup Tailscale for distributed deployment
+3. 📦 Create a custom environment
+4. 🚀 Provide clear instructions to start services
+
+**Individual setup steps:**
+```bash
+make setup-secrets       # Configure API keys and passwords
+make setup-tailscale     # Configure Tailscale and SSL (optional)
+make setup-environment   # Create environment config
+```
+
+For complete wizard documentation, see [`WIZARD.md`](WIZARD.md).
+
 ## Configuration
 
 ### Required Environment Variables
@@ -396,6 +419,7 @@ Project includes `.cursor/rules/always-plan-first.mdc` requiring understanding b
 For detailed technical documentation, see:
 - **[@docs/wyoming-protocol.md](docs/wyoming-protocol.md)**: WebSocket communication protocol details
 - **[@docs/memory-providers.md](docs/memory-providers.md)**: In-depth memory provider comparison and setup
+- **[@backends/advanced/Docs/mycelia-setup.md](backends/advanced/Docs/mycelia-setup.md)**: Complete Mycelia setup guide with auto-login and OAuth
 - **[@docs/versioned-processing.md](docs/versioned-processing.md)**: Transcript and memory versioning details
 - **[@docs/api-reference.md](docs/api-reference.md)**: Complete endpoint documentation with examples
 - **[@docs/speaker-recognition.md](docs/speaker-recognition.md)**: Advanced analysis and live inference features

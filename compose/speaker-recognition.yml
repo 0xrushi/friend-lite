@@ -1,0 +1,34 @@
+# Speaker Recognition Service
+# Voice identification and diarization
+# Enable with: docker compose --profile speaker up
+
+services:
+  speaker-recognition:
+    build:
+      context: ../extras/speaker-recognition
+      dockerfile: Dockerfile
+    ports:
+      - "${SPEAKER_SERVICE_PORT:-8085}:8085"
+    environment:
+      - MODEL_PATH=/models
+    volumes:
+      - speaker_models:/models
+    profiles:
+      - speaker
+    restart: unless-stopped
+    networks:
+      - chronicle-network
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+
+networks:
+  chronicle-network:
+    name: chronicle-network
+    external: true
+
+volumes:
+  speaker_models:
+    driver: local

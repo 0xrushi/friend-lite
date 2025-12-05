@@ -3,16 +3,52 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Load .env.test from the tests directory (one level up from setup/)
-test_env_path = Path(__file__).resolve().parents[1] / ".env.test"
-load_dotenv(test_env_path)
+# Determine environment type: 'test' (default) or 'normal'
+ENV_TYPE = os.getenv('ENV_TYPE', 'test')
+
+# Project paths - absolute paths that work from any working directory
+PROJECT_ROOT = Path(__file__).resolve().parents[2]  # friend-lite root
+TESTS_DIR = Path(__file__).resolve().parents[1]      # tests directory
+BACKENDS_ADVANCED_DIR = PROJECT_ROOT / "backends" / "advanced"
+
+# Load appropriate .env file based on ENV_TYPE
+if ENV_TYPE == 'normal':
+    env_file = TESTS_DIR / ".env.normal"
+    # Also load the main .env from backends/advanced
+    main_env = BACKENDS_ADVANCED_DIR / ".env"
+    load_dotenv(main_env)  # Load main env first
+    load_dotenv(env_file, override=True)  # Override with test-specific settings
+else:  # test (default)
+    env_file = TESTS_DIR / ".env.test"
+    load_dotenv(env_file)
+
+# Convert to strings for Robot Framework
+PROJECT_ROOT_STR = str(PROJECT_ROOT)
+BACKENDS_ADVANCED_DIR_STR = str(BACKENDS_ADVANCED_DIR)
+
+# Environment-specific configurations
+if ENV_TYPE == 'normal':
+    # Normal environment (production-like)
+    API_PORT = '8000'
+    FRONTEND_PORT = '5173'
+    COMPOSE_FILE = 'docker-compose.yml'
+    MONGO_PORT = '27017'
+    QDRANT_PORT = '6333'
+else:  # test
+    # Test environment (isolated)
+    API_PORT = '8001'
+    FRONTEND_PORT = '3001'
+    COMPOSE_FILE = 'docker-compose-test.yml'
+    MONGO_PORT = '27018'
+    QDRANT_PORT = '6337'
 
 # API Configuration
-API_URL = 'http://localhost:8001'  # Use BACKEND_URL from test.env
-API_BASE = 'http://localhost:8001/api'
+API_URL = os.getenv('BACKEND_URL', f'http://localhost:{API_PORT}')
+API_BASE = f'{API_URL}/api'
 SPEAKER_RECOGNITION_URL = 'http://localhost:8085'  # Speaker recognition service
 
-WEB_URL = os.getenv('FRONTEND_URL', 'http://localhost:3001')  # Use FRONTEND_URL from test.env
+WEB_URL = os.getenv('FRONTEND_URL', f'http://localhost:{FRONTEND_PORT}')
+
 # Admin user credentials (Robot Framework format)
 ADMIN_USER = {
     "email": os.getenv('ADMIN_EMAIL', 'test-admin@example.com'),

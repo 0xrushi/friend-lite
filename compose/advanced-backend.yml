@@ -1,0 +1,7 @@
+# Friend-Lite Advanced Backend
+# Main backend services - API, workers, databases, web UI
+# This is the core Friend-Lite stack
+
+include:
+  - path: ../backends/advanced/docker-compose.yml
+    env_file: ../backends/advanced/.env

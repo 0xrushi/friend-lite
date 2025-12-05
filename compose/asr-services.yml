@@ -1,0 +1,28 @@
+# ASR (Automatic Speech Recognition) Services
+# Offline transcription with Parakeet
+# Enable with: docker compose --profile asr up
+
+services:
+  parakeet-asr:
+    build:
+      context: ../extras/asr-services
+      dockerfile: Dockerfile.parakeet
+    ports:
+      - "${PARAKEET_PORT:-8767}:8767"
+    environment:
+      - MODEL_NAME=${PARAKEET_MODEL:-parakeet-ctc-1.1b}
+    profiles:
+      - asr
+    restart: unless-stopped
+    networks:
+      - chronicle-network
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 8G
+
+networks:
+  chronicle-network:
+    name: chronicle-network
+    external: true

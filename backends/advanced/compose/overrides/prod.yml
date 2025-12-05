@@ -1,0 +1,82 @@
+# Production Environment Overrides
+# Production-ready configuration with security and performance optimizations
+
+services:
+  friend-backend:
+    # Production: no source mounting
+    volumes:
+      - ./data/audio_chunks:/app/audio_chunks
+      - ./data/debug_dir:/app/debug_dir
+      - ./data:/app/data
+      # Remove source mount for production
+    environment:
+      # Production should use env-specific CORS
+      - CORS_ORIGINS=${CORS_ORIGINS}  # Must be explicitly set in .env.prod
+    restart: always
+    # Production: Add resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 2G
+
+  workers:
+    # Production: no source mounting
+    volumes:
+      - ./data/audio_chunks:/app/audio_chunks
+      - ./data:/app/data
+      # Remove source mount for production
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 8G
+        reservations:
+          cpus: '2'
+          memory: 4G
+
+  webui:
+    # Production: use production Dockerfile (already default)
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+
+  qdrant:
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+
+  mongo:
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+
+  redis:
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 2G
+
+  # Production: Mycelia without dev source mounts
+  mycelia-backend:
+    volumes: []  # Remove source mount
+    restart: always
+
+  mycelia-frontend:
+    volumes: []  # Remove source mount
+    restart: always

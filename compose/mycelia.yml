@@ -1,0 +1,69 @@
+# Mycelia Services
+# AI memory and timeline service
+# Enable with: docker compose --profile mycelia up
+
+services:
+  mycelia-backend:
+    build:
+      context: ../extras/mycelia/backend
+      dockerfile: Dockerfile.simple
+    command: ["deno", "run", "-A", "--env", "server.ts", "serve", "-p", "5100"]
+    ports:
+      - "${MYCELIA_BACKEND_PORT:-5100}:5100"
+    environment:
+      # Shared JWT secret for Friend-Lite authentication
+      - JWT_SECRET=${AUTH_SECRET_KEY}
+      - SECRET_KEY=${AUTH_SECRET_KEY}
+      # MongoDB connection (Docker internal)
+      - MONGO_URL=mongodb://mongo:27017
+      - MONGO_DB=${MYCELIA_DB:-mycelia}
+      - DATABASE_NAME=${MYCELIA_DB:-mycelia}
+      # Redis connection (ioredis uses host/port, not URL)
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    volumes:
+      - ../extras/mycelia/backend/app:/app/app
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "deno", "eval", "fetch('http://localhost:5100/health').then(r => r.ok ? Deno.exit(0) : Deno.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+    profiles:
+      - mycelia
+    networks:
+      - mem0-network
+      - chronicle-network
+
+  mycelia-frontend:
+    build:
+      context: ../extras/mycelia
+      dockerfile: frontend/Dockerfile.simple
+    ports:
+      - "${MYCELIA_FRONTEND_PORT:-3003}:8080"
+    environment:
+      - VITE_API_URL=${MYCELIA_API_URL:-http://localhost:5100}
+    volumes:
+      - ../extras/mycelia/frontend/src:/app/src
+    depends_on:
+      mycelia-backend:
+        condition: service_healthy
+    restart: unless-stopped
+    profiles:
+      - mycelia
+    networks:
+      - mem0-network
+      - chronicle-network
+
+networks:
+  mem0-network:
+    driver: bridge
+  chronicle-network:
+    name: chronicle-network
+    external: true

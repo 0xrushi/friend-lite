@@ -14,10 +14,10 @@ services:
       context: ./cache/mem0/openmemory/api
       dockerfile: Dockerfile
     env_file:
-      - .env
+      - .env.openmemory
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - OPENMEMORY_USER_ID=${OPENMEMORY_USER_ID:-openmemory}
+      - OPENMEMORY_USER_ID=${OPENMEMORY_USER_ID:-stu}
     depends_on:
       - mem0_store
     ports:
@@ -42,3 +42,26 @@ services:
       - openmemory-mcp
     profiles:
       - ui  # Only starts when --profile ui is used
+
+  # neo4j-mem0:
+  #   image: neo4j:5.15-community
+  #   ports:
+  #     - "7474:7474" # HTTP
+  #     - "7687:7687" # Bolt
+  #   environment:
+  #     - NEO4J_AUTH=neo4j/${NEO4J_PASSWORD:-password}
+  #     - NEO4J_PLUGINS=["apoc"]
+  #     - NEO4J_dbms_security_procedures_unrestricted=apoc.*
+  #     - NEO4J_dbms_security_procedures_allowlist=apoc.*
+  #   volumes:
+  #     - ./data/neo4j_data:/data
+  #     - ./data/neo4j_logs:/logs
+  #   restart: unless-stopped
+
+
+
+
+networks:
+  default:
+    name: chronicle-network
+    external: true

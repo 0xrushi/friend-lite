@@ -1,0 +1,50 @@
+# OpenMemory MCP Server
+# Cross-client memory compatibility
+# Enable with: docker compose --profile openmemory up
+
+services:
+  openmemory-mcp:
+    build:
+      context: ../extras/openmemory-mcp
+      dockerfile: Dockerfile
+    ports:
+      - "${OPENMEMORY_PORT:-8765}:8765"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENMEMORY_USER_ID=${OPENMEMORY_USER_ID:-openmemory}
+      - QDRANT_URL=${QDRANT_URL:-http://qdrant:6334}
+    depends_on:
+      - qdrant
+    profiles:
+      - openmemory
+    restart: unless-stopped
+    networks:
+      - chronicle-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; exit(0 if requests.get('http://localhost:8765/docs').status_code == 200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # OpenMemory UI (optional within openmemory profile)
+  openmemory-ui:
+    image: mem0/openmemory-ui:latest
+    ports:
+      - "${OPENMEMORY_UI_PORT:-3001}:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:${OPENMEMORY_PORT:-8765}
+      - NEXT_PUBLIC_USER_ID=${OPENMEMORY_USER_ID:-openmemory}
+    depends_on:
+      - openmemory-mcp
+    profiles:
+      - openmemory
+      - openmemory-ui
+    restart: unless-stopped
+    networks:
+      - chronicle-network
+
+networks:
+  chronicle-network:
+    name: chronicle-network
+    external: true

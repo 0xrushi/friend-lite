@@ -69,8 +69,8 @@ elif [ -n "${HF_TOKEN:-}" ]; then
     export SIMILARITY_THRESHOLD=0.15
     export SPEAKER_SERVICE_HOST=speaker-service
     export COMPUTE_MODE=cpu
-    export SPEAKER_SERVICE_PORT=8085
-    export SPEAKER_SERVICE_URL=http://speaker-service:8085
+    export SPEAKER_SERVICE_PORT=8086
+    export SPEAKER_SERVICE_URL=http://speaker-service:8086
     export SPEAKER_SERVICE_TEST_PORT=8086
     export REACT_UI_HOST=0.0.0.0
     export REACT_UI_PORT=5173

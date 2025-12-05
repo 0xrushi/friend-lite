@@ -2,6 +2,9 @@
 *.wav
 **/*.env
 !**/.env.template
+.env.secrets
+.env.backup.*
+config.env.backup.*
 **/memory_config.yaml
 !**/memory_config.yaml.template
 example/*
@@ -82,3 +85,4 @@ log.html
 output.xml
 report.html
 .secrets
+extras/openmemory-mcp/.env.openmemory
