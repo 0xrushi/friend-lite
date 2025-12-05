@@ -177,10 +177,16 @@ export const uploadApi = {
       },
     }),
 
-  uploadAudioFromUrl: (payload: { drive_folder_id: string; device_name?: string; auto_generate_client?: boolean }) =>
-    api.post('/api/audio/upload_audio_from_url', null, {
-      params: payload.drive_folder_id,
-      timeout: 300000, // optional: 5 minutes
+uploadAudioFromUrl: (payload: { drive_folder_id: string; device_name?: string; auto_generate_client?: boolean }) =>
+    // 1. Set the POST body to null (or leave it out, though explicit null is cleaner for no body)
+    api.post('/api/audio/upload_audio_from_url', null, { 
+      // 2. Pass the entire payload object to the 'params' configuration key
+      params: { 
+        url: payload.drive_folder_id, // IMPORTANT: Use 'url' here to match the backend's alias
+        device_name: payload.device_name,
+        auto_generate_client: payload.auto_generate_client,
+      },
+      timeout: 300000,
     }),
 }
 
