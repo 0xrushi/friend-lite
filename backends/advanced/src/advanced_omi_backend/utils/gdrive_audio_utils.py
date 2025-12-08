@@ -15,10 +15,7 @@ class AudioValidationError(Exception):
     pass
 
 
-# -------------------------------------------------------------
-# DOWNLOAD A SINGLE FILE (OAUTH)
-# -------------------------------------------------------------
-async def download_and_wrap_drive_file(service, file_item):
+def download_and_wrap_drive_file(service, file_item):
     file_id = file_item["id"]
     name = file_item["name"]
 
@@ -29,7 +26,7 @@ async def download_and_wrap_drive_file(service, file_item):
 
     done = False
     while not done:
-        status, done = downloader.next_chunk()
+        _status, done = downloader.next_chunk()
 
     content = fh.getvalue()
 
@@ -47,20 +44,17 @@ async def download_and_wrap_drive_file(service, file_item):
         try:
             original_close()
         finally:
-            try:
-                os.unlink(tmp_file.name)
-            except FileNotFoundError:
-                pass
+            # SpooledTemporaryFile auto-cleans when closed; no unlink needed
+            pass
 
     upload_file.close = wrapped_close
 
     return upload_file
 
-
 # -------------------------------------------------------------
 # LIST + DOWNLOAD FILES IN FOLDER (OAUTH)
 # -------------------------------------------------------------
-async def download_audio_files_from_drive(folder_id: str) -> List[StarletteUploadFile]:
+def download_audio_files_from_drive(folder_id: str) -> List[StarletteUploadFile]:
     if not folder_id:
         raise AudioValidationError("Google Drive folder ID is required.")
 
@@ -88,11 +82,12 @@ async def download_audio_files_from_drive(folder_id: str) -> List[StarletteUploa
 
         wrapped_files = []
         for item in audio_files:
-            wrapped_files.append(await download_and_wrap_drive_file(service, item))
+            # synchronous call now
+            wrapped_files.append(download_and_wrap_drive_file(service, item))
 
         return wrapped_files
 
     except Exception as e:
         if isinstance(e, AudioValidationError):
             raise
-        raise AudioValidationError(f"Google Drive API Error: {repr(e)}")
+        raise AudioValidationError(f"Google Drive API Error: {e}") from e
