@@ -61,7 +61,8 @@ def download_audio_files_from_drive(folder_id: str) -> List[StarletteUploadFile]
     service = get_app_config().get_gdrive_service()
 
     try:
-        query = f"'{folder_id}' in parents and trashed = false"
+        escaped_folder_id = folder_id.replace("\\", "\\\\").replace("'", "\\'")
+        query = f"'{escaped_folder_id}' in parents and trashed = false"
 
         response = service.files().list(
             q=query,
