@@ -370,7 +370,6 @@ export default function Upload() {
           📝 Upload Instructions
         </h3>
         <ul className="text-sm text-yellow-700 dark:text-yellow-300 space-y-1">
-          <li>• Hello world</li>
           <li>• Audio files will be processed sequentially for transcription and memory extraction</li>
           <li>• Processing time varies based on audio length (roughly 3x the audio duration + 60s)</li>
           <li>• Large files or multiple files may cause timeout errors - this is normal</li>

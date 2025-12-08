@@ -1,12 +1,13 @@
 import os
 import io
 import tempfile
+import atexit
 from typing import List
 from starlette.datastructures import UploadFile as StarletteUploadFile
 from googleapiclient.http import MediaIoBaseDownload
 from advanced_omi_backend.app_config import get_app_config
 
-AUDIO_EXTENSIONS = (".wav", ".mp3", ".flac", ".ogg")
+AUDIO_EXTENSIONS = (".wav", ".mp3", ".flac", ".ogg", ".m4a")
 FOLDER_MIMETYPE = "application/vnd.google-apps.folder"
 
 
@@ -35,15 +36,25 @@ async def download_and_wrap_drive_file(service, file_item):
     if not content:
         raise AudioValidationError(f"Downloaded Google Drive file '{name}' was empty")
 
-    tmp_file = tempfile.NamedTemporaryFile(delete=False)
+    tmp_file = tempfile.SpooledTemporaryFile(max_size=10*1024*1024)  # 10 MB
     tmp_file.write(content)
-    tmp_file.flush()
+    tmp_file.seek(0)
+    upload_file = StarletteUploadFile(filename=name, file=tmp_file)
 
-    # Wrap in Starlette UploadFile to mimic standard uploads
-    return StarletteUploadFile(
-        filename=name,
-        file=open(tmp_file.name, "rb"),
-    )
+    original_close = upload_file.close
+
+    def wrapped_close():
+        try:
+            original_close()
+        finally:
+            try:
+                os.unlink(tmp_file.name)
+            except FileNotFoundError:
+                pass
+
+    upload_file.close = wrapped_close
+
+    return upload_file
 
 
 # -------------------------------------------------------------
