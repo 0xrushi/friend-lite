@@ -29,6 +29,7 @@ Clone, run setup wizard, start services, access at http://localhost:5173
 
 ## Links
 
+- **🆕 [NEW Install Guide](INSTALL.md)** - Complete beginner-friendly setup for Windows, macOS, and Linux
 - **📚 [Setup Guide](quickstart.md)** - Start here
 - **🔧 [Full Documentation](CLAUDE.md)** - Comprehensive reference
 - **🏗️ [Architecture Details](Docs/features.md)** - Technical deep dive

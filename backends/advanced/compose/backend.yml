@@ -17,17 +17,11 @@ services:
       - ../data:/app/data
     environment:
       # Service URLs (Docker internal network)
-      - REDIS_URL=redis://redis:6379/0
+      # Use REDIS_DATABASE (derived from PORT_OFFSET) for environment isolation
+      - REDIS_URL=redis://chronicle-redis:6379/${REDIS_DATABASE:-0}
       - MYCELIA_URL=${MYCELIA_URL:-http://mycelia-backend:5173}
       # Complex defaults
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:5173,http://localhost:3010,http://localhost:3015,http://localhost:3020,http://localhost:8000}
-    depends_on:
-      qdrant:
-        condition: service_started
-      mongo:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/readiness"]
       interval: 30s
@@ -56,14 +50,8 @@ services:
       - ../data:/app/data
     environment:
       # Service URLs (Docker internal network)
-      - REDIS_URL=redis://redis:6379/0
-    depends_on:
-      redis:
-        condition: service_healthy
-      mongo:
-        condition: service_healthy
-      qdrant:
-        condition: service_started
+      # Use REDIS_DATABASE (derived from PORT_OFFSET) for environment isolation
+      - REDIS_URL=redis://chronicle-redis:6379/${REDIS_DATABASE:-0}
     restart: unless-stopped
     networks:
       - chronicle-network

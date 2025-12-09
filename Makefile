@@ -33,7 +33,7 @@ endif
 SCRIPTS_DIR := scripts
 K8S_SCRIPTS_DIR := $(SCRIPTS_DIR)/k8s
 
-.PHONY: help menu wizard setup-secrets setup-tailscale setup-environment check-secrets setup-k8s setup-infrastructure setup-rbac setup-storage-pvc config config-docker config-k8s config-all clean deploy deploy-docker deploy-k8s deploy-k8s-full deploy-infrastructure deploy-apps check-infrastructure check-apps build-backend up-backend down-backend k8s-status k8s-cleanup k8s-purge audio-manage mycelia-sync-status mycelia-sync-all mycelia-sync-user mycelia-check-orphans mycelia-reassign-orphans test-robot test-robot-integration test-robot-unit test-robot-endpoints test-robot-specific test-robot-clean
+.PHONY: help menu wizard setup-secrets setup-tailscale configure-tailscale-serve setup-environment check-secrets setup-k8s setup-infrastructure setup-rbac setup-storage-pvc config config-docker config-k8s config-all clean deploy deploy-docker deploy-k8s deploy-k8s-full deploy-infrastructure deploy-apps check-infrastructure check-apps build-backend up-backend down-backend k8s-status k8s-cleanup k8s-purge audio-manage mycelia-sync-status mycelia-sync-all mycelia-sync-user mycelia-check-orphans mycelia-reassign-orphans mycelia-create-token test-robot test-robot-integration test-robot-unit test-robot-endpoints test-robot-specific test-robot-clean infra-start infra-stop infra-restart infra-logs infra-status infra-clean caddy-start caddy-stop caddy-restart caddy-logs caddy-status caddy-regenerate env-list env-start env-stop env-clean env-status
 
 # Default target
 .DEFAULT_GOAL := menu
@@ -43,10 +43,11 @@ menu: ## Show interactive menu (default)
 	@echo "================================"
 	@echo
 	@echo "🧙 Setup:"
-	@echo "  wizard             🧙 Interactive setup wizard (secrets + Tailscale + environment)"
-	@echo "  setup-secrets      🔐 Configure API keys and passwords"
-	@echo "  setup-tailscale    🌐 Configure Tailscale for distributed deployment"
-	@echo "  setup-environment  📦 Create a custom environment"
+	@echo "  wizard                      🧙 Interactive setup wizard (secrets + Tailscale + environment)"
+	@echo "  setup-secrets               🔐 Configure API keys and passwords"
+	@echo "  setup-tailscale             🌐 Configure Tailscale for distributed deployment"
+	@echo "  configure-tailscale-serve   🌐 Configure Tailscale serve routes (single environment)"
+	@echo "  setup-environment           📦 Create a custom environment"
 	@echo
 	@echo "📋 Quick Actions:"
 	@echo "  setup-dev          🛠️  Setup development environment (git hooks, pre-commit)"
@@ -78,11 +79,28 @@ menu: ## Show interactive menu (default)
 	@echo "  clean              🧹 Clean up generated files"
 	@echo
 	@echo "🔄 Mycelia Sync:"
+	@echo "  mycelia-create-token     🔑 Create Mycelia API token for a user"
 	@echo "  mycelia-sync-status      📊 Show Mycelia OAuth sync status"
 	@echo "  mycelia-sync-all         🔄 Sync all Friend-Lite users to Mycelia"
 	@echo "  mycelia-sync-user        👤 Sync specific user (EMAIL=user@example.com)"
 	@echo "  mycelia-check-orphans    🔍 Find orphaned Mycelia objects"
 	@echo "  mycelia-reassign-orphans ♻️  Reassign orphans (EMAIL=admin@example.com)"
+	@echo
+	@echo "🏗️  Shared Infrastructure:"
+	@echo "  infra-start              🚀 Start shared infrastructure (MongoDB, Redis, Qdrant, optional Neo4j)"
+	@echo "  infra-stop               🛑 Stop infrastructure"
+	@echo "  infra-restart            🔄 Restart infrastructure"
+	@echo "  infra-status             📊 Check infrastructure status"
+	@echo "  infra-logs               📋 View infrastructure logs"
+	@echo "  infra-clean              🗑️  Clean all infrastructure data (DANGER!)"
+	@echo
+	@echo "🌐 Caddy Reverse Proxy (Shared Service):"
+	@echo "  caddy-start              🚀 Start shared Caddy (serves all environments)"
+	@echo "  caddy-stop               🛑 Stop Caddy"
+	@echo "  caddy-restart            🔄 Restart Caddy"
+	@echo "  caddy-status             📊 Check if Caddy is running"
+	@echo "  caddy-logs               📋 View Caddy logs"
+	@echo "  caddy-regenerate         🔧 Regenerate Caddyfile from environments"
 	@echo
 	@echo "Current configuration:"
 	@echo "  DOMAIN: $(DOMAIN)"
@@ -129,6 +147,7 @@ help: ## Show detailed help for all targets
 	@echo "  audio-manage       Interactive audio file management"
 	@echo
 	@echo "🔄 MYCELIA SYNC:"
+	@echo "  mycelia-create-token Create Mycelia API token for a user"
 	@echo "  mycelia-sync-status Show Mycelia OAuth sync status for all users"
 	@echo "  mycelia-sync-all   Sync all Friend-Lite users to Mycelia OAuth"
 	@echo "  mycelia-sync-user  Sync specific user (EMAIL=user@example.com)"
@@ -184,18 +203,20 @@ wizard: ## 🧙 Interactive setup wizard - guides through complete Friend-Lite s
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@echo ""
 	@echo "This wizard will guide you through:"
-	@echo "  1. 🔐 Setting up secrets (API keys, passwords)"
-	@echo "  2. 🌐 Optionally configuring Tailscale for distributed deployment"
-	@echo "  3. 📦 Creating a custom environment"
-	@echo "  4. 🚀 Starting your Friend-Lite instance"
+	@echo "  1. 📦 Creating your environment (name, ports, services)"
+	@echo "  2. 🔐 Configuring secrets (API keys based on your services)"
+	@echo "  3. 🌐 Optionally configuring Tailscale for remote access"
+	@echo "  4. 🔧 Finalizing setup (certificates, final configuration)"
 	@echo ""
 	@read -p "Press Enter to continue or Ctrl+C to exit..."
+	@echo ""
+	@$(MAKE) --no-print-directory setup-environment
 	@echo ""
 	@$(MAKE) --no-print-directory setup-secrets
 	@echo ""
 	@$(MAKE) --no-print-directory setup-tailscale
 	@echo ""
-	@$(MAKE) --no-print-directory setup-environment
+	@$(MAKE) --no-print-directory finalize-setup
 	@echo ""
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@echo "✅ Setup Complete!"
@@ -204,12 +225,11 @@ wizard: ## 🧙 Interactive setup wizard - guides through complete Friend-Lite s
 	@echo "🚀 Next Steps:"
 	@echo ""
 	@if [ -f ".env.secrets" ] && [ -d "environments" ]; then \
+		LATEST_ENV=$$(ls -t environments/*.env 2>/dev/null | head -1 | xargs basename -s .env 2>/dev/null || echo "dev"); \
 		echo "  Start your environment:"; \
-		echo "    ./start-env.sh $${ENV_NAME:-dev}"; \
+		echo "    ./start-env.sh $$LATEST_ENV"; \
 		echo ""; \
-		echo "  Or with optional services:"; \
-		echo "    ./start-env.sh $${ENV_NAME:-dev} --profile mycelia"; \
-		echo "    ./start-env.sh $${ENV_NAME:-dev} --profile speaker"; \
+		echo "  💡 Your configured services will start automatically!"; \
 	else \
 		echo "  ⚠️  Some setup steps were skipped. Run individual targets:"; \
 		echo "    make setup-secrets"; \
@@ -234,378 +254,19 @@ check-secrets: ## Check if secrets file exists and is configured
 	@echo "✅ Secrets file configured"
 
 setup-secrets: ## 🔐 Interactive secrets setup (API keys, passwords)
-	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@echo "🔐 Step 1: Secrets Configuration"
-	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@echo ""
-	@if [ -f ".env.secrets" ]; then \
-		echo "ℹ️  .env.secrets already exists"; \
-		echo ""; \
-		read -p "Do you want to reconfigure it? (y/N): " reconfigure; \
-		if [ "$$reconfigure" != "y" ] && [ "$$reconfigure" != "Y" ]; then \
-			echo ""; \
-			echo "✅ Keeping existing secrets"; \
-			exit 0; \
-		fi; \
-		echo ""; \
-		echo "📝 Backing up existing .env.secrets..."; \
-		cp .env.secrets .env.secrets.backup.$$(date +%Y%m%d_%H%M%S); \
-		echo ""; \
-	else \
-		echo "📝 Creating .env.secrets from template..."; \
-		cp .env.secrets.template .env.secrets; \
-		echo "✅ Created .env.secrets"; \
-		echo ""; \
-	fi
-	@echo "🔑 Required Secrets Configuration"
-	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@echo ""
-	@echo "Let's configure your secrets. Press Enter to skip optional ones."
-	@echo ""
-	@# JWT Secret Key (required)
-	@echo "1️⃣  JWT Secret Key (required for authentication)"
-	@echo "   This is used to sign JWT tokens. Should be random and secure."
-	@read -p "   Enter JWT secret key (or press Enter to generate): " jwt_key; \
-	if [ -z "$$jwt_key" ]; then \
-		jwt_key=$$(openssl rand -hex 32 2>/dev/null || cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 64 | head -n 1); \
-		echo "   ✅ Generated random key: $$jwt_key"; \
-	fi; \
-	sed -i.bak "s|^AUTH_SECRET_KEY=.*|AUTH_SECRET_KEY=$$jwt_key|" .env.secrets && rm .env.secrets.bak
-	@echo ""
-	@# Admin credentials
-	@echo "2️⃣  Admin Account"
-	@read -p "   Admin email (default: admin@example.com): " admin_email; \
-	admin_email=$${admin_email:-admin@example.com}; \
-	sed -i.bak "s|^ADMIN_EMAIL=.*|ADMIN_EMAIL=$$admin_email|" .env.secrets && rm .env.secrets.bak; \
-	read -sp "   Admin password: " admin_pass; echo ""; \
-	if [ -n "$$admin_pass" ]; then \
-		sed -i.bak "s|^ADMIN_PASSWORD=.*|ADMIN_PASSWORD=$$admin_pass|" .env.secrets && rm .env.secrets.bak; \
-	fi
-	@echo ""
-	@# OpenAI API Key
-	@echo "3️⃣  OpenAI API Key (required for memory extraction)"
-	@echo "   Get your key from: https://platform.openai.com/api-keys"
-	@read -p "   OpenAI API key (or press Enter to skip): " openai_key; \
-	if [ -n "$$openai_key" ]; then \
-		sed -i.bak "s|^OPENAI_API_KEY=.*|OPENAI_API_KEY=$$openai_key|" .env.secrets && rm .env.secrets.bak; \
-	fi
-	@echo ""
-	@# Deepgram API Key
-	@echo "4️⃣  Deepgram API Key (recommended for transcription)"
-	@echo "   Get your key from: https://console.deepgram.com/"
-	@read -p "   Deepgram API key (or press Enter to skip): " deepgram_key; \
-	if [ -n "$$deepgram_key" ]; then \
-		sed -i.bak "s|^DEEPGRAM_API_KEY=.*|DEEPGRAM_API_KEY=$$deepgram_key|" .env.secrets && rm .env.secrets.bak; \
-	fi
-	@echo ""
-	@# Optional: Mistral API Key
-	@echo "5️⃣  Mistral API Key (optional - alternative transcription)"
-	@echo "   Get your key from: https://console.mistral.ai/"
-	@read -p "   Mistral API key (or press Enter to skip): " mistral_key; \
-	if [ -n "$$mistral_key" ]; then \
-		sed -i.bak "s|^MISTRAL_API_KEY=.*|MISTRAL_API_KEY=$$mistral_key|" .env.secrets && rm .env.secrets.bak; \
-	fi
-	@echo ""
-	@# Optional: Hugging Face Token
-	@echo "6️⃣  Hugging Face Token (optional - for speaker recognition models)"
-	@echo "   Get your token from: https://huggingface.co/settings/tokens"
-	@read -p "   HF token (or press Enter to skip): " hf_token; \
-	if [ -n "$$hf_token" ]; then \
-		sed -i.bak "s|^HF_TOKEN=.*|HF_TOKEN=$$hf_token|" .env.secrets && rm .env.secrets.bak; \
-	fi
-	@echo ""
-	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@echo "✅ Secrets configured successfully!"
-	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@echo ""
-	@echo "📄 Configuration saved to: .env.secrets"
-	@echo "🔒 This file is gitignored and will not be committed"
-	@echo ""
+	@./scripts/setup-secrets.sh
 
 setup-tailscale: ## 🌐 Interactive Tailscale setup for distributed deployment
-	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@echo "🌐 Step 2: Tailscale Configuration (Optional)"
-	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@echo ""
-	@echo "Tailscale enables secure distributed deployments:"
-	@echo "  • Run services on different machines"
-	@echo "  • Secure service-to-service communication"
-	@echo "  • Access from mobile devices"
-	@echo "  • Automatic HTTPS with 'tailscale serve'"
-	@echo ""
-	@read -p "Do you want to configure Tailscale? (y/N): " use_tailscale; \
-	if [ "$$use_tailscale" != "y" ] && [ "$$use_tailscale" != "Y" ]; then \
-		echo ""; \
-		echo "ℹ️  Skipping Tailscale setup"; \
-		echo "   You can run this later with: make setup-tailscale"; \
-		exit 0; \
-	fi
-	@echo ""
-	@# Check if Tailscale is installed
-	@if ! command -v tailscale >/dev/null 2>&1; then \
-		echo "❌ Tailscale not found"; \
-		echo ""; \
-		echo "📦 Install Tailscale:"; \
-		echo "   curl -fsSL https://tailscale.com/install.sh | sh"; \
-		echo "   sudo tailscale up"; \
-		echo ""; \
-		echo "Then run this setup again: make setup-tailscale"; \
-		exit 1; \
-	fi
-	@echo "✅ Tailscale is installed"
-	@echo ""
-	@# Get Tailscale status
-	@echo "📊 Checking Tailscale status..."
-	@if ! tailscale status >/dev/null 2>&1; then \
-		echo "❌ Tailscale is not running"; \
-		echo ""; \
-		echo "🔧 Start Tailscale:"; \
-		echo "   sudo tailscale up"; \
-		echo ""; \
-		exit 1; \
-	fi
-	@echo "✅ Tailscale is running"
-	@echo ""
-	@echo "📋 Your Tailscale devices:"
-	@echo ""
-	@tailscale status | head -n 10
-	@echo ""
-	@# Get Tailscale hostname
-	@echo "🏷️  Tailscale Hostname Configuration"
-	@echo ""
-	@echo "Your Tailscale hostname is the DNS name assigned to THIS machine."
-	@echo "It's different from the IP address - it's a permanent name."
-	@echo ""
-	@echo "📋 To find your Tailscale hostname:"
-	@echo "   1. Run: tailscale status"
-	@echo "   2. Look for this machine's name in the first column"
-	@echo "   3. The full hostname is shown on the right (ends in .ts.net)"
-	@echo ""
-	@echo "Example output:"
-	@echo "   anubis    100.x.x.x   anubis.tail12345.ts.net   <-- Your hostname"
-	@echo ""
-	@default_hostname=$$(tailscale status --json 2>/dev/null | grep -o '"DNSName":"[^"]*"' | head -1 | cut -d'"' -f4 | sed 's/\.$$//'); \
-	if [ -n "$$default_hostname" ]; then \
-		echo "💡 Auto-detected hostname for THIS machine: $$default_hostname"; \
-		echo ""; \
-	fi; \
-	read -p "Tailscale hostname [$$default_hostname]: " tailscale_hostname; \
-	tailscale_hostname=$${tailscale_hostname:-$$default_hostname}; \
-	if [ -z "$$tailscale_hostname" ]; then \
-		echo ""; \
-		echo "❌ No hostname provided"; \
-		exit 1; \
-	fi; \
-	export TAILSCALE_HOSTNAME=$$tailscale_hostname; \
-	echo ""; \
-	echo "✅ Using Tailscale hostname: $$tailscale_hostname"
-	@echo ""
-	@# SSL Setup
-	@echo "🔐 SSL Certificate Configuration"
-	@echo ""
-	@echo "How do you want to handle HTTPS?"
-	@echo "  1) Use 'tailscale serve' (automatic HTTPS, recommended)"
-	@echo "  2) Generate self-signed certificates"
-	@echo "  3) Skip SSL setup"
-	@echo ""
-	@read -p "Choose option (1-3) [1]: " ssl_choice; \
-	ssl_choice=$${ssl_choice:-1}; \
-	case $$ssl_choice in \
-		1) \
-			echo ""; \
-			echo "✅ Will use 'tailscale serve' for automatic HTTPS"; \
-			echo ""; \
-			echo "📝 After starting services, run:"; \
-			echo "   tailscale serve https / http://localhost:8000"; \
-			echo "   tailscale serve https / http://localhost:5173"; \
-			echo ""; \
-			export HTTPS_ENABLED=true; \
-			;; \
-		2) \
-			echo ""; \
-			echo "🔐 Generating SSL certificates for $$tailscale_hostname..."; \
-			if [ -f "backends/advanced/ssl/generate-ssl.sh" ]; then \
-				cd backends/advanced && ./ssl/generate-ssl.sh $$tailscale_hostname && cd ../..; \
-				echo ""; \
-				echo "✅ SSL certificates generated"; \
-			else \
-				echo "❌ SSL generation script not found"; \
-				exit 1; \
-			fi; \
-			export HTTPS_ENABLED=true; \
-			;; \
-		3) \
-			echo ""; \
-			echo "ℹ️  Skipping SSL setup"; \
-			export HTTPS_ENABLED=false; \
-			;; \
-		*) \
-			echo ""; \
-			echo "❌ Invalid choice"; \
-			exit 1; \
-			;; \
-	esac
-	@echo ""
-	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@echo "✅ Tailscale configuration complete!"
-	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@echo ""
+	@./scripts/setup-tailscale.sh
+
+configure-tailscale-serve: ## 🌐 Configure Tailscale serve for an environment
+	@./scripts/configure-tailscale-serve.sh
 
 setup-environment: ## 📦 Create a custom environment configuration
-	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@echo "📦 Step 3: Environment Setup"
-	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@echo ""
-	@echo "Environments allow you to:"
-	@echo "  • Run multiple isolated instances (dev, staging, prod)"
-	@echo "  • Use different databases and ports for each"
-	@echo "  • Test changes without affecting production"
-	@echo ""
-	@# Check existing environments
-	@if [ -d "environments" ] && [ -n "$$(ls -A environments/*.env 2>/dev/null)" ]; then \
-		echo "📋 Existing environments:"; \
-		ls -1 environments/*.env 2>/dev/null | sed 's|environments/||;s|.env$$||' | sed 's/^/  - /'; \
-		echo ""; \
-	fi
-	@# Get environment name
-	@read -p "Environment name [dev]: " env_name; \
-	env_name=$${env_name:-dev}; \
-	mkdir -p environments; \
-	env_file="environments/$$env_name.env"; \
-	echo ""; \
-	if [ -f "$$env_file" ]; then \
-		echo "⚠️  Environment '$$env_name' already exists"; \
-		read -p "Do you want to overwrite it? (y/N): " overwrite; \
-		if [ "$$overwrite" != "y" ] && [ "$$overwrite" != "Y" ]; then \
-			echo ""; \
-			echo "ℹ️  Keeping existing environment"; \
-			exit 0; \
-		fi; \
-		echo ""; \
-		cp "$$env_file" "$$env_file.backup.$$(date +%Y%m%d_%H%M%S)"; \
-		echo "📝 Backed up existing environment"; \
-		echo ""; \
-	fi
-	@# Get port offset
-	@echo "🔢 Port Configuration"; \
-	echo ""; \
-	echo "Each environment needs a unique port offset to avoid conflicts."; \
-	echo "  dev:     0   (8000, 5173, 27017, ...)"; \
-	echo "  staging: 100 (8100, 5273, 27117, ...)"; \
-	echo "  prod:    200 (8200, 5373, 27217, ...)"; \
-	echo ""; \
-	read -p "Port offset [0]: " port_offset; \
-	port_offset=$${port_offset:-0}; \
-	echo ""
-	@# Get database names
-	@echo "💾 Database Configuration"; \
-	echo ""; \
-	read -p "MongoDB database name [friend-lite-$$env_name]: " mongodb_db; \
-	mongodb_db=$${mongodb_db:-friend-lite-$$env_name}; \
-	read -p "Mycelia database name [mycelia-$$env_name]: " mycelia_db; \
-	mycelia_db=$${mycelia_db:-mycelia-$$env_name}; \
-	echo ""
-	@# Optional services
-	@echo "🔌 Optional Services"; \
-	echo ""; \
-	read -p "Enable Mycelia? (y/N): " enable_mycelia; \
-	read -p "Enable Speaker Recognition? (y/N): " enable_speaker; \
-	read -p "Enable OpenMemory MCP? (y/N): " enable_openmemory; \
-	read -p "Enable Parakeet ASR? (y/N): " enable_parakeet; \
-	services=""; \
-	if [ "$$enable_mycelia" = "y" ] || [ "$$enable_mycelia" = "Y" ]; then \
-		services="$$services mycelia"; \
-	fi; \
-	if [ "$$enable_speaker" = "y" ] || [ "$$enable_speaker" = "Y" ]; then \
-		services="$$services speaker"; \
-	fi; \
-	if [ "$$enable_openmemory" = "y" ] || [ "$$enable_openmemory" = "Y" ]; then \
-		services="$$services openmemory"; \
-	fi; \
-	if [ "$$enable_parakeet" = "y" ] || [ "$$enable_parakeet" = "Y" ]; then \
-		services="$$services parakeet"; \
-	fi; \
-	echo ""
-	@# Tailscale settings (from previous step or ask)
-	@if [ -n "$$TAILSCALE_HOSTNAME" ]; then \
-		echo ""; \
-		echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"; \
-		echo "🌐 Tailscale Configuration"; \
-		echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"; \
-		echo ""; \
-		echo "✅ Using Tailscale configuration from previous step:"; \
-		echo "   Hostname: $$TAILSCALE_HOSTNAME"; \
-		echo "   HTTPS:    $$HTTPS_ENABLED"; \
-		echo ""; \
-		tailscale_hostname=$$TAILSCALE_HOSTNAME; \
-		https_enabled=$$HTTPS_ENABLED; \
-	else \
-		echo ""; \
-		echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"; \
-		echo "🌐 Tailscale Configuration (Optional)"; \
-		echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"; \
-		echo ""; \
-		echo "⚠️  You skipped Tailscale setup earlier."; \
-		echo ""; \
-		echo "You can still configure it for this environment:"; \
-		echo "  • Enter your Tailscale hostname (from 'tailscale status')"; \
-		echo "  • Or press Enter to skip (HTTP only, no Tailscale)"; \
-		echo ""; \
-		read -p "Tailscale hostname (or press Enter to skip): " tailscale_hostname; \
-		if [ -n "$$tailscale_hostname" ]; then \
-			echo ""; \
-			echo "⚠️  Note: SSL certificates were not generated."; \
-			echo "   To generate them later, run:"; \
-			echo "   cd backends/advanced && ./ssl/generate-ssl.sh $$tailscale_hostname"; \
-			echo ""; \
-			https_enabled=true; \
-		else \
-			https_enabled=false; \
-		fi; \
-	fi; \
-	echo ""
-	@# Write environment file
-	@echo "📝 Creating environment file: $$env_file"; \
-	echo ""; \
-	printf "# ========================================\n" > "$$env_file"; \
-	printf "# Friend-Lite Environment: %s\n" "$$env_name" >> "$$env_file"; \
-	printf "# ========================================\n" >> "$$env_file"; \
-	printf "# Generated: %s\n" "$$(date)" >> "$$env_file"; \
-	printf "\n" >> "$$env_file"; \
-	printf "# Environment identification\n" >> "$$env_file"; \
-	printf "ENV_NAME=%s\n" "$$env_name" >> "$$env_file"; \
-	printf "COMPOSE_PROJECT_NAME=friend-lite-%s\n" "$$env_name" >> "$$env_file"; \
-	printf "\n" >> "$$env_file"; \
-	printf "# Port offset (each environment needs unique ports)\n" >> "$$env_file"; \
-	printf "PORT_OFFSET=%s\n" "$$port_offset" >> "$$env_file"; \
-	printf "\n" >> "$$env_file"; \
-	printf "# Data directory (isolated per environment)\n" >> "$$env_file"; \
-	printf "DATA_DIR=./data/%s\n" "$$env_name" >> "$$env_file"; \
-	printf "\n" >> "$$env_file"; \
-	printf "# Database names (isolated per environment)\n" >> "$$env_file"; \
-	printf "MONGODB_DATABASE=%s\n" "$$mongodb_db" >> "$$env_file"; \
-	printf "MYCELIA_DB=%s\n" "$$mycelia_db" >> "$$env_file"; \
-	printf "\n" >> "$$env_file"; \
-	printf "# Optional services\n" >> "$$env_file"; \
-	printf "SERVICES=%s\n" "$$services" >> "$$env_file"; \
-	printf "\n" >> "$$env_file"; \
-	if [ -n "$$tailscale_hostname" ]; then \
-		printf "# Tailscale configuration\n" >> "$$env_file"; \
-		printf "TAILSCALE_HOSTNAME=%s\n" "$$tailscale_hostname" >> "$$env_file"; \
-		printf "HTTPS_ENABLED=%s\n" "$$https_enabled" >> "$$env_file"; \
-		printf "\n" >> "$$env_file"; \
-	fi; \
-	echo "✅ Environment created: $$env_name"
-	@echo ""
-	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@echo "✅ Environment setup complete!"
-	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@echo ""
-	@echo "📄 Environment file: $$env_file"
-	@echo ""
-	@echo "🚀 Start this environment with:"
-	@echo "   ./start-env.sh $$env_name"
-	@echo ""
+	@./scripts/setup-environment.sh
+
+finalize-setup: ## 🔧 Finalize setup (generate Caddyfile, provision certificates)
+	@./scripts/finalize-setup.sh
 
 # ========================================
 # KUBERNETES SETUP
@@ -838,6 +499,39 @@ mycelia-reassign-orphans: ## Reassign orphaned objects to user (usage: make myce
 	@read -p "Continue? (y/N): " confirm && [ "$$confirm" = "y" ] || exit 1
 	@cd backends/advanced && uv run python scripts/sync_friendlite_mycelia.py --reassign-orphans --target-email $(EMAIL)
 
+mycelia-create-token: ## Create Mycelia API token for a user in specified environment
+	@echo "🔑 Creating Mycelia API Token"
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@echo ""
+	@# List available environments
+	@if [ ! -d "environments" ] || [ -z "$$(ls -A environments/*.env 2>/dev/null)" ]; then \
+		echo "❌ No environments found. Create one with: make wizard"; \
+		exit 1; \
+	fi
+	@echo "📋 Available environments:"; \
+	ls -1 environments/*.env 2>/dev/null | sed 's|environments/||;s|.env$$||' | sed 's/^/  - /'; \
+	echo ""
+	@# Ask for environment
+	@read -p "Environment name: " env_name; \
+	if [ ! -f "environments/$$env_name.env" ]; then \
+		echo "❌ Environment '$$env_name' not found"; \
+		exit 1; \
+	fi; \
+	echo ""; \
+	echo "📦 Checking if $$env_name environment is running..."; \
+	echo ""; \
+	source "environments/$$env_name.env"; \
+	running=$$(docker ps --filter "name=$$COMPOSE_PROJECT_NAME-friend-backend-1" --format "{{.Names}}" 2>/dev/null); \
+	if [ -z "$$running" ]; then \
+		echo "⚠️  Environment not running. Start it first with:"; \
+		echo "   ./start-env.sh $$env_name"; \
+		echo ""; \
+		exit 1; \
+	fi; \
+	echo "✅ Environment is running ($$COMPOSE_PROJECT_NAME)"; \
+	echo ""; \
+	cd backends/advanced && ENV_NAME=$$env_name uv run python scripts/create_mycelia_api_key.py
+
 # ========================================
 # TESTING TARGETS
 # ========================================
@@ -940,4 +634,172 @@ env-status: ## Show status of all environments
 		COMPOSE_PROJECT_NAME=friend-lite-$$env docker compose ps 2>/dev/null | grep -v "NAME" || echo "  Not running"; \
 		echo ""; \
 	done
+
+# ========================================
+# SHARED INFRASTRUCTURE (MongoDB, Redis, Qdrant)
+# ========================================
+
+infra-start: ## Start shared infrastructure (MongoDB, Redis, Qdrant, optional Neo4j)
+	@echo "🚀 Starting shared infrastructure services..."
+	@echo ""
+	@# Check if network exists, create if not
+	@docker network inspect chronicle-network >/dev/null 2>&1 || docker network create chronicle-network
+	@# Check if Neo4j should be started (NEO4J_ENABLED in any environment)
+	@if grep -q "^NEO4J_ENABLED=true" environments/*.env 2>/dev/null; then \
+		echo "🔗 Neo4j enabled in at least one environment - starting with Neo4j profile..."; \
+		docker compose -p chronicle-infra -f compose/infrastructure-shared.yml --profile neo4j up -d; \
+	else \
+		docker compose -p chronicle-infra -f compose/infrastructure-shared.yml up -d; \
+	fi
+	@echo ""
+	@echo "✅ Infrastructure services started!"
+	@echo ""
+	@echo "   📊 MongoDB:  mongodb://localhost:27017"
+	@echo "   💾 Redis:    redis://localhost:6379"
+	@echo "   🔍 Qdrant:   http://localhost:6034"
+	@if docker ps --format '{{.Names}}' | grep -q '^chronicle-neo4j$$'; then \
+		echo "   🔗 Neo4j:    http://localhost:7474 (bolt: 7687)"; \
+	fi
+	@echo ""
+	@echo "💡 These services are shared by all environments"
+	@echo "   Each environment uses unique database names for isolation"
+	@echo ""
+
+infra-stop: ## Stop shared infrastructure
+	@echo "🛑 Stopping shared infrastructure..."
+	@echo "⚠️  This will affect ALL running environments!"
+	@read -p "Continue? (y/N): " confirm && [ "$$confirm" = "y" ] || exit 1
+	@docker compose -p chronicle-infra -f compose/infrastructure-shared.yml down
+	@echo "✅ Infrastructure stopped"
+
+infra-restart: ## Restart shared infrastructure
+	@echo "🔄 Restarting shared infrastructure..."
+	@docker compose -p chronicle-infra -f compose/infrastructure-shared.yml restart
+	@echo "✅ Infrastructure restarted"
+
+infra-logs: ## View infrastructure logs
+	@echo "📋 Viewing infrastructure logs (press Ctrl+C to exit)..."
+	@docker compose -p chronicle-infra -f compose/infrastructure-shared.yml logs -f
+
+infra-status: ## Check infrastructure status
+	@echo "📊 Infrastructure Status:"
+	@echo ""
+	@if docker ps --format '{{.Names}}' | grep -qE '(chronicle|friend-lite).*mongo'; then \
+		echo "✅ MongoDB is running"; \
+		docker ps --format '{{.Names}} {{.Ports}}' | grep mongo | awk '{print "   " $$1}'; \
+	else \
+		echo "❌ MongoDB is not running"; \
+	fi
+	@echo ""
+	@if docker ps --format '{{.Names}}' | grep -qE '(chronicle|friend-lite).*redis'; then \
+		echo "✅ Redis is running"; \
+		docker ps --format '{{.Names}} {{.Ports}}' | grep redis | awk '{print "   " $$1}'; \
+	else \
+		echo "❌ Redis is not running"; \
+	fi
+	@echo ""
+	@if docker ps --format '{{.Names}}' | grep -qE '(chronicle|friend-lite).*qdrant'; then \
+		echo "✅ Qdrant is running"; \
+		docker ps --format '{{.Names}} {{.Ports}}' | grep qdrant | awk '{print "   " $$1}'; \
+	else \
+		echo "❌ Qdrant is not running"; \
+	fi
+	@echo ""
+	@if docker ps --format '{{.Names}}' | grep -q '^chronicle-neo4j$$'; then \
+		echo "✅ Neo4j is running"; \
+		docker ps --format '{{.Names}} {{.Ports}}' | grep neo4j | awk '{print "   " $$1}'; \
+	else \
+		echo "ℹ️  Neo4j is not running (optional)"; \
+	fi
+	@echo ""
+	@if ! docker ps --format '{{.Names}}' | grep -qE '(chronicle|friend-lite).*(mongo|redis|qdrant)'; then \
+		echo "💡 Start infrastructure with: make infra-start"; \
+	fi
+
+infra-clean: ## Clean infrastructure data (DANGER: deletes all databases!)
+	@echo "⚠️  WARNING: This will delete ALL data from ALL environments!"
+	@echo "   This includes:"
+	@echo "   • All MongoDB databases"
+	@echo "   • All Redis data"
+	@echo "   • All Qdrant collections"
+	@echo "   • All Neo4j graph databases (if enabled)"
+	@echo ""
+	@read -p "Type 'DELETE ALL DATA' to confirm: " confirm && [ "$$confirm" = "DELETE ALL DATA" ] || exit 1
+	@docker compose -p chronicle-infra -f compose/infrastructure-shared.yml --profile neo4j down -v
+	@echo "✅ Infrastructure data deleted"
+
+# ========================================
+# CADDY REVERSE PROXY (Shared Service)
+# ========================================
+
+caddy-start: ## Start shared Caddy reverse proxy (serves all environments)
+	@echo "🚀 Starting Caddy reverse proxy..."
+	@echo ""
+	@# Check if Caddyfile exists
+	@if [ ! -f "caddy/Caddyfile" ]; then \
+		echo "⚠️  Caddyfile not found. Generating..."; \
+		./scripts/generate-caddyfile.sh; \
+		echo ""; \
+	fi
+	@# Start Caddy
+	@docker compose -f compose/caddy.yml up -d
+	@echo ""
+	@echo "✅ Caddy reverse proxy started!"
+	@echo ""
+	@# Show access URLs
+	@if [ -f "config-docker.env" ]; then \
+		source config-docker.env; \
+		if [ -n "$$TAILSCALE_HOSTNAME" ]; then \
+			echo "🌐 Access your environments at:"; \
+			echo "   https://$$TAILSCALE_HOSTNAME/"; \
+			echo ""; \
+			echo "   Individual environments:"; \
+			for env in $$(ls -1 environments/*.env 2>/dev/null | sed 's|environments/||;s|.env$$||'); do \
+				echo "     • $$env: https://$$TAILSCALE_HOSTNAME/$$env/"; \
+			done; \
+			echo ""; \
+		fi; \
+	fi
+
+caddy-stop: ## Stop shared Caddy reverse proxy
+	@echo "🛑 Stopping Caddy reverse proxy..."
+	@docker compose -f compose/caddy.yml down
+	@echo "✅ Caddy stopped"
+
+caddy-restart: ## Restart shared Caddy reverse proxy
+	@echo "🔄 Restarting Caddy reverse proxy..."
+	@docker compose -f compose/caddy.yml restart
+	@echo "✅ Caddy restarted"
+
+caddy-logs: ## View Caddy logs
+	@echo "📋 Viewing Caddy logs (press Ctrl+C to exit)..."
+	@docker compose -f compose/caddy.yml logs -f
+
+caddy-status: ## Check if Caddy is running
+	@echo "📊 Caddy Status:"
+	@echo ""
+	@if docker ps --format '{{.Names}}' | grep -qE '^(chronicle|friend-lite)-caddy'; then \
+		echo "✅ Caddy is running"; \
+		docker ps --format '{{.Names}} {{.Ports}}' | grep caddy | awk '{print "   " $$1}'; \
+		echo ""; \
+		if [ -f "config-docker.env" ]; then \
+			source config-docker.env; \
+			if [ -n "$$TAILSCALE_HOSTNAME" ]; then \
+				echo "🌐 Access URL: https://$$TAILSCALE_HOSTNAME/"; \
+			fi; \
+		fi; \
+	else \
+		echo "❌ Caddy is not running"; \
+		echo "   Start with: make caddy-start"; \
+	fi
+	@echo ""
+
+caddy-regenerate: ## Regenerate Caddyfile from current environments
+	@echo "🔧 Regenerating Caddyfile..."
+	@./scripts/generate-caddyfile.sh
+	@echo ""
+	@echo "✅ Caddyfile regenerated"
+	@echo ""
+	@echo "🔄 Restart Caddy to apply changes:"
+	@echo "   make caddy-restart"
 

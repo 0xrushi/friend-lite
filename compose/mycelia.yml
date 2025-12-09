@@ -23,11 +23,6 @@ services:
       - REDIS_PORT=6379
     volumes:
       - ../extras/mycelia/backend/app:/app/app
-    depends_on:
-      mongo:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
     healthcheck:
       test: ["CMD", "deno", "eval", "fetch('http://localhost:5100/health').then(r => r.ok ? Deno.exit(0) : Deno.exit(1))"]
       interval: 30s
@@ -38,7 +33,6 @@ services:
     profiles:
       - mycelia
     networks:
-      - mem0-network
       - chronicle-network
 
   mycelia-frontend:
@@ -58,12 +52,9 @@ services:
     profiles:
       - mycelia
     networks:
-      - mem0-network
       - chronicle-network
 
 networks:
-  mem0-network:
-    driver: bridge
   chronicle-network:
     name: chronicle-network
     external: true

@@ -3,18 +3,24 @@
 # Enable with: docker compose --profile openmemory up
 
 services:
-  openmemory-mcp:
+  openmemory:
     build:
-      context: ../extras/openmemory-mcp
+      context: ../extras/openmemory/api
       dockerfile: Dockerfile
     ports:
       - "${OPENMEMORY_PORT:-8765}:8765"
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - OPENMEMORY_USER_ID=${OPENMEMORY_USER_ID:-openmemory}
-      - QDRANT_URL=${QDRANT_URL:-http://qdrant:6334}
-    depends_on:
-      - qdrant
+      - USER=${OPENMEMORY_USER_ID:-user}
+      - API_KEY=${OPENAI_API_KEY}
+      # Use shared Qdrant instance (same as Friend-Lite)
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
+      # Neo4j configuration (when graph memory is enabled)
+      - NEO4J_URL=neo4j://neo4j:7687
+      - NEO4J_USERNAME=neo4j
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD:-password}
+      - NEO4J_DB=neo4j  # Neo4j Community Edition only supports single database
     profiles:
       - openmemory
     restart: unless-stopped
@@ -29,14 +35,20 @@ services:
 
   # OpenMemory UI (optional within openmemory profile)
   openmemory-ui:
+    build:
+      context: ../extras/openmemory/ui
+      dockerfile: Dockerfile
+      args:
+        - NEXT_PUBLIC_API_URL=http://localhost:${OPENMEMORY_PORT:-8765}
+        - NEXT_PUBLIC_USER_ID=${OPENMEMORY_USER_ID:-user}
     image: mem0/openmemory-ui:latest
     ports:
-      - "${OPENMEMORY_UI_PORT:-3001}:3000"
+      - "${OPENMEMORY_UI_PORT:-3330}:3000"
     environment:
       - NEXT_PUBLIC_API_URL=http://localhost:${OPENMEMORY_PORT:-8765}
-      - NEXT_PUBLIC_USER_ID=${OPENMEMORY_USER_ID:-openmemory}
+      - NEXT_PUBLIC_USER_ID=${OPENMEMORY_USER_ID:-user}
     depends_on:
-      - openmemory-mcp
+      - openmemory
     profiles:
       - openmemory
       - openmemory-ui

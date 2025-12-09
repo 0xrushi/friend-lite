@@ -19,8 +19,9 @@
 
 include:
   # Core backend (always included)
-  # This includes: mongo, redis, qdrant, friend-backend, workers, webui
-  - compose/advanced-backend.yml
+  # This includes: friend-backend, workers, webui
+  - path: backends/advanced/docker-compose.yml
+    env_file: backends/advanced/.env
 
   # Optional services (profile-based)
   - compose/mycelia.yml             # --profile mycelia
