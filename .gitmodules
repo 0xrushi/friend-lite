@@ -1,3 +1,7 @@
 [submodule "extras/mycelia"]
 	path = extras/mycelia
 	url = https://github.com/mycelia-tech/mycelia
+[submodule "extras/openmemory"]
+	path = extras/openmemory
+	url = https://github.com/thestumonkey/mem0.git
+	branch = friend-lite-integration
