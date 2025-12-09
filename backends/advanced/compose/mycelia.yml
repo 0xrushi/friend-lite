@@ -1,9 +1,0 @@
-# Mycelia Services (Backend-Level Reference)
-# NOTE: Mycelia is now defined at project root level (../../compose/mycelia.yml)
-# This file kept for backward compatibility when running from backends/advanced/
-#
-# Mycelia is at the same level as other extras (openmemory, speaker, asr)
-# Use from project root: docker compose --profile mycelia up
-
-# Empty services - mycelia defined at root level
-services: {}
