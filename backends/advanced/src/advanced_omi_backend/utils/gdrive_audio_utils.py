@@ -1,11 +1,13 @@
-import os
 import io
 import tempfile
-import atexit
 from typing import List
+import logging
 from starlette.datastructures import UploadFile as StarletteUploadFile
 from googleapiclient.http import MediaIoBaseDownload
 from advanced_omi_backend.app_config import get_app_config
+
+logger = logging.getLogger(__name__)
+audio_logger = logging.getLogger("audio_processing")
 
 AUDIO_EXTENSIONS = (".wav", ".mp3", ".flac", ".ogg", ".m4a")
 FOLDER_MIMETYPE = "application/vnd.google-apps.folder"
@@ -15,7 +17,7 @@ class AudioValidationError(Exception):
     pass
 
 
-def download_and_wrap_drive_file(service, file_item):
+async def download_and_wrap_drive_file(service, file_item):
     file_id = file_item["id"]
     name = file_item["name"]
 
@@ -54,7 +56,7 @@ def download_and_wrap_drive_file(service, file_item):
 # -------------------------------------------------------------
 # LIST + DOWNLOAD FILES IN FOLDER (OAUTH)
 # -------------------------------------------------------------
-def download_audio_files_from_drive(folder_id: str) -> List[StarletteUploadFile]:
+async def download_audio_files_from_drive(folder_id: str) -> List[StarletteUploadFile]:
     if not folder_id:
         raise AudioValidationError("Google Drive folder ID is required.")
 
@@ -73,18 +75,34 @@ def download_audio_files_from_drive(folder_id: str) -> List[StarletteUploadFile]
 
         all_files = response.get("files", [])
 
-        audio_files = [
+        audio_files_metadata = [
             f for f in all_files
             if f["name"].lower().endswith(AUDIO_EXTENSIONS)
         ]
 
-        if not audio_files:
+        if not audio_files_metadata:
             raise AudioValidationError("No audio files found in folder.")
 
         wrapped_files = []
-        for item in audio_files:
-            # synchronous call now
-            wrapped_files.append(download_and_wrap_drive_file(service, item))
+        skipped_count = 0
+        
+        for item in audio_files_metadata:
+            file_id = item["id"] # Get the Google Drive File ID
+            
+            #  Check if the file is already processed
+            if await is_drive_file_already_processed(file_id):
+                audio_logger.info(f"Skipping already processed file: {item['name']}") # Use your logger
+                skipped_count += 1
+                continue
+
+            # synchronous call now (but make the parent function async)
+            wrapped_file = await download_and_wrap_drive_file(service, item)
+            #  Attach the file_id to the UploadFile object for later use
+            setattr(wrapped_file, "gdrive_file_id", file_id) 
+            wrapped_files.append(wrapped_file)
+            
+        if not wrapped_files and skipped_count > 0:
+            raise AudioValidationError(f"All {skipped_count} files in the folder have already been processed.")
 
         return wrapped_files
 
@@ -92,3 +110,14 @@ def download_audio_files_from_drive(folder_id: str) -> List[StarletteUploadFile]
         if isinstance(e, AudioValidationError):
             raise
         raise AudioValidationError(f"Google Drive API Error: {e}") from e
+    
+
+async def is_drive_file_already_processed(gdrive_file_id: str) -> bool:
+    """Check if an AudioFile document already exists for the given GDrive File ID."""
+    if not gdrive_file_id:
+        return False
+    from advanced_omi_backend.models.audio_file import AudioFile     
+    existing_file = await AudioFile.find_one(
+        AudioFile.gdrive_file_id == gdrive_file_id
+    )
+    return existing_file is not None
