@@ -9,23 +9,22 @@
 #   Production:    docker compose -f docker-compose.yml -f compose/overrides/prod.yml up
 #
 # Structure:
-#   compose/infrastructure.yml    - Core services (mongo, redis, qdrant)
 #   compose/backend.yml           - Backend API and workers
 #   compose/frontend.yml          - Web UI
-#   compose/mycelia.yml           - Mycelia services (--profile mycelia)
-#   compose/optional-services.yml - Caddy, Ollama, etc.
 #   compose/overrides/            - Environment-specific overrides
 
 include:
-  # Core infrastructure (always included)
-  - compose/infrastructure.yml
-
   # Application services (always included)
   - compose/backend.yml
   - compose/frontend.yml
 
-  # Optional services (profile-based)
-  - compose/optional-services.yml
+  # Note: Infrastructure (MongoDB, Redis, Qdrant) is SHARED across all environments
+  # Start infrastructure once with: docker compose -f ../../compose/infrastructure-shared.yml up -d
+  # Each environment connects to shared infrastructure using unique database names
+
+  # Note: Caddy is SHARED across all environments
+  # Start Caddy once with: docker compose -f ../../compose/caddy.yml up -d
+  # Caddy serves all environments via path-based routing
 
   # Note: Mycelia moved to root level (../../compose/mycelia.yml)
   # To use Mycelia, run from project root: docker compose --profile mycelia up

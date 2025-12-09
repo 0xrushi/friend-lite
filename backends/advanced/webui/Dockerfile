@@ -17,8 +17,11 @@ COPY . .
 ARG VITE_ALLOWED_HOSTS
 ENV VITE_ALLOWED_HOSTS=${VITE_ALLOWED_HOSTS}
 
-ARG VITE_BACKEND_URL
-ENV VITE_BACKEND_URL=${VITE_BACKEND_URL}
+ARG VITE_BASE_PATH
+ENV VITE_BASE_PATH=${VITE_BASE_PATH:-/}
+
+# Debug: Print BASE_PATH value (forces cache invalidation when changed)
+RUN echo "Building with VITE_BASE_PATH=${VITE_BASE_PATH}"
 
 # Build the application
 RUN npm run build
