@@ -260,7 +260,18 @@ async def audio_streaming_persistence_job(
     max_empty_reads = 3  # Exit after 3 consecutive empty reads (deterministic check)
     conversation_count = 0
 
+    # Get current job for zombie detection
+    from rq import get_current_job
+    from advanced_omi_backend.utils.job_utils import check_job_alive
+    current_job = get_current_job()
+
     while True:
+        # Check if job still exists in Redis (detect zombie state)
+        if not await check_job_alive(redis_client, current_job):
+            if file_sink:
+                await file_sink.close()
+            break
+
         # Check timeout
         if time.time() - start_time > max_runtime:
             logger.warning(f"⏱️ Timeout reached for audio persistence {session_id}")

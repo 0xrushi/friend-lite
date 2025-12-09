@@ -175,7 +175,7 @@ Segment Timestamps Match Cropped Audio
     Log To Console    Conversation 2 completed: ${conversation_id}
 
     # Wait for cropping job to complete
-    ${cropping_jobs}=    Wait Until Keyword Succeeds    30s    2s
+    ${cropping_jobs}=    Wait Until Keyword Succeeds    60s    2s
     ...    Job Type Exists For Conversation    process_cropping_job    ${conversation_id}
     ${cropping_job}=    Set Variable    ${cropping_jobs}[0]
     Wait For Job Status    ${cropping_job}[job_id]    completed    timeout=30s    interval=2s

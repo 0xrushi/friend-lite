@@ -1,0 +1,62 @@
+# Backend Services
+# Friend-Lite backend API and workers
+
+services:
+  friend-backend:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    env_file:
+      - ../.env
+    volumes:
+      - ../src:/app/src
+      - ../data/audio_chunks:/app/audio_chunks
+      - ../data/debug_dir:/app/debug_dir
+      - ../data:/app/data
+    environment:
+      # Service URLs (Docker internal network)
+      # Use REDIS_DATABASE (derived from PORT_OFFSET) for environment isolation
+      - REDIS_URL=redis://chronicle-redis:6379/${REDIS_DATABASE:-0}
+      - MYCELIA_URL=${MYCELIA_URL:-http://mycelia-backend:5173}
+      # Complex defaults
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:5173,http://localhost:3010,http://localhost:3015,http://localhost:3020,http://localhost:8000}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/readiness"]
+      interval: 30s
+      timeout: 30s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+    networks:
+      - chronicle-network
+
+  # Unified Worker Container
+  # Runs all workers in a single container:
+  # - 3 RQ workers (transcription, memory, default queues)
+  # - 1 Audio stream worker (Redis Streams consumer - must be single instance)
+  workers:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    command: ["./start-workers.sh"]
+    env_file:
+      - ../.env
+    volumes:
+      - ../src:/app/src
+      - ../start-workers.sh:/app/start-workers.sh
+      - ../data/audio_chunks:/app/audio_chunks
+      - ../data:/app/data
+    environment:
+      # Service URLs (Docker internal network)
+      # Use REDIS_DATABASE (derived from PORT_OFFSET) for environment isolation
+      - REDIS_URL=redis://chronicle-redis:6379/${REDIS_DATABASE:-0}
+    restart: unless-stopped
+    networks:
+      - chronicle-network
+
+networks:
+  chronicle-network:
+    name: chronicle-network
+    external: true

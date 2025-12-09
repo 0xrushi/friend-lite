@@ -1,0 +1,40 @@
+# Friend-Lite Root Docker Compose
+# Unified entry point for all Friend-Lite services
+#
+# Usage:
+#   Basic:                docker compose up
+#   With Mycelia:         docker compose --profile mycelia up
+#   With ASR:             docker compose --profile asr up
+#   With Speaker ID:      docker compose --profile speaker up
+#   With OpenMemory:      docker compose --profile openmemory up
+#   With Observability:   docker compose --profile observability up
+#   All services:         docker compose --profile all up
+#
+#   Multiple profiles:    docker compose --profile mycelia --profile speaker up
+#
+# Environment-specific:
+#   Development:  docker compose up (default)
+#   Testing:      docker compose -f docker-compose.yml -f backends/advanced/compose/overrides/test.yml up
+#   Production:   docker compose -f docker-compose.yml -f backends/advanced/compose/overrides/prod.yml up
+
+include:
+  # Core backend (always included)
+  # This includes: friend-backend, workers, webui
+  - path: backends/advanced/docker-compose.yml
+    env_file: backends/advanced/.env
+
+  # Optional services (profile-based)
+  - compose/mycelia.yml             # --profile mycelia
+  - compose/asr-services.yml        # --profile asr
+  - compose/speaker-recognition.yml # --profile speaker
+  - compose/openmemory.yml          # --profile openmemory
+  - compose/observability.yml       # --profile observability
+
+# Shared network for all services
+# Must be created before first run: docker network create chronicle-network
+networks:
+  chronicle-network:
+    name: chronicle-network
+    external: true
+
+# Note: Individual service volumes are defined in their respective compose files

@@ -1,0 +1,22 @@
+# Docker Compose override for development
+# This file is automatically applied when running `docker compose up`
+# It provides hot reload for the webui service
+
+# services:
+#   webui:
+#     build:
+#       context: ./webui
+#       dockerfile: Dockerfile.dev
+#     ports:
+#       - "300:5173"  # Map to Vite dev server port
+#     volumes:
+#       # Mount source code for hot reload
+#       - ./webui/src:/app/src:ro
+#       - ./webui/public:/app/public:ro
+#       - ./webui/index.html:/app/index.html:ro
+#       - ./webui/vite.config.ts:/app/vite.config.ts:ro
+#       - ./webui/tsconfig.json:/app/tsconfig.json:ro
+#       - ./webui/tsconfig.node.json:/app/tsconfig.node.json:ro
+#     command: npm run dev -- --host 0.0.0.0
+#     environment:
+#       - NODE_ENV=development

@@ -193,6 +193,75 @@ async def transcribe_full_audio_job(
 
     logger.info(f"📊 Transcription complete: {len(transcript_text)} chars, {len(segments)} segments, {len(words)} words")
 
+    # Validate meaningful speech BEFORE any further processing
+    from advanced_omi_backend.utils.conversation_utils import analyze_speech, mark_conversation_deleted
+
+    transcript_data = {"text": transcript_text, "words": words}
+    speech_analysis = analyze_speech(transcript_data)
+
+    if not speech_analysis.get("has_speech", False):
+        logger.warning(
+            f"⚠️ Transcription found no meaningful speech for conversation {conversation_id}: "
+            f"{speech_analysis.get('reason', 'unknown')}"
+        )
+
+        # Mark conversation as deleted
+        await mark_conversation_deleted(
+            conversation_id=conversation_id,
+            deletion_reason="no_meaningful_speech_batch_transcription"
+        )
+
+        # Cancel all dependent jobs (cropping, speaker recognition, memory, title/summary)
+        from rq import get_current_job
+        from rq.job import Job
+
+        current_job = get_current_job()
+        if current_job:
+            # Get all jobs that depend on this transcription job
+            from advanced_omi_backend.controllers.queue_controller import redis_conn
+
+            # Find dependent jobs by searching for jobs with this job as dependency
+            try:
+                # Cancel jobs based on conversation_id pattern
+                job_patterns = [
+                    f"crop_{conversation_id[:12]}",
+                    f"speaker_{conversation_id[:12]}",
+                    f"memory_{conversation_id[:12]}",
+                    f"title_summary_{conversation_id[:12]}"
+                ]
+
+                cancelled_jobs = []
+                for job_id in job_patterns:
+                    try:
+                        dependent_job = Job.fetch(job_id, connection=redis_conn)
+                        if dependent_job and dependent_job.get_status() in ['queued', 'deferred', 'scheduled']:
+                            dependent_job.cancel()
+                            cancelled_jobs.append(job_id)
+                            logger.info(f"✅ Cancelled dependent job: {job_id}")
+                    except Exception as e:
+                        logger.debug(f"Job {job_id} not found or already completed: {e}")
+
+                if cancelled_jobs:
+                    logger.info(f"🚫 Cancelled {len(cancelled_jobs)} dependent jobs due to no meaningful speech")
+            except Exception as cancel_error:
+                logger.warning(f"Failed to cancel some dependent jobs: {cancel_error}")
+
+        # Return early with failure status
+        return {
+            "success": False,
+            "conversation_id": conversation_id,
+            "error": "no_meaningful_speech",
+            "reason": speech_analysis.get("reason"),
+            "word_count": speech_analysis.get("word_count", 0),
+            "duration": speech_analysis.get("duration", 0.0),
+            "deleted": True
+        }
+
+    logger.info(
+        f"✅ Meaningful speech validated: {speech_analysis.get('word_count')} words, "
+        f"{speech_analysis.get('duration', 0):.1f}s"
+    )
+
     # Calculate processing time (transcription only)
     processing_time = time.time() - start_time
 
@@ -430,6 +499,11 @@ async def stream_speech_detection_job(
 
     # Main loop: Listen for speech
     while True:
+        # Check if job still exists in Redis (detect zombie state)
+        from advanced_omi_backend.utils.job_utils import check_job_alive
+        if not await check_job_alive(redis_client, current_job):
+            break
+
         # Exit conditions
         session_status = await redis_client.hget(session_key, "status")
         if session_status and session_status.decode() in ["complete", "closed"]:

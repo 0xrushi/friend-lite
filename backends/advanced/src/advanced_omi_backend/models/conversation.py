@@ -30,6 +30,7 @@ class Conversation(Document):
         """Supported memory providers."""
         FRIEND_LITE = "friend_lite"
         OPENMEMORY_MCP = "openmemory_mcp"
+        MYCELIA = "mycelia"
 
     class ConversationStatus(str, Enum):
         """Conversation processing status."""

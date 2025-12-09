@@ -281,6 +281,11 @@ async def open_conversation_job(
         logger.info("🧪 Test mode: Waiting for audio queue to drain before timeout")
 
     while True:
+        # Check if job still exists in Redis (detect zombie state)
+        from advanced_omi_backend.utils.job_utils import check_job_alive
+        if not await check_job_alive(redis_client, current_job):
+            break
+
         # Check if session is finalizing (set by producer when recording stops)
         if not finalize_received:
             status = await redis_client.hget(session_key, "status")

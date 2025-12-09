@@ -98,6 +98,41 @@ def get_jwt_strategy() -> JWTStrategy:
     )  # 24 hours for device compatibility
 
 
+def generate_jwt_for_user(user_id: str, user_email: str) -> str:
+    """Generate a JWT token for a user to authenticate with external services.
+
+    This function creates a JWT token that can be used to authenticate with
+    services that share the same AUTH_SECRET_KEY, such as Mycelia.
+
+    Args:
+        user_id: User's unique identifier (MongoDB ObjectId as string)
+        user_email: User's email address
+
+    Returns:
+        JWT token string valid for 24 hours
+
+    Example:
+        >>> token = generate_jwt_for_user("507f1f77bcf86cd799439011", "user@example.com")
+        >>> # Use token to call Mycelia API
+    """
+    from datetime import datetime, timedelta
+    import jwt
+
+    # Create JWT payload matching Friend-Lite's standard format
+    payload = {
+        "sub": user_id,  # Subject = user ID
+        "email": user_email,
+        "iss": "friend-lite",  # Issuer
+        "aud": "friend-lite",  # Audience
+        "exp": datetime.utcnow() + timedelta(hours=24),  # 24 hour expiration
+        "iat": datetime.utcnow(),  # Issued at
+    }
+
+    # Sign the token with the same secret key
+    token = jwt.encode(payload, SECRET_KEY, algorithm="HS256")
+    return token
+
+
 # Authentication backends
 cookie_backend = AuthenticationBackend(
     name="cookie",

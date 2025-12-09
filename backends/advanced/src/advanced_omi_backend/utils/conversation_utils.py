@@ -52,8 +52,9 @@ def analyze_speech(transcript_data: dict) -> dict:
     Analyze transcript for meaningful speech to determine if conversation should be created.
 
     Uses configurable thresholds from environment:
-    - SPEECH_DETECTION_MIN_WORDS (default: 5)
-    - SPEECH_DETECTION_MIN_CONFIDENCE (default: 0.5)
+    - SPEECH_DETECTION_MIN_WORDS (default: 10)
+    - SPEECH_DETECTION_MIN_CONFIDENCE (default: 0.7)
+    - SPEECH_DETECTION_MIN_DURATION (default: 10.0)
 
     Args:
         transcript_data: Dictionary with:
@@ -98,6 +99,16 @@ def analyze_speech(transcript_data: dict) -> dict:
             speech_start = valid_words[0].get("start", 0)
             speech_end = valid_words[-1].get("end", 0)
             speech_duration = speech_end - speech_start
+
+            # Check minimum duration threshold
+            min_duration = settings.get("min_duration", 10.0)
+            if speech_duration < min_duration:
+                return {
+                    "has_speech": False,
+                    "reason": f"Speech too short ({speech_duration:.1f}s < {min_duration}s)",
+                    "word_count": len(valid_words),
+                    "duration": speech_duration,
+                }
 
             return {
                 "has_speech": True,

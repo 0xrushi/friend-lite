@@ -46,7 +46,7 @@ async def process_memory_job(
         Dict with processing results
     """
     from advanced_omi_backend.models.conversation import Conversation
-    from advanced_omi_backend.memory import get_memory_service
+    from advanced_omi_backend.services.memory import get_memory_service
     from advanced_omi_backend.users import get_user_by_id
 
     start_time = time.time()
@@ -142,7 +142,7 @@ async def process_memory_job(
                 # Determine memory provider from memory service
                 memory_provider = conversation_model.MemoryProvider.FRIEND_LITE  # Default
                 try:
-                    from advanced_omi_backend.memory import get_memory_service
+                    from advanced_omi_backend.services.memory import get_memory_service
                     memory_service_obj = get_memory_service()
                     provider_name = memory_service_obj.__class__.__name__
                     if "OpenMemory" in provider_name:
@@ -180,9 +180,11 @@ async def process_memory_job(
                     for memory_id in created_memory_ids[:5]:  # Limit to first 5 for display
                         memory_entry = await memory_service.get_memory(memory_id, user_id)
                         if memory_entry:
+                            # memory_entry is a MemoryEntry object, not a dict
+                            memory_text = memory_entry.content if hasattr(memory_entry, 'content') else str(memory_entry)
                             memory_details.append({
                                 "memory_id": memory_id,
-                                "text": memory_entry.get("text", "")[:200]  # First 200 chars
+                                "text": memory_text[:200]  # First 200 chars
                             })
                 except Exception as e:
                     logger.warning(f"Failed to fetch memory details for UI: {e}")

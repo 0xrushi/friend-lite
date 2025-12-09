@@ -7,7 +7,8 @@ Handles memory CRUD operations, search, and debug functionality.
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Body
+from pydantic import BaseModel
 
 from advanced_omi_backend.auth import current_active_user, current_superuser
 from advanced_omi_backend.controllers import memory_controller
@@ -16,6 +17,12 @@ from advanced_omi_backend.users import User
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/memories", tags=["memories"])
+
+
+class AddMemoryRequest(BaseModel):
+    """Request model for adding a memory."""
+    content: str
+    source_id: Optional[str] = None
 
 
 @router.get("")
@@ -48,6 +55,15 @@ async def search_memories(
 ):
     """Search memories by text query with configurable similarity threshold. Users can only search their own memories, admins can search all or filter by user."""
     return await memory_controller.search_memories(query, current_user, limit, score_threshold, user_id)
+
+
+@router.post("")
+async def add_memory(
+    request: AddMemoryRequest,
+    current_user: User = Depends(current_active_user)
+):
+    """Add a memory directly from content text. The service will extract structured memories from the provided content."""
+    return await memory_controller.add_memory(request.content, current_user, request.source_id)
 
 
 @router.delete("/{memory_id}")

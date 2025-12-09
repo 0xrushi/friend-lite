@@ -16,7 +16,7 @@ from advanced_omi_backend.auth import (
 )
 from advanced_omi_backend.client_manager import get_user_clients_all
 from advanced_omi_backend.database import db, users_col
-from advanced_omi_backend.memory import get_memory_service
+from advanced_omi_backend.services.memory import get_memory_service
 from advanced_omi_backend.models.conversation import Conversation
 from advanced_omi_backend.users import User, UserCreate, UserUpdate
 

@@ -1,0 +1,5 @@
+# Development Environment Overrides
+# This file is intentionally minimal - dev settings are in base compose files
+# Only add overrides here if they conflict with base or test environments
+
+services: {}

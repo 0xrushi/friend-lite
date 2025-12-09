@@ -126,3 +126,20 @@ async def cleanup_stuck_stream_workers(request: Request, current_user: User = De
 async def cleanup_old_sessions(request: Request, max_age_seconds: int = 3600, current_user: User = Depends(current_superuser)):
     """Clean up old session tracking metadata. Admin only."""
     return await session_controller.cleanup_old_sessions(request, max_age_seconds)
+
+
+# Memory Provider Configuration Endpoints
+
+@router.get("/admin/memory/provider")
+async def get_memory_provider(current_user: User = Depends(current_superuser)):
+    """Get current memory provider configuration. Admin only."""
+    return await system_controller.get_memory_provider()
+
+
+@router.post("/admin/memory/provider")
+async def set_memory_provider(
+    provider: str = Body(..., embed=True),
+    current_user: User = Depends(current_superuser)
+):
+    """Set memory provider and restart backend services. Admin only."""
+    return await system_controller.set_memory_provider(provider)
