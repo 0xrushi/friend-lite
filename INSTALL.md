@@ -6,7 +6,7 @@ Choose your operating system to get started with Chronicle:
 
 **Complete step-by-step guide for Windows users (including WSL2 setup)**
 
-👉 **[Windows Setup Guide](WINDOWS-SETUP.md)**
+👉 **[Windows Setup Guide](Docs/setup/windows-wsl2.md)**
 
 - Fresh Windows install instructions
 - Automated dependency installation
@@ -224,9 +224,10 @@ Make sure Docker Desktop has WSL2 integration enabled:
 ## Advanced: Manual Dependency Installation
 
 If you prefer not to use the automated script, see:
-- **Windows**: [WINDOWS-SETUP.md](WINDOWS-SETUP.md) - Step-by-step manual instructions
-- **Linux**: [Docker Install Docs](https://docs.docker.com/engine/install/)
-- **macOS**: [Docker Desktop for Mac](https://docs.docker.com/desktop/install/mac-install/)
+- **Windows**: [Docs/setup/windows-wsl2.md](Docs/setup/windows-wsl2.md) - Step-by-step manual instructions
+- **Windows (Git Bash)**: [Docs/setup/windows-gitbash.md](Docs/setup/windows-gitbash.md) - Alternative setup
+- **Linux**: [Docs/setup/linux.md](Docs/setup/linux.md) - Linux manual setup
+- **macOS**: [Docs/setup/macos.md](Docs/setup/macos.md) - macOS manual setup
 
 ---
 

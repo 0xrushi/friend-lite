@@ -1,6 +1,6 @@
 # Multi-Environment Management
 
-Friend-Lite supports running multiple environments simultaneously with isolated databases and different ports. This is perfect for:
+Chronicle supports running multiple environments simultaneously with isolated databases and different ports. This is perfect for:
 - **Git worktrees** - Work on multiple branches simultaneously
 - **Feature development** - Isolated testing environments
 - **Parallel testing** - Run tests while developing
@@ -217,7 +217,7 @@ make env-clean ENV=quick-test
 
 ## Configuration Layers
 
-Friend-Lite uses a layered configuration system for **Docker Compose** deployments:
+Chronicle uses a layered configuration system for **Docker Compose** deployments:
 
 ### 1. `docker-defaults.env` - System Constants
 Infrastructure URLs and defaults (rarely changed):

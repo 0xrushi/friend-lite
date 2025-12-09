@@ -38,11 +38,20 @@ Welcome to friend-lite! This guide provides the optimal reading sequence to unde
 - How conversations become memories
 - Mem0 integration and vector storage
 - Configuration and customization options
-- **Code References**: 
+- **Code References**:
   - `src/advanced_omi_backend/memory/memory_service.py` (main processing)
   - `src/advanced_omi_backend/transcript_coordinator.py` (event coordination)
   - `src/advanced_omi_backend/conversation_repository.py` (data access)
   - `src/advanced_omi_backend/conversation_manager.py` (lifecycle management)
+
+### 3b. **[Mycelia Setup Guide](./mycelia-setup.md)** 🔗 *MEMORY INTERFACE*
+**Complete guide for setting up Mycelia memory interface**
+- What is Mycelia and when to use it
+- Auto-login setup (recommended for web UI)
+- OAuth credentials for API access
+- Getting Client ID and token for frontend
+- Troubleshooting authentication issues
+- **Perfect for**: Users wanting advanced memory visualization and API access
 
 ### 4. **[Authentication System](./auth.md)**
 **User management and security**
@@ -104,6 +113,12 @@ Welcome to friend-lite! This guide provides the optimal reading sequence to unde
 2. `src/advanced_omi_backend/auth.py` - Authentication implementation
 3. `src/advanced_omi_backend/users.py` - User management
 4. `src/advanced_omi_backend/routers/api_router.py` - Auth router setup
+
+### **"I want to set up Mycelia memory interface"**
+1. [mycelia-setup.md](./mycelia-setup.md) - Complete setup guide
+2. Set `MEMORY_PROVIDER=mycelia` in `.env`
+3. Run `docker compose --profile mycelia up --build -d`
+4. Check logs for OAuth credentials: `docker compose logs friend-backend | grep -A 10 "MYCELIA OAUTH"`
 
 ---
 
