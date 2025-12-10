@@ -5,6 +5,8 @@ import logging
 from starlette.datastructures import UploadFile as StarletteUploadFile
 from googleapiclient.http import MediaIoBaseDownload
 from advanced_omi_backend.app_config import get_app_config
+from advanced_omi_backend.clients.gdrive_audio_client import get_google_drive_client
+
 
 logger = logging.getLogger(__name__)
 audio_logger = logging.getLogger("audio_processing")
@@ -60,7 +62,7 @@ async def download_audio_files_from_drive(folder_id: str) -> List[StarletteUploa
     if not folder_id:
         raise AudioValidationError("Google Drive folder ID is required.")
 
-    service = get_app_config().get_gdrive_service()
+    service = get_google_drive_client()
 
     try:
         escaped_folder_id = folder_id.replace("\\", "\\\\").replace("'", "\\'")

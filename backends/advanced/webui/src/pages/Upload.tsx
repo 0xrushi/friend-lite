@@ -15,85 +15,80 @@ export default function Upload() {
   const [isUploading, setIsUploading] = useState(false)
   const [dragActive, setDragActive] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
-  const [audioUrl, setAudioUrl] = useState('')
+  const [gdriveFolderId, setGdriveFolderId] = useState('')
 
   const { isAdmin } = useAuth()
 
   const generateId = () => Math.random().toString(36).substr(2, 9)
 
-  const [urlUploadStatus, setUrlUploadStatus] = useState<{
-  type: 'success' | 'error' | null
-  message: string
-}>({ type: null, message: '' })
+  const [gdriveUploadStatus, setGdriveUploadStatus] = useState<{
+    type: 'success' | 'error' | null
+    message: string
+  }>({
+    type: null,
+    message: ''
+  })
 
+  // Handle Google Drive folder submission
+  const handleGDriveSubmit = async () => {
+    if (!gdriveFolderId) return
 
-  // Handle URL submission
-  const handleUrlSubmit = async () => {
-  if (!audioUrl) return
+    setIsUploading(true)
+    setGdriveUploadStatus({ type: null, message: '' })
 
-  setIsUploading(true)
-  setUrlUploadStatus({ type: null, message: '' })
+    try {
+      await uploadApi.uploadFromGDriveFolder({
+        gdrive_folder_id: gdriveFolderId,
+        device_name: 'upload',
+        auto_generate_client: true,
+      })
 
-  try {
-    const response = await uploadApi.uploadAudioFromUrl({
-      drive_folder_id: audioUrl,
-      device_name: 'upload',
-      auto_generate_client: true,
-    })
+      setGdriveUploadStatus({
+        type: 'success',
+        message: 'Google Drive folder submitted successfully.',
+      })
 
-    console.log('URL Upload response:', response)
-
-    setUrlUploadStatus({
-      type: 'success',
-      message: `Audio submitted successfully`,
-    })
-
-    setAudioUrl('')
-  } catch (err: any) {
-    console.error('URL upload failed:', err)
-
-    setUrlUploadStatus({
-      type: 'error',
-      message:
-        err?.response?.data?.detail || 'Failed to upload audio from URL',
-    })
-  } finally {
-    setIsUploading(false)
+      setGdriveFolderId('')
+    } catch (err: any) {
+      setGdriveUploadStatus({
+        type: 'error',
+        message: err?.response?.data?.detail || 'Failed to upload folder.',
+      })
+    } finally {
+      setIsUploading(false)
+    }
   }
-}
 
   const handleFileSelect = (selectedFiles: FileList | null) => {
     if (!selectedFiles) return
 
-    const audioFiles = Array.from(selectedFiles).filter(file => 
-      file.type.startsWith('audio/') || 
-      file.name.toLowerCase().endsWith('.wav') ||
-      file.name.toLowerCase().endsWith('.mp3') ||
-      file.name.toLowerCase().endsWith('.m4a') ||
-      file.name.toLowerCase().endsWith('.flac')
+    const audioFiles = Array.from(selectedFiles).filter(
+      (file) =>
+        file.type.startsWith('audio/') ||
+        file.name.toLowerCase().endsWith('.wav') ||
+        file.name.toLowerCase().endsWith('.mp3') ||
+        file.name.toLowerCase().endsWith('.m4a') ||
+        file.name.toLowerCase().endsWith('.flac')
     )
 
-    const newFiles: UploadFile[] = audioFiles.map(file => ({
+    const newFiles: UploadFile[] = audioFiles.map((file) => ({
       file,
       id: generateId(),
-      status: 'pending'
+      status: 'pending',
     }))
 
-    setFiles(prevFiles => [...prevFiles, ...newFiles])
+    setFiles((prev) => [...prev, ...newFiles])
   }
 
   const removeFile = (id: string) => {
-    setFiles(files.filter(f => f.id !== id))
+    setFiles(files.filter((f) => f.id !== id))
   }
 
   const handleDrag = useCallback((e: React.DragEvent) => {
     e.preventDefault()
     e.stopPropagation()
-    if (e.type === 'dragenter' || e.type === 'dragover') {
-      setDragActive(true)
-    } else if (e.type === 'dragleave') {
-      setDragActive(false)
-    }
+    if (e.type === 'dragenter' || e.type === 'dragover') setDragActive(true)
+    else if (e.type === 'dragleave') setDragActive(false)
   }, [])
 
   const handleDrop = useCallback((e: React.DragEvent) => {
@@ -115,29 +110,25 @@ export default function Upload() {
         formData.append('files', file)
       })
 
-      // Update all files to uploading status
-      setFiles(prevFiles => 
-        prevFiles.map(f => ({ ...f, status: 'uploading' as const }))
+      setFiles((prev) =>
+        prev.map((f) => ({ ...f, status: 'uploading' }))
       )
 
       await uploadApi.uploadAudioFiles(formData, (progress) => {
         setUploadProgress(progress)
       })
-      
-      // Mark all files as successful
-      setFiles(prevFiles => 
-        prevFiles.map(f => ({ ...f, status: 'success' as const }))
-      )
 
-    } catch (error: any) {
-      console.error('Upload failed:', error)
-      
-      // Mark all files as failed
-      setFiles(prevFiles => 
-        prevFiles.map(f => ({ 
-          ...f, 
-          status: 'error' as const, 
-          error: error.message || 'Upload failed' 
+      setFiles((prev) =>
+        prev.map((f) => ({ ...f, status: 'success' }))
+      )
+    } catch (err: any) {
+      console.error('Upload failed:', err)
+
+      setFiles((prev) =>
+        prev.map((f) => ({
+          ...f,
+          status: 'error',
+          error: err.message || 'Upload failed',
         }))
       )
     } finally {
@@ -147,7 +138,7 @@ export default function Upload() {
   }
 
   const clearCompleted = () => {
-    setFiles(files.filter(f => f.status === 'pending' || f.status === 'uploading'))
+    setFiles(files.filter((f) => f.status === 'pending' || f.status === 'uploading'))
   }
 
   const formatFileSize = (bytes: number) => {
@@ -155,7 +146,7 @@ export default function Upload() {
     const k = 1024
     const sizes = ['Bytes', 'KB', 'MB', 'GB']
     const i = Math.floor(Math.log(bytes) / Math.log(k))
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
+    return `${(bytes / Math.pow(k, i)).toFixed(2)} ${sizes[i]}`
   }
 
   const getStatusIcon = (status: UploadFile['status']) => {
@@ -194,44 +185,43 @@ export default function Upload() {
           Upload Audio Files
         </h1>
       </div>
-      {/* URL Input */}
+
+      {/* Google Drive Folder Upload */}
       <div className="mb-6 p-4 bg-gray-50 dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600">
-  <label className="block mb-2 font-medium text-gray-900 dark:text-gray-100">
-    Paste audio URL:
-  </label>
+        <label className="block mb-2 font-medium text-gray-900 dark:text-gray-100">
+          Paste Google Drive Folder ID:
+        </label>
 
-  <div className="flex space-x-2">
-    <input
-      type="text"
-      value={audioUrl}
-      onChange={(e) => setAudioUrl(e.target.value)}
-      placeholder="https://example.com/audio.wav"
-      className="flex-1 px-3 py-2 border rounded-lg dark:bg-gray-800 dark:text-gray-100"
-    />
+        <div className="flex space-x-2">
+          <input
+            type="text"
+            value={gdriveFolderId}
+            onChange={(e) => setGdriveFolderId(e.target.value)}
+            placeholder="1AbCdEfGhIjKlMnOpQrStUvWxYz123456"
+            className="flex-1 px-3 py-2 border rounded-lg dark:bg-gray-800 dark:text-gray-100"
+          />
 
-    <button
-      onClick={handleUrlSubmit}
-      disabled={isUploading || !audioUrl}
-      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-    >
-      {isUploading ? 'Submitting...' : 'Submit URL'}
-    </button>
-  </div>
+          <button
+            onClick={handleGDriveSubmit}
+            disabled={isUploading || !gdriveFolderId}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+          >
+            {isUploading ? 'Submitting...' : 'Submit Folder'}
+          </button>
+        </div>
 
-  {/* ✅ Add the status message here */}
-  {urlUploadStatus.type && (
-    <div
-      className={`mt-3 p-3 rounded-lg text-sm ${
-        urlUploadStatus.type === 'success'
-          ? 'bg-green-100 text-green-800 border border-green-300'
-          : 'bg-red-100 text-red-800 border border-red-300'
-      }`}
-    >
-      {urlUploadStatus.message}
-    </div>
-  )}
-</div>
-
+        {gdriveUploadStatus.type && (
+          <div
+            className={`mt-3 p-3 rounded-lg text-sm ${
+              gdriveUploadStatus.type === 'success'
+                ? 'bg-green-100 text-green-800 border border-green-300'
+                : 'bg-red-100 text-red-800 border border-red-300'
+            }`}
+          >
+            {gdriveUploadStatus.message}
+          </div>
+        )}
+      </div>
 
       {/* Drop Zone */}
       <div
@@ -252,7 +242,7 @@ export default function Upload() {
         <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
           Supported formats: WAV, MP3, M4A, FLAC
         </p>
-        
+
         <input
           type="file"
           multiple
@@ -260,10 +250,10 @@ export default function Upload() {
           onChange={(e) => handleFileSelect(e.target.files)}
           className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
         />
-        
+
         <button
           onClick={() => (document.querySelector('input[type="file"]') as HTMLInputElement)?.click()}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
         >
           Select Files
         </button>
@@ -279,14 +269,14 @@ export default function Upload() {
             <div className="flex space-x-2">
               <button
                 onClick={clearCompleted}
-                className="px-3 py-1 text-sm bg-gray-600 text-white rounded hover:bg-gray-700 transition-colors"
+                className="px-3 py-1 text-sm bg-gray-600 text-white rounded hover:bg-gray-700"
               >
                 Clear Completed
               </button>
               <button
                 onClick={uploadFiles}
-                disabled={isUploading || files.every(f => f.status !== 'pending')}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled={isUploading || files.every((f) => f.status !== 'pending')}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
               >
                 {isUploading ? 'Uploading...' : 'Upload All'}
               </button>
@@ -317,19 +307,24 @@ export default function Upload() {
                 </div>
 
                 <div className="flex items-center space-x-2">
-                  <span className={`text-sm font-medium ${
-                    uploadFile.status === 'success' ? 'text-green-600' :
-                    uploadFile.status === 'error' ? 'text-red-600' :
-                    uploadFile.status === 'uploading' ? 'text-blue-600' :
-                    'text-gray-600 dark:text-gray-400'
-                  }`}>
+                  <span
+                    className={`text-sm font-medium ${
+                      uploadFile.status === 'success'
+                        ? 'text-green-600'
+                        : uploadFile.status === 'error'
+                        ? 'text-red-600'
+                        : uploadFile.status === 'uploading'
+                        ? 'text-blue-600'
+                        : 'text-gray-600 dark:text-gray-400'
+                    }`}
+                  >
                     {uploadFile.status.charAt(0).toUpperCase() + uploadFile.status.slice(1)}
                   </span>
-                  
+
                   {uploadFile.status === 'pending' && (
                     <button
                       onClick={() => removeFile(uploadFile.id)}
-                      className="p-1 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
+                      className="p-1 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"
                     >
                       <X className="h-4 w-4" />
                     </button>
@@ -371,9 +366,9 @@ export default function Upload() {
         </h3>
         <ul className="text-sm text-yellow-700 dark:text-yellow-300 space-y-1">
           <li>• Audio files will be processed sequentially for transcription and memory extraction</li>
-          <li>• Processing time varies based on audio length (roughly 3x the audio duration + 60s)</li>
-          <li>• Large files or multiple files may cause timeout errors - this is normal</li>
-          <li>• Check the Conversations tab to see processed results</li>
+          <li>• Processing time varies based on audio length (roughly 3× duration + 60s)</li>
+          <li>• Large files or multiple files may cause timeout errors</li>
+          <li>• Check the Conversations tab for processed results</li>
           <li>• Supported formats: WAV, MP3, M4A, FLAC</li>
         </ul>
       </div>
