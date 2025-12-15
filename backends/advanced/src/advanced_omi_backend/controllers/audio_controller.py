@@ -40,6 +40,7 @@ async def upload_and_process_audio_files(
     device_name: str = "upload",
     auto_generate_client: bool = True,
     folder: str = None,
+    source: str = "upload"
 ) -> dict:
     """
     Upload audio files and process them directly.
@@ -81,10 +82,12 @@ async def upload_and_process_audio_files(
                 # Read file content
                 content = await file.read()
 
-                gdrive_file_id = getattr(file, "gdrive_file_id", None)
 
                 # Generate audio UUID and timestamp
-                audio_uuid = str(uuid.uuid4())
+                if source == "gdrive":
+                    audio_uuid = getattr(file, "audio_uuid", None)
+                else: 
+                    audio_uuid = str(uuid.uuid4())
                 timestamp = int(time.time() * 1000)
 
                 # Determine output directory (with optional subfolder)
@@ -100,13 +103,13 @@ async def upload_and_process_audio_files(
                     relative_audio_path, file_path, duration = await write_audio_file(
                         raw_audio_data=content,
                         audio_uuid=audio_uuid,
+                        source=source,
                         client_id=client_id,
                         user_id=user.user_id,
                         user_email=user.email,
                         timestamp=timestamp,
                         chunk_dir=chunk_dir,
                         validate=True,  # Validate WAV format, convert stereo→mono
-                        gdrive_file_id=gdrive_file_id
                     )
                 except AudioValidationError as e:
                     processed_files.append({

@@ -30,7 +30,7 @@ async def upload_audio_from_drive_folder(
         raise HTTPException(status_code=400, detail=str(e))
 
     return await audio_controller.upload_and_process_audio_files(
-        current_user, files, device_name, auto_generate_client
+        current_user, files, device_name, auto_generate_client, source="gdrive"
     )
 
 

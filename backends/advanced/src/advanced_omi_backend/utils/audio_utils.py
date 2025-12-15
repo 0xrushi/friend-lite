@@ -102,13 +102,13 @@ async def validate_and_prepare_audio(
 async def write_audio_file(
     raw_audio_data: bytes,
     audio_uuid: str,
+    source: str,
     client_id: str,
     user_id: str,
     user_email: str,
     timestamp: int,
     chunk_dir: Optional[Path] = None,
     validate: bool = True,
-    gdrive_file_id: Optional[str] = None,
 ) -> tuple[str, str, float]:
     """
     Validate, write audio data to WAV file, and create AudioSession database entry.
@@ -198,6 +198,7 @@ async def write_audio_file(
     # Create AudioFile database entry using Beanie model
     audio_file = AudioFile(
         audio_uuid=audio_uuid,
+        source=source,
         audio_path=wav_filename,
         client_id=client_id,
         timestamp=timestamp,
@@ -205,7 +206,6 @@ async def write_audio_file(
         user_email=user_email,
         has_speech=False,  # Will be updated by transcription
         speech_analysis={}, 
-        gdrive_file_id=gdrive_file_id
     )
     await audio_file.insert()
 

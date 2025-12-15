@@ -90,15 +90,20 @@ async def download_audio_files_from_drive(folder_id: str) -> List[StarletteUploa
             file_id = item["id"] # Get the Google Drive File ID
             
             #  Check if the file is already processed
-            if await is_drive_file_already_processed(file_id):
-                audio_logger.info(f"Skipping already processed file: {item['name']}") # Use your logger
+            existing = await AudioFile.find_one({
+                "audio_uuid": file_id,
+                "source": "gdrive"
+            })
+
+            if existing:
+                audio_logger.info(f"Skipping already processed file: {item['name']}")
                 skipped_count += 1
                 continue
 
             # synchronous call now (but make the parent function async)
             wrapped_file = await download_and_wrap_drive_file(service, item)
             #  Attach the file_id to the UploadFile object for later use
-            wrapped_file.gdrive_file_id = file_id
+            wrapped_file.audio_uuid = file_id
             wrapped_files.append(wrapped_file)
             
         if not wrapped_files and skipped_count > 0:
@@ -112,11 +117,3 @@ async def download_audio_files_from_drive(folder_id: str) -> List[StarletteUploa
         raise AudioValidationError(f"Google Drive API Error: {e}") from e
     
 
-async def is_drive_file_already_processed(gdrive_file_id: str) -> bool:
-    """Check if an AudioFile document already exists for the given GDrive File ID."""
-    if not gdrive_file_id:
-        return False
-    existing_file = await AudioFile.find_one(
-        AudioFile.gdrive_file_id == gdrive_file_id
-    )
-    return existing_file is not None
