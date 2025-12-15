@@ -86,6 +86,9 @@ async def upload_and_process_audio_files(
                 # Generate audio UUID and timestamp
                 if source == "gdrive":
                     audio_uuid = getattr(file, "audio_uuid", None)
+                    if not audio_uuid: 
+                        audio_logger.error(f"Missing audio_uuid for gdrive file: {file.filename}")
+                        audio_uuid = str(uuid.uuid4()) 
                 else: 
                     audio_uuid = str(uuid.uuid4())
                 timestamp = int(time.time() * 1000)
@@ -139,7 +142,7 @@ async def upload_and_process_audio_files(
                 # Use the relative path returned by write_audio_file (already includes folder prefix if applicable)
                 conversation.audio_path = relative_audio_path
                 await conversation.insert()
-                conversation_id = conversation.conversation_id  # Get the auto-gener    ated ID
+                conversation_id = conversation.conversation_id  # Get the auto-generated ID
 
                 audio_logger.info(f"📝 Created conversation {conversation_id} for uploaded file")
 
