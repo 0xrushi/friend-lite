@@ -16,9 +16,32 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator, ConfigDict
 
-
 def _resolve_env(value: Any) -> Any:
-    """Resolve ${VAR:-default} patterns inside strings."""
+    """Resolve ``${VAR:-default}`` patterns inside a single value.
+    
+    This helper is intentionally minimal: it only operates on strings and leaves
+    all other types unchanged. Patterns of the form ``${VAR}`` or
+    ``${VAR:-default}`` are expanded using ``os.getenv``:
+    
+    - If the environment variable **VAR** is set, its value is used.
+    - Otherwise the optional ``default`` is used (or ``\"\"`` if omitted).
+    
+    Examples:
+        >>> os.environ.get("OLLAMA_MODEL")
+        >>> _resolve_env("${OLLAMA_MODEL:-llama3.1:latest}")
+        'llama3.1:latest'
+        
+        >>> os.environ["OLLAMA_MODEL"] = "llama3.2:latest"
+        >>> _resolve_env("${OLLAMA_MODEL:-llama3.1:latest}")
+        'llama3.2:latest'
+        
+        >>> _resolve_env("Bearer ${OPENAI_API_KEY:-}")
+        'Bearer '  # when OPENAI_API_KEY is not set
+    
+    Note:
+        Use :func:`_deep_resolve_env` to apply this logic to an entire
+        nested config structure (dicts/lists) loaded from YAML.
+    """
     if not isinstance(value, str):
         return value
 
@@ -32,7 +55,30 @@ def _resolve_env(value: Any) -> Any:
 
 
 def _deep_resolve_env(data: Any) -> Any:
-    """Recursively resolve environment variables in nested structures."""
+    """Recursively resolve environment variables in nested structures.
+    
+    This walks arbitrary Python structures produced by ``yaml.safe_load`` and
+    applies :func:`_resolve_env` to every string it finds. Dictionaries and
+    lists are traversed deeply; scalars are passed through unchanged.
+    
+    Examples:
+        >>> os.environ["OPENAI_MODEL"] = "gpt-4o-mini"
+        >>> cfg = {
+        ...     "models": [
+        ...         {"model_name": "${OPENAI_MODEL:-gpt-4o-mini}"},
+        ...         {"model_url": "${OPENAI_BASE_URL:-https://api.openai.com/v1}"}
+        ...     ]
+        ... }
+        >>> resolved = _deep_resolve_env(cfg)
+        >>> resolved["models"][0]["model_name"]
+        'gpt-4o-mini'
+        >>> resolved["models"][1]["model_url"]
+        'https://api.openai.com/v1'
+    
+    This is what :func:`load_models_config` uses immediately after loading
+    ``config.yml`` so that all ``${VAR:-default}`` placeholders are resolved
+    before Pydantic validation and model registry construction.
+    """
     if isinstance(data, dict):
         return {k: _deep_resolve_env(v) for k, v in data.items()}
     if isinstance(data, list):
