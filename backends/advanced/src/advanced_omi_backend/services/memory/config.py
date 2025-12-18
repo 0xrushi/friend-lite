@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict
 
+from advanced_omi_backend.model_registry import get_models_registry
+
 memory_logger = logging.getLogger("memory_service")
 
 
@@ -145,7 +147,6 @@ def build_memory_config_from_env() -> MemoryConfig:
     """Build memory configuration from environment variables and YAML config."""
     try:
         # Determine memory provider from registry
-        from advanced_omi_backend.model_registry import get_models_registry
         reg = get_models_registry()
         mem_settings = (reg.memory if reg else {})
         memory_provider = (mem_settings.get("provider") or "chronicle").lower()
@@ -187,11 +188,6 @@ def build_memory_config_from_env() -> MemoryConfig:
             mycelia_config = create_mycelia_config(api_url=api_url, timeout=timeout)
 
             # Use default LLM from registry for temporal extraction
-            try:
-                from advanced_omi_backend.model_registry import get_models_registry
-                reg = get_models_registry()
-            except Exception:
-                reg = None
             llm_config = None
             if reg:
                 llm_def = reg.get_default("llm")
@@ -220,12 +216,10 @@ def build_memory_config_from_env() -> MemoryConfig:
         llm_config = None
         llm_provider_enum = LLMProvider.OPENAI  # OpenAI-compatible API family
         embedding_dims = 1536
-        from advanced_omi_backend.model_registry import get_models_registry
-        registry = get_models_registry()
-        if not registry:
+        if not reg:
             raise ValueError("config.yml not found; cannot configure LLM provider")
-        llm_def = registry.get_default("llm")
-        embed_def = registry.get_default("embedding")
+        llm_def = reg.get_default("llm")
+        embed_def = reg.get_default("embedding")
         if not llm_def:
             raise ValueError("No default LLM defined in config.yml")
         model = llm_def.model_name
@@ -246,11 +240,7 @@ def build_memory_config_from_env() -> MemoryConfig:
         memory_logger.info(f"🔧 Setting Embedder dims {embedding_dims}")
 
         # Build vector store configuration from registry (no env)
-        from advanced_omi_backend.model_registry import get_models_registry
-        registry_vs = get_models_registry()
-        if not registry_vs:
-            raise ValueError("config.yml not found; cannot configure vector store")
-        vs_def = registry_vs.get_default("vector_store")
+        vs_def = reg.get_default("vector_store")
         if not vs_def or (vs_def.model_provider or "").lower() != "qdrant":
             raise ValueError("No default Qdrant vector_store defined in config.yml")
 
@@ -301,15 +291,13 @@ def get_embedding_dims(llm_config: Dict[str, Any]) -> int:
     """
     embedding_model = llm_config.get('embedding_model')
     try:
-        from advanced_omi_backend.model_registry import get_models_registry
         reg = get_models_registry()
         if reg:
             emb_def = reg.get_default("embedding")
             if emb_def and emb_def.embedding_dimensions:
                 return int(emb_def.embedding_dimensions)
-    except Exception:
-        memory_logger.error(
-            f"Failed to get embedding dimensions for model '{embedding_model}': {e}. "
-            "Falling back to default dimensions."
+    except Exception as e:
+        memory_logger.exception(
+            f"Failed to get embedding dimensions from registry for model '{embedding_model}'"
         )
-        raise
+        raise e

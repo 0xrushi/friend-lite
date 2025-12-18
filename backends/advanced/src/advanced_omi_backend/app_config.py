@@ -15,6 +15,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 
 from advanced_omi_backend.constants import OMI_CHANNELS, OMI_SAMPLE_RATE, OMI_SAMPLE_WIDTH
 from advanced_omi_backend.services.transcription import get_transcription_provider
+from advanced_omi_backend.model_registry import get_models_registry
 
 # Load environment variables
 load_dotenv()
@@ -64,11 +65,7 @@ class AppConfig:
         self.qdrant_base_url = os.getenv("QDRANT_BASE_URL", "qdrant")
         self.qdrant_port = os.getenv("QDRANT_PORT", "6333")
         # Memory provider from registry
-        try:
-            from advanced_omi_backend.model_registry import get_models_registry
-            _reg = get_models_registry()
-        except Exception:
-            _reg = None
+        _reg = get_models_registry()
         _mem = _reg.memory if _reg else {}
         self.memory_provider = (_mem.get("provider") or "chronicle").lower()
 

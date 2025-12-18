@@ -349,7 +349,7 @@ async def transcribe_full_audio_job(
         transcript=transcript_text,
         segments=speaker_segments,
         provider=Conversation.TranscriptProvider(provider_normalized),
-        model=provider.name if hasattr(provider, 'name') else (provider.model.name if hasattr(provider, 'model') else "unknown"),
+        model=provider.name,
         processing_time_seconds=processing_time,
         metadata=metadata,
         set_as_active=True,

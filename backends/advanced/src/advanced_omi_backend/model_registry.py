@@ -14,7 +14,8 @@ import yaml
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field, field_validator, model_validator, ConfigDict
+import logging
+from pydantic import BaseModel, Field, field_validator, model_validator, ConfigDict, ValidationError
 
 def _resolve_env(value: Any) -> Any:
     """Resolve ``${VAR:-default}`` patterns inside a single value.
@@ -320,9 +321,8 @@ def load_models_config(force_reload: bool = False) -> Optional[AppModels]:
             # Pydantic will handle validation automatically
             model_def = ModelDef(**m)
             models[model_def.name] = model_def
-        except Exception as e:
+        except ValidationError as e:
             # Log but don't fail the entire registry load
-            import logging
             logging.warning(f"Failed to load model '{m.get('name', 'unknown')}': {e}")
             continue
 
