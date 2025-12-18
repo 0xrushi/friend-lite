@@ -1,5 +1,5 @@
 """
-Health check routes for Friend-Lite backend.
+Health check routes for Chronicle backend.
 
 This module provides health check endpoints for monitoring the application's status.
 """
@@ -18,7 +18,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from advanced_omi_backend.controllers.queue_controller import redis_conn
 from advanced_omi_backend.client_manager import get_client_manager
 from advanced_omi_backend.llm_client import async_health_check
-from advanced_omi_backend.memory import get_memory_service
+from advanced_omi_backend.services.memory import get_memory_service
 from advanced_omi_backend.services.transcription import get_transcription_provider
 
 # Create router
@@ -116,9 +116,15 @@ async def health_check():
 
     overall_healthy = True
     critical_services_healthy = True
-    
+
     # Get configuration once at the start
-    memory_provider = os.getenv("MEMORY_PROVIDER", "friend_lite")
+    memory_provider = os.getenv("MEMORY_PROVIDER", "chronicle").lower()
+
+    # Map legacy provider names to current names
+    if memory_provider in ("friend-lite", "friend_lite"):
+        logger.debug(f"Mapping legacy provider '{memory_provider}' to 'chronicle'")
+        memory_provider = "chronicle"
+
     speaker_service_url = os.getenv("SPEAKER_SERVICE_URL")
     openmemory_mcp_url = os.getenv("OPENMEMORY_MCP_URL")
 
@@ -230,38 +236,38 @@ async def health_check():
         overall_healthy = False
 
     # Check memory service (provider-dependent)
-    if memory_provider == "friend_lite":
+    if memory_provider == "chronicle":
         try:
-            # Test Friend-Lite memory service connection with timeout
+            # Test Chronicle memory service connection with timeout
             test_success = await asyncio.wait_for(memory_service.test_connection(), timeout=8.0)
             if test_success:
                 health_status["services"]["memory_service"] = {
-                    "status": "✅ Friend-Lite Memory Connected",
+                    "status": "✅ Chronicle Memory Connected",
                     "healthy": True,
-                    "provider": "friend_lite",
+                    "provider": "chronicle",
                     "critical": False,
                 }
             else:
                 health_status["services"]["memory_service"] = {
-                    "status": "⚠️ Friend-Lite Memory Test Failed",
+                    "status": "⚠️ Chronicle Memory Test Failed",
                     "healthy": False,
-                    "provider": "friend_lite",
+                    "provider": "chronicle",
                     "critical": False,
                 }
                 overall_healthy = False
         except asyncio.TimeoutError:
             health_status["services"]["memory_service"] = {
-                "status": "⚠️ Friend-Lite Memory Timeout (8s) - Check Qdrant",
+                "status": "⚠️ Chronicle Memory Timeout (8s) - Check Qdrant",
                 "healthy": False,
-                "provider": "friend_lite",
+                "provider": "chronicle",
                 "critical": False,
             }
             overall_healthy = False
         except Exception as e:
             health_status["services"]["memory_service"] = {
-                "status": f"⚠️ Friend-Lite Memory Failed: {str(e)}",
+                "status": f"⚠️ Chronicle Memory Failed: {str(e)}",
                 "healthy": False,
-                "provider": "friend_lite",
+                "provider": "chronicle",
                 "critical": False,
             }
             overall_healthy = False
@@ -273,6 +279,42 @@ async def health_check():
             "provider": "openmemory_mcp",
             "critical": False,
         }
+    elif memory_provider == "mycelia":
+        # Mycelia memory service check
+        try:
+            # Test Mycelia memory service connection with timeout
+            test_success = await asyncio.wait_for(memory_service.test_connection(), timeout=8.0)
+            if test_success:
+                health_status["services"]["memory_service"] = {
+                    "status": "✅ Mycelia Memory Connected",
+                    "healthy": True,
+                    "provider": "mycelia",
+                    "critical": False,
+                }
+            else:
+                health_status["services"]["memory_service"] = {
+                    "status": "⚠️ Mycelia Memory Test Failed",
+                    "healthy": False,
+                    "provider": "mycelia",
+                    "critical": False,
+                }
+                overall_healthy = False
+        except asyncio.TimeoutError:
+            health_status["services"]["memory_service"] = {
+                "status": "⚠️ Mycelia Memory Timeout (8s) - Check Mycelia service",
+                "healthy": False,
+                "provider": "mycelia",
+                "critical": False,
+            }
+            overall_healthy = False
+        except Exception as e:
+            health_status["services"]["memory_service"] = {
+                "status": f"⚠️ Mycelia Memory Failed: {str(e)}",
+                "healthy": False,
+                "provider": "mycelia",
+                "critical": False,
+            }
+            overall_healthy = False
     else:
         health_status["services"]["memory_service"] = {
             "status": f"❌ Unknown memory provider: {memory_provider}",

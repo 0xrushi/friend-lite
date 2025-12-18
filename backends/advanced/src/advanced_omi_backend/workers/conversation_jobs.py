@@ -281,6 +281,11 @@ async def open_conversation_job(
         logger.info("🧪 Test mode: Waiting for audio queue to drain before timeout")
 
     while True:
+        # Check if job still exists in Redis (detect zombie state)
+        from advanced_omi_backend.utils.job_utils import check_job_alive
+        if not await check_job_alive(redis_client, current_job):
+            break
+
         # Check if session is finalizing (set by producer when recording stops)
         if not finalize_received:
             status = await redis_client.hget(session_key, "status")
@@ -400,10 +405,15 @@ async def open_conversation_job(
     )
 
     # Determine end reason based on how we exited the loop
-    # Check session completion_reason from Redis
+    # Check session completion_reason from Redis (set by WebSocket controller on disconnect)
     completion_reason = await redis_client.hget(session_key, "completion_reason")
     completion_reason_str = completion_reason.decode() if completion_reason else None
 
+    # Determine end_reason with proper precedence:
+    # 1. websocket_disconnect (explicit disconnect from client)
+    # 2. inactivity_timeout (no speech for SPEECH_INACTIVITY_THRESHOLD_SECONDS)
+    # 3. max_duration (conversation exceeded max runtime)
+    # 4. user_stopped (user manually stopped recording)
     if completion_reason_str == "websocket_disconnect":
         end_reason = "websocket_disconnect"
     elif timeout_triggered:

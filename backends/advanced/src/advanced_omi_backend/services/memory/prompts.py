@@ -5,10 +5,13 @@ This module contains the prompts used by the LLM providers for:
 2. Updating memory with new facts (DEFAULT_UPDATE_MEMORY_PROMPT)
 3. Answering questions from memory (MEMORY_ANSWER_PROMPT)
 4. Procedural memory for task tracking (PROCEDURAL_MEMORY_SYSTEM_PROMPT)
+5. Temporal and entity extraction (get_temporal_entity_extraction_prompt())
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
+from typing import List, Optional
+from pydantic import BaseModel, Field
 
 MEMORY_ANSWER_PROMPT = """
 You are an expert at answering questions based on the provided memories. Your task is to provide accurate and concise answers to the questions by leveraging the information given in the memories.
@@ -383,3 +386,171 @@ Example response:
 
     Do not return anything except the JSON format.
     """
+
+
+# ===== Temporal and Entity Extraction =====
+
+class TimeRange(BaseModel):
+    """Represents a time range with start and end timestamps."""
+    start: datetime = Field(description="ISO 8601 timestamp when the event/activity starts")
+    end: datetime = Field(description="ISO 8601 timestamp when the event/activity ends")
+    name: Optional[str] = Field(default=None, description="Optional name/label for this time range (e.g., 'wedding ceremony', 'party')")
+
+
+class TemporalEntity(BaseModel):
+    """Structured temporal and entity information extracted from a memory fact."""
+    isEvent: bool = Field(description="Whether this memory describes a scheduled event or time-bound activity")
+    isPerson: bool = Field(description="Whether this memory is primarily about a person or people")
+    isPlace: bool = Field(description="Whether this memory is primarily about a location or place")
+    isPromise: bool = Field(description="Whether this memory contains a commitment, promise, or agreement")
+    isRelationship: bool = Field(description="Whether this memory describes a relationship between people")
+    entities: List[str] = Field(default_factory=list, description="List of people, places, or things mentioned (e.g., ['John', 'Botanical Gardens', 'wedding'])")
+    timeRanges: List[TimeRange] = Field(default_factory=list, description="List of time ranges if this is a temporal memory")
+    emoji: Optional[str] = Field(default=None, description="Single emoji that best represents this memory")
+
+
+def build_temporal_extraction_prompt(current_date: datetime) -> str:
+    """Build the temporal extraction prompt with the current date context."""
+    return f"""You are an expert at extracting temporal and entity information from memory facts.
+
+Your task is to analyze a memory fact and extract structured information in JSON format:
+1. **Entity Types**: Determine if the memory is about events, people, places, promises, or relationships
+2. **Temporal Information**: Extract and resolve any time references to actual ISO 8601 timestamps
+3. **Named Entities**: List all people, places, and things mentioned
+4. **Representation**: Choose a single emoji that captures the essence of the memory
+
+You must return a valid JSON object with the following structure.
+
+**Current Date Context:**
+- Today's date: {current_date.strftime("%Y-%m-%d")}
+- Current time: {current_date.strftime("%H:%M:%S")}
+- Day of week: {current_date.strftime("%A")}
+
+**Time Resolution Guidelines:**
+
+Relative Time References:
+- "tomorrow" → Add 1 day to current date
+- "next week" → Add 7 days to current date
+- "in X days/weeks/months" → Add X time units to current date
+- "yesterday" → Subtract 1 day from current date
+
+Time of Day:
+- "4pm" or "16:00" → Use current date with that time
+- "tomorrow at 4pm" → Use tomorrow's date at 16:00
+- "morning" → 09:00 on the referenced day
+- "afternoon" → 14:00 on the referenced day
+- "evening" → 18:00 on the referenced day
+- "night" → 21:00 on the referenced day
+
+Duration Estimation (when only start time is mentioned):
+- Events like "wedding", "meeting", "party" → Default 2 hours duration
+- "lunch", "dinner", "breakfast" → Default 1 hour duration
+- "class", "workshop" → Default 1.5 hours duration
+- "appointment", "call" → Default 30 minutes duration
+
+**Entity Type Guidelines:**
+
+- **isEvent**: True for scheduled activities, appointments, meetings, parties, ceremonies, classes, etc.
+- **isPerson**: True when the primary focus is on a person (e.g., "Met John", "Sarah is my friend")
+- **isPlace**: True when the primary focus is a location (e.g., "Botanical Gardens is beautiful", "Favorite restaurant is...")
+- **isPromise**: True for commitments, promises, or agreements (e.g., "I'll call you tomorrow", "We agreed to meet")
+- **isRelationship**: True for statements about relationships (e.g., "John is my brother", "We're getting married")
+
+**Examples:**
+
+Input: "I'm getting married in one week! It's going to be at 4pm at the botanical gardens."
+Output:
+{{
+    "isEvent": true,
+    "isPerson": false,
+    "isPlace": false,
+    "isPromise": false,
+    "isRelationship": true,
+    "entities": ["botanical gardens", "wedding"],
+    "timeRanges": [
+        {{
+            "start": "{(current_date.replace(hour=16, minute=0, second=0) + timedelta(days=7)).isoformat()}",
+            "end": "{(current_date.replace(hour=18, minute=0, second=0) + timedelta(days=7)).isoformat()}",
+            "name": "wedding ceremony"
+        }}
+    ],
+    "emoji": "💒"
+}}
+
+Input: "Had a meeting with John at 3pm to discuss the new project"
+Output:
+{{
+    "isEvent": true,
+    "isPerson": true,
+    "isPlace": false,
+    "isPromise": false,
+    "isRelationship": false,
+    "entities": ["John", "new project", "meeting"],
+    "timeRanges": [
+        {{
+            "start": "{current_date.replace(hour=15, minute=0, second=0).isoformat()}",
+            "end": "{current_date.replace(hour=16, minute=0, second=0).isoformat()}",
+            "name": "meeting"
+        }}
+    ],
+    "emoji": "🤝"
+}}
+
+Input: "My favorite restaurant is Giovanni's Italian Kitchen"
+Output:
+{{
+    "isEvent": false,
+    "isPerson": false,
+    "isPlace": true,
+    "isPromise": false,
+    "isRelationship": false,
+    "entities": ["Giovanni's Italian Kitchen", "restaurant"],
+    "timeRanges": [],
+    "emoji": "🍝"
+}}
+
+Input: "I love hiking in the mountains"
+Output:
+{{
+    "isEvent": false,
+    "isPerson": false,
+    "isPlace": false,
+    "isPromise": false,
+    "isRelationship": false,
+    "entities": ["mountains", "hiking"],
+    "timeRanges": [],
+    "emoji": "🏔️"
+}}
+
+Input: "Tomorrow I need to call Sarah about the party at 2pm"
+Output:
+{{
+    "isEvent": true,
+    "isPerson": true,
+    "isPlace": false,
+    "isPromise": true,
+    "isRelationship": false,
+    "entities": ["Sarah", "party", "call"],
+    "timeRanges": [
+        {{
+            "start": "{(current_date.replace(hour=14, minute=0, second=0) + timedelta(days=1)).isoformat()}",
+            "end": "{(current_date.replace(hour=14, minute=30, second=0) + timedelta(days=1)).isoformat()}",
+            "name": "call Sarah"
+        }}
+    ],
+    "emoji": "📞"
+}}
+
+**Instructions:**
+- Return structured data following the TemporalEntity schema
+- Convert all temporal references to ISO 8601 format
+- Be conservative: if there's no temporal information, leave timeRanges empty
+- Multiple tags can be true (e.g., isEvent and isPerson both true for "meeting with John")
+- Extract all meaningful entities (people, places, things) mentioned in the fact
+- Choose an emoji that best represents the core meaning of the memory
+"""
+
+
+def get_temporal_entity_extraction_prompt() -> str:
+    """Get the temporal entity extraction prompt with current date/time."""
+    return build_temporal_extraction_prompt(datetime.now())

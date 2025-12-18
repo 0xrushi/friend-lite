@@ -1,7 +1,7 @@
 """Memory service factory for creating appropriate memory service instances.
 
 This module provides a factory pattern for instantiating memory services
-based on configuration. It supports both the sophisticated Friend-Lite
+based on configuration. It supports both the sophisticated Chronicle
 implementation and the OpenMemory MCP backend.
 """
 
@@ -36,23 +36,36 @@ def create_memory_service(config: MemoryConfig) -> MemoryServiceBase:
     """
     memory_logger.info(f"🧠  Creating memory service with provider: {config.memory_provider.value}")
     
-    if config.memory_provider == MemoryProvider.FRIEND_LITE:
-        # Use the sophisticated Friend-Lite implementation
-        from .memory_service import MemoryService as FriendLiteMemoryService
-        return FriendLiteMemoryService(config)
-        
+    if config.memory_provider == MemoryProvider.CHRONICLE:
+        # Use the sophisticated Chronicle implementation
+        from .providers.chronicle import MemoryService as ChronicleMemoryService
+        return ChronicleMemoryService(config)
+
     elif config.memory_provider == MemoryProvider.OPENMEMORY_MCP:
         # Use OpenMemory MCP implementation
         try:
-            from .providers.openmemory_mcp_service import OpenMemoryMCPService
+            from .providers.openmemory_mcp import OpenMemoryMCPService
         except ImportError as e:
             raise RuntimeError(f"OpenMemory MCP service not available: {e}")
-        
+
         if not config.openmemory_config:
             raise ValueError("OpenMemory configuration is required for OPENMEMORY_MCP provider")
-        
+
         return OpenMemoryMCPService(**config.openmemory_config)
-        
+
+    elif config.memory_provider == MemoryProvider.MYCELIA:
+        # Use Mycelia implementation
+        try:
+            from .providers.mycelia import MyceliaMemoryService
+        except ImportError as e:
+            raise RuntimeError(f"Mycelia memory service not available: {e}")
+
+        if not config.mycelia_config:
+            raise ValueError("Mycelia configuration is required for MYCELIA provider")
+
+        # Pass the full config so Mycelia can access llm_config
+        return MyceliaMemoryService(config)
+
     else:
         raise ValueError(f"Unsupported memory provider: {config.memory_provider}")
 
@@ -143,7 +156,9 @@ def get_service_info() -> dict:
         # Try to determine provider from service type
         if "OpenMemoryMCP" in info["service_type"]:
             info["memory_provider"] = "openmemory_mcp"
-        elif "FriendLite" in info["service_type"] or "MemoryService" in info["service_type"]:
-            info["memory_provider"] = "friend_lite"
+        elif info["service_type"] == "ChronicleMemoryService":
+            info["memory_provider"] = "chronicle"
+        elif info["service_type"] == "MyceliaMemoryService":
+            info["memory_provider"] = "mycelia"
     
     return info

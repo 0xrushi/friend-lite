@@ -11,15 +11,11 @@ import time
 import uuid
 from typing import Any, List, Optional, Tuple
 
-from .base import MemoryEntry, MemoryServiceBase
-from .config import LLMProvider as LLMProviderEnum
-from .config import MemoryConfig, VectorStoreProvider
-from .providers import (
-    LLMProviderBase,
-    OpenAIProvider,
-    QdrantVectorStore,
-    VectorStoreBase,
-)
+from ..base import LLMProviderBase, MemoryEntry, MemoryServiceBase, VectorStoreBase
+from ..config import LLMProvider as LLMProviderEnum
+from ..config import MemoryConfig, VectorStoreProvider
+from .llm_providers import OpenAIProvider
+from .vector_stores import QdrantVectorStore
 
 memory_logger = logging.getLogger("memory_service")
 
@@ -49,10 +45,10 @@ class MemoryService(MemoryServiceBase):
         Args:
             config: MemoryConfig instance with provider settings
         """
+        super().__init__()
         self.config = config
         self.llm_provider: Optional[LLMProviderBase] = None
         self.vector_store: Optional[VectorStoreBase] = None
-        self._initialized = False
 
     async def initialize(self) -> None:
         """Initialize the memory service and all its components.
@@ -133,8 +129,7 @@ class MemoryService(MemoryServiceBase):
         Raises:
             asyncio.TimeoutError: If processing exceeds timeout
         """
-        if not self._initialized:
-            await self.initialize()
+        await self._ensure_initialized()
 
         try:
             # Skip empty transcripts
@@ -295,7 +290,7 @@ class MemoryService(MemoryServiceBase):
             memory_logger.error(f"Count memories failed: {e}")
             return None
 
-    async def delete_memory(self, memory_id: str) -> bool:
+    async def delete_memory(self, memory_id: str, user_id: Optional[str] = None, user_email: Optional[str] = None) -> bool:
         """Delete a specific memory by ID.
         
         Args:

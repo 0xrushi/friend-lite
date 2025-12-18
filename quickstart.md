@@ -1,10 +1,10 @@
-# Friend-Lite Quick Start
+# Chronicle Quick Start
 
 ## What You're Building (Complete Beginners Start Here!)
 
 You're setting up your own personal AI that:
 - **Runs on your home computer** - processes audio, stores memories, runs AI models
-- **Connects to your phone** - where you use the Friend-Lite app and OMI device
+- **Connects to your phone** - where you use the Chronicle app and OMI device
 - **Works everywhere** - your phone can access your home AI from anywhere
 
 Think of it like having Siri/Alexa, but it's **your own AI** running on **your hardware** with **your data**.
@@ -13,12 +13,12 @@ Think of it like having Siri/Alexa, but it's **your own AI** running on **your h
 
 ### On Your Home Computer
 - **Docker** - Runs all the AI services (like having multiple apps in containers)
-- **Friend-Lite Backend** - The main AI brain (transcription, memory, processing)
+- **Chronicle Backend** - The main AI brain (transcription, memory, processing)
 - **Tailscale** - Creates secure tunnel so your phone can reach home
 
 ### On Your Phone  
 - **Tailscale** - Connects securely to your home computer
-- **Friend-Lite Mobile App** - Interface for your OMI device and conversations
+- **Chronicle Mobile App** - Interface for your OMI device and conversations
 
 ### AI Services (Choose Your Path)
 
@@ -101,15 +101,49 @@ The setup wizard will automatically download and configure:
 
 *Note: First-time setup will download AI models (this can take time and storage space)*
 
-## Step 3: Download and Setup Friend-Lite
+## Step 3: Download and Setup Chronicle
 
 ### On Your Home Computer
 
 **Download the code:**
 ```bash
-git clone https://github.com/AnkushMalaker/friend-lite.git
-cd friend-lite
+git clone https://github.com/chronicle-ai/chronicle.git
+cd chronicle
 ```
+
+*The `--recursive` flag downloads the Mycelia submodule (see note below)*
+
+**If you already cloned without `--recursive`:**
+```bash
+git submodule update --init --recursive
+```
+
+<details>
+<summary><strong>📦 About the Mycelia Submodule (Optional - Click to expand)</strong></summary>
+
+**What is Mycelia?**
+Mycelia is an optional self-hosted AI memory system that Friend-Lite can use as an alternative memory backend. It provides:
+- Timeline-based memory visualization
+- Advanced audio processing with speaker diarization
+- MongoDB-based full-text search
+- MCP (Model Context Protocol) integration
+
+**Do I need it?**
+**Most users don't need Mycelia!** The default Friend-Lite memory system works great for most use cases. Only consider Mycelia if you:
+- Want timeline-based memory visualization
+- Need advanced speaker diarization features
+- Want to use MongoDB for memory storage instead of Qdrant
+
+**Runtime Dependencies (if using Mycelia):**
+- **Deno** - JavaScript/TypeScript runtime (install: `curl -fsSL https://deno.land/install.sh | sh`)
+- **MongoDB** - Database for memory storage
+- **Redis** - Caching layer
+- **FFmpeg** - Audio processing (usually pre-installed)
+
+**Build/Setup:**
+If you choose Mycelia as your memory provider during setup wizard, the wizard will configure the necessary services automatically. No manual build steps required!
+
+</details>
 
 **Run the setup wizard:**
 ```bash
@@ -173,26 +207,26 @@ Before connecting your phone, make sure everything works:
    
    *Your browser will warn about "unsafe certificate" - click "Advanced" → "Proceed anyway"*
 
-2. You should see the Friend-Lite dashboard
+2. You should see the Chronicle dashboard
 3. Click "Live Recording" in the sidebar
 4. Test your microphone - record a short clip
 5. Check that it gets transcribed and appears in "Conversations"
 6. **Only proceed to phone setup when this works perfectly!**
 
-## Step 5: Install Friend-Lite on Your Phone
+## Step 5: Install Chronicle on Your Phone
 
 **No development setup needed - just download and install!**
 
 ### Android Users
-1. Go to [GitHub Releases](https://github.com/AnkushMalaker/friend-lite/releases)
-2. Find the latest release and download `friend-lite-android.apk`
+1. Go to [GitHub Releases](https://github.com/AnkushMalaker/chronicle/releases)
+2. Find the latest release and download `chronicle-android.apk`
 3. Install APK on your phone:
    - Enable "Install from unknown sources" in Android settings
    - Tap the downloaded APK file to install
 
 ### iPhone Users  
-1. Go to [GitHub Releases](https://github.com/AnkushMalaker/friend-lite/releases)
-2. Find the latest release and download `friend-lite-ios.ipa` 
+1. Go to [GitHub Releases](https://github.com/AnkushMalaker/chronicle/releases)
+2. Find the latest release and download `chronicle-ios.ipa` 
 3. Install using sideloading tool:
    - **AltStore** (recommended): [altstore.io](https://altstore.io)
    - **Sideloadly**: [sideloadly.io](https://sideloadly.io)
@@ -201,7 +235,7 @@ Before connecting your phone, make sure everything works:
 
 ### Configure the App
 1. **First**: Make sure Tailscale is running on your phone
-2. Open Friend-Lite app
+2. Open Chronicle app
 3. Go to Settings → Backend Configuration
 4. Enter Backend URL: `https://[your-tailscale-ip]` 
    
@@ -216,7 +250,7 @@ Before connecting your phone, make sure everything works:
 ## Step 6: Connect Your OMI Device
 
 1. Turn on your OMI/Friend device (make sure it's charged)
-2. Open Friend-Lite app on your phone
+2. Open Chronicle app on your phone
 3. Go to "Devices" tab → "Add New Device"
 4. Follow Bluetooth pairing instructions
 5. Once connected, start a conversation!

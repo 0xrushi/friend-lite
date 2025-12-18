@@ -6,7 +6,7 @@ OpenMemory servers using REST API endpoints for memory operations.
 
 import logging
 import uuid
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import httpx
 
 memory_logger = logging.getLogger("memory_service")
@@ -28,18 +28,20 @@ class MCPClient:
         client: HTTP client instance
     """
     
-    def __init__(self, server_url: str, client_name: str = "friend_lite", user_id: str = "default", timeout: int = 30):
+    def __init__(self, server_url: str, client_name: str = "chronicle", user_id: str = "default", user_email: str = "", timeout: int = 30):
         """Initialize client for OpenMemory.
-        
+
         Args:
             server_url: Base URL of the OpenMemory server
             client_name: Client identifier (used as app name)
             user_id: User identifier for memory isolation
+            user_email: User email address for user metadata
             timeout: HTTP request timeout in seconds
         """
         self.server_url = server_url.rstrip('/')
         self.client_name = client_name
         self.user_id = user_id
+        self.user_email = user_email
         self.timeout = timeout
         
         # Use custom CA certificate if available
@@ -107,20 +109,40 @@ class MCPClient:
                 memory_logger.error("No apps found in OpenMemory - cannot create memory")
                 raise MCPError("No apps found in OpenMemory")
 
-            # Use REST API endpoint for creating memories (trailing slash required)
+            # Use REST API endpoint for creating memories
+            # The 'app' field can be either app name (string) or app UUID
+            payload = {
+                "user_id": self.user_id,
+                "text": text,
+                "app": self.client_name,  # Use app name (OpenMemory accepts name or UUID)
+                "metadata": {
+                    "source": "friend_lite",
+                    "client": self.client_name,
+                    "user_email": self.user_email
+                },
+                "infer": True
+            }
+
+            memory_logger.info(f"POSTing memory to {self.server_url}/api/v1/memories/ with payload={payload}")
+
             response = await self.client.post(
                 f"{self.server_url}/api/v1/memories/",
                 json={
                     "user_id": self.user_id,
                     "text": text,
+                    "app": self.client_name,  # Use app name (OpenMemory accepts name or UUID)
                     "metadata": {
-                        "source": "friend_lite",
-                        "client": self.client_name
+                        "source": "chronicle",
+                        "client": self.client_name,
+                        "user_email": self.user_email
                     },
-                    "infer": True,
-                    "app_id": app_id  # Use app_id to avoid duplicate name issues
+                    "infer": True
                 }
             )
+
+            response_body = response.text[:500] if response.status_code != 200 else "..."
+            memory_logger.info(f"OpenMemory response: status={response.status_code}, body={response_body}, headers={dict(response.headers)}")
+
             response.raise_for_status()
             
             result = response.json()
@@ -208,7 +230,7 @@ class MCPClient:
             else:
                 memories = []
             
-            # Format memories for Friend-Lite
+            # Format memories for Chronicle
             formatted_memories = []
             for memory in memories:
                 formatted_memories.append({
@@ -334,12 +356,102 @@ class MCPClient:
                 return result.get("deleted_count", len(memory_ids))
             
             return len(memory_ids)
-            
+
         except Exception as e:
             memory_logger.error(f"Error deleting all memories: {e}")
             return 0
-    
-    async def delete_memory(self, memory_id: str) -> bool:
+
+    async def get_memory(self, memory_id: str) -> Optional[Dict[str, Any]]:
+        """Get a specific memory by ID.
+
+        Args:
+            memory_id: ID of the memory to retrieve
+
+        Returns:
+            Memory dictionary if found, None otherwise
+        """
+        try:
+            # Use the memories endpoint with specific ID
+            response = await self.client.get(
+                f"{self.server_url}/api/v1/memories/{memory_id}",
+                params={"user_id": self.user_id}
+            )
+
+            if response.status_code == 404:
+                memory_logger.warning(f"Memory not found: {memory_id}")
+                return None
+
+            response.raise_for_status()
+            result = response.json()
+
+            # Format memory for Chronicle
+            if isinstance(result, dict):
+                return {
+                    "id": result.get("id", memory_id),
+                    "content": result.get("content", "") or result.get("text", ""),
+                    "metadata": result.get("metadata_", {}) or result.get("metadata", {}),
+                    "created_at": result.get("created_at"),
+                }
+
+            return None
+
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                return None
+            memory_logger.error(f"HTTP error getting memory: {e}")
+            return None
+        except Exception as e:
+            memory_logger.error(f"Error getting memory: {e}")
+            return None
+
+    async def update_memory(
+        self,
+        memory_id: str,
+        content: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> bool:
+        """Update a specific memory's content and/or metadata.
+
+        Args:
+            memory_id: ID of the memory to update
+            content: New content for the memory (if None, content is not updated)
+            metadata: New metadata to merge with existing (if None, metadata is not updated)
+
+        Returns:
+            True if update succeeded, False otherwise
+        """
+        try:
+            # Build update payload
+            update_data: Dict[str, Any] = {"user_id": self.user_id}
+
+            if content is not None:
+                update_data["text"] = content
+
+            if metadata is not None:
+                update_data["metadata"] = metadata
+
+            if len(update_data) == 1:  # Only user_id
+                memory_logger.warning("No update data provided")
+                return False
+
+            # Use PUT to update memory
+            response = await self.client.put(
+                f"{self.server_url}/api/v1/memories/{memory_id}",
+                json=update_data
+            )
+
+            response.raise_for_status()
+            memory_logger.info(f"✅ Updated OpenMemory memory: {memory_id}")
+            return True
+
+        except httpx.HTTPStatusError as e:
+            memory_logger.error(f"HTTP error updating memory: {e.response.status_code}")
+            return False
+        except Exception as e:
+            memory_logger.error(f"Error updating memory: {e}")
+            return False
+
+    async def delete_memory(self, memory_id: str, user_id: Optional[str] = None, user_email: Optional[str] = None) -> bool:
         """Delete a specific memory by ID.
         
         Args:

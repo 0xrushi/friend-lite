@@ -1,5 +1,5 @@
 """
-Application configuration for Friend-Lite backend.
+Application configuration for Chronicle backend.
 
 Centralizes all application-level configuration including database connections,
 service configurations, and environment variables that were previously in main.py.
@@ -28,8 +28,10 @@ class AppConfig:
     def __init__(self):
         # MongoDB Configuration
         self.mongodb_uri = os.getenv("MONGODB_URI", "mongodb://mongo:27017")
+        # default to legacy value to avoid breaking peoples .env
+        self.mongodb_database = os.getenv("MONGODB_DATABASE", "friend-lite")
         self.mongo_client = AsyncIOMotorClient(self.mongodb_uri)
-        self.db = self.mongo_client.get_default_database("friend-lite")
+        self.db = self.mongo_client.get_default_database(self.mongodb_database)
         self.users_col = self.db["users"]
         self.speakers_col = self.db["speakers"]
 
@@ -66,7 +68,11 @@ class AppConfig:
         # External Services Configuration
         self.qdrant_base_url = os.getenv("QDRANT_BASE_URL", "qdrant")
         self.qdrant_port = os.getenv("QDRANT_PORT", "6333")
-        self.memory_provider = os.getenv("MEMORY_PROVIDER", "friend_lite").lower()
+        self.memory_provider = os.getenv("MEMORY_PROVIDER", "chronicle").lower()
+        # Map legacy provider names to current names
+        if self.memory_provider in ("friend-lite", "friend_lite"):
+            logger.debug(f"Mapping legacy provider '{self.memory_provider}' to 'chronicle'")
+            self.memory_provider = "chronicle"
 
         # Redis Configuration
         self.redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
@@ -83,7 +89,7 @@ class AppConfig:
         self.max_workers = os.cpu_count() or 4
 
         # Memory service configuration
-        self.memory_service_supports_threshold = self.memory_provider == "friend_lite"
+        self.memory_service_supports_threshold = self.memory_provider == "chronicle"
 
         self.gdrive_credentials_path = "data/gdrive_service_account.json"
         self.gdrive_scopes = ["https://www.googleapis.com/auth/drive.readonly"]

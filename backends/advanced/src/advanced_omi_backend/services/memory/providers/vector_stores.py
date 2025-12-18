@@ -9,7 +9,7 @@ Vector stores handle storage, retrieval, and similarity search of memory embeddi
 import logging
 import time
 import uuid
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from qdrant_client import AsyncQdrantClient
 from qdrant_client.models import (
@@ -240,7 +240,7 @@ class QdrantVectorStore(VectorStoreBase):
             memory_logger.error(f"Qdrant get memories failed: {e}")
             return []
 
-    async def delete_memory(self, memory_id: str) -> bool:
+    async def delete_memory(self, memory_id: str, user_id: Optional[str] = None, user_email: Optional[str] = None) -> bool:
         """Delete a specific memory from Qdrant."""
         try:
             # Convert memory_id to proper format for Qdrant

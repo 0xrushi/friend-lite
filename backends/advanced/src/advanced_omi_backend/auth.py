@@ -3,8 +3,10 @@
 import logging
 import os
 import re
+from datetime import datetime, timedelta
 from typing import Literal, Optional, overload
 
+import jwt
 from beanie import PydanticObjectId
 from dotenv import load_dotenv
 from fastapi import Depends, Request
@@ -21,6 +23,10 @@ from advanced_omi_backend.users import User, UserCreate, get_user_db
 logger = logging.getLogger(__name__)
 
 load_dotenv()
+JWT_LIFETIME_SECONDS = int(os.getenv("JWT_LIFETIME_SECONDS", "86400"))
+
+# JWT configuration
+JWT_LIFETIME_SECONDS = 86400  # 24 hours
 
 
 @overload
@@ -82,7 +88,7 @@ async def get_user_manager(user_db=Depends(get_user_db)):
 
 # Transport configurations
 cookie_transport = CookieTransport(
-    cookie_max_age=86400,  # 24 hours (matches JWT lifetime)
+    cookie_max_age=JWT_LIFETIME_SECONDS,  # Matches JWT lifetime
     cookie_secure=COOKIE_SECURE,  # Set to False in development if not using HTTPS
     cookie_httponly=True,
     cookie_samesite="lax",
@@ -94,8 +100,40 @@ bearer_transport = BearerTransport(tokenUrl="auth/jwt/login")
 def get_jwt_strategy() -> JWTStrategy:
     """Get JWT strategy for token generation and validation."""
     return JWTStrategy(
-        secret=SECRET_KEY, lifetime_seconds=86400
-    )  # 24 hours for device compatibility
+        secret=SECRET_KEY, lifetime_seconds=JWT_LIFETIME_SECONDS
+    )
+
+
+def generate_jwt_for_user(user_id: str, user_email: str) -> str:
+    """Generate a JWT token for a user to authenticate with external services.
+
+    This function creates a JWT token that can be used to authenticate with
+    services that share the same AUTH_SECRET_KEY, such as Mycelia.
+
+    Args:
+        user_id: User's unique identifier (MongoDB ObjectId as string)
+        user_email: User's email address
+
+    Returns:
+        JWT token string valid for JWT_LIFETIME_SECONDS (default: 24 hours)
+
+    Example:
+        >>> token = generate_jwt_for_user("507f1f77bcf86cd799439011", "user@example.com")
+        >>> # Use token to call Mycelia API
+    """
+    # Create JWT payload matching Chronicle's standard format
+    payload = {
+        "sub": user_id,  # Subject = user ID
+        "email": user_email,
+        "iss": "chronicle",  # Issuer
+        "aud": "chronicle",  # Audience
+        "exp": datetime.utcnow() + timedelta(seconds=JWT_LIFETIME_SECONDS),
+        "iat": datetime.utcnow(),  # Issued at
+    }
+
+    # Sign the token with the same secret key
+    token = jwt.encode(payload, SECRET_KEY, algorithm="HS256")
+    return token
 
 
 # Authentication backends

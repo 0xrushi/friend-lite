@@ -1,7 +1,7 @@
 # ========================================
-# Friend-Lite Management System
+# Chronicle Management System
 # ========================================
-# Central management interface for Friend-Lite project
+# Central management interface for Chronicle project
 # Handles configuration, deployment, and maintenance tasks
 
 # Load environment variables from .env file
@@ -19,13 +19,13 @@ export $(shell sed 's/=.*//' config.env | grep -v '^\s*$$' | grep -v '^\s*\#')
 SCRIPTS_DIR := scripts
 K8S_SCRIPTS_DIR := $(SCRIPTS_DIR)/k8s
 
-.PHONY: help menu setup-k8s setup-infrastructure setup-rbac setup-storage-pvc config config-docker config-k8s config-all clean deploy deploy-docker deploy-k8s deploy-k8s-full deploy-infrastructure deploy-apps check-infrastructure check-apps build-backend up-backend down-backend k8s-status k8s-cleanup k8s-purge audio-manage test-robot test-robot-integration test-robot-unit test-robot-endpoints test-robot-specific test-robot-clean
+.PHONY: help menu setup-k8s setup-infrastructure setup-rbac setup-storage-pvc config config-docker config-k8s config-all clean deploy deploy-docker deploy-k8s deploy-k8s-full deploy-infrastructure deploy-apps check-infrastructure check-apps build-backend up-backend down-backend k8s-status k8s-cleanup k8s-purge audio-manage mycelia-sync-status mycelia-sync-all mycelia-sync-user mycelia-check-orphans mycelia-reassign-orphans test-robot test-robot-integration test-robot-unit test-robot-endpoints test-robot-specific test-robot-clean
 
 # Default target
 .DEFAULT_GOAL := menu
 
 menu: ## Show interactive menu (default)
-	@echo "🎯 Friend-Lite Management System"
+	@echo "🎯 Chronicle Management System"
 	@echo "================================"
 	@echo
 	@echo "📋 Quick Actions:"
@@ -57,6 +57,13 @@ menu: ## Show interactive menu (default)
 	@echo "  check-apps         🔍 Check application services"
 	@echo "  clean              🧹 Clean up generated files"
 	@echo
+	@echo "🔄 Mycelia Sync:"
+	@echo "  mycelia-sync-status      📊 Show Mycelia OAuth sync status"
+	@echo "  mycelia-sync-all         🔄 Sync all Chronicle users to Mycelia"
+	@echo "  mycelia-sync-user        👤 Sync specific user (EMAIL=user@example.com)"
+	@echo "  mycelia-check-orphans    🔍 Find orphaned Mycelia objects"
+	@echo "  mycelia-reassign-orphans ♻️  Reassign orphans (EMAIL=admin@example.com)"
+	@echo
 	@echo "Current configuration:"
 	@echo "  DOMAIN: $(DOMAIN)"
 	@echo "  DEPLOYMENT_MODE: $(DEPLOYMENT_MODE)"
@@ -68,7 +75,7 @@ menu: ## Show interactive menu (default)
 	@echo "💡 Tip: Run 'make help' for detailed help on any target"
 
 help: ## Show detailed help for all targets
-	@echo "🎯 Friend-Lite Management System - Detailed Help"
+	@echo "🎯 Chronicle Management System - Detailed Help"
 	@echo "================================================"
 	@echo
 	@echo "🏗️  KUBERNETES SETUP:"
@@ -100,6 +107,13 @@ help: ## Show detailed help for all targets
 	@echo
 	@echo "🎵 AUDIO MANAGEMENT:"
 	@echo "  audio-manage       Interactive audio file management"
+	@echo
+	@echo "🔄 MYCELIA SYNC:"
+	@echo "  mycelia-sync-status Show Mycelia OAuth sync status for all users"
+	@echo "  mycelia-sync-all   Sync all Chronicle users to Mycelia OAuth"
+	@echo "  mycelia-sync-user  Sync specific user (EMAIL=user@example.com)"
+	@echo "  mycelia-check-orphans Find Mycelia objects without Chronicle owner"
+	@echo "  mycelia-reassign-orphans Reassign orphaned objects (EMAIL=admin@example.com)"
 	@echo
 	@echo "🧪 ROBOT FRAMEWORK TESTING:"
 	@echo "  test-robot         Run all Robot Framework tests"
@@ -144,7 +158,7 @@ setup-dev: ## Setup development environment (git hooks, pre-commit)
 
 setup-k8s: ## Initial Kubernetes setup (registry + infrastructure)
 	@echo "🏗️  Starting Kubernetes initial setup..."
-	@echo "This will set up the complete infrastructure for Friend-Lite"
+	@echo "This will set up the complete infrastructure for Chronicle"
 	@echo
 	@echo "📋 Setup includes:"
 	@echo "  • Insecure registry configuration"
@@ -216,10 +230,10 @@ config-k8s: ## Generate Kubernetes configuration files (ConfigMap/Secret only - 
 	@kubectl apply -f k8s-manifests/configmap.yaml -n $(APPLICATION_NAMESPACE) 2>/dev/null || echo "⚠️  ConfigMap not applied (cluster not available?)"
 	@kubectl apply -f k8s-manifests/secrets.yaml -n $(APPLICATION_NAMESPACE) 2>/dev/null || echo "⚠️  Secret not applied (cluster not available?)"
 	@echo "📦 Copying ConfigMap and Secret to speech namespace..."
-	@kubectl get configmap friend-lite-config -n $(APPLICATION_NAMESPACE) -o yaml | \
+	@kubectl get configmap chronicle-config -n $(APPLICATION_NAMESPACE) -o yaml | \
 		sed -e '/namespace:/d' -e '/resourceVersion:/d' -e '/uid:/d' -e '/creationTimestamp:/d' | \
 		kubectl apply -n speech -f - 2>/dev/null || echo "⚠️  ConfigMap not copied to speech namespace"
-	@kubectl get secret friend-lite-secrets -n $(APPLICATION_NAMESPACE) -o yaml | \
+	@kubectl get secret chronicle-secrets -n $(APPLICATION_NAMESPACE) -o yaml | \
 		sed -e '/namespace:/d' -e '/resourceVersion:/d' -e '/uid:/d' -e '/creationTimestamp:/d' | \
 		kubectl apply -n speech -f - 2>/dev/null || echo "⚠️  Secret not copied to speech namespace"
 	@echo "✅ Kubernetes configuration files generated"
@@ -332,6 +346,42 @@ k8s-purge: ## Purge unused images (registry + container)
 audio-manage: ## Interactive audio file management
 	@echo "🎵 Starting audio file management..."
 	@$(SCRIPTS_DIR)/manage-audio-files.sh
+
+# ========================================
+# MYCELIA SYNC
+# ========================================
+
+mycelia-sync-status: ## Show Mycelia OAuth sync status for all users
+	@echo "📊 Checking Mycelia OAuth sync status..."
+	@cd backends/advanced && uv run python scripts/sync_chronicle_mycelia.py --status
+
+mycelia-sync-all: ## Sync all Chronicle users to Mycelia OAuth
+	@echo "🔄 Syncing all Chronicle users to Mycelia OAuth..."
+	@echo "⚠️  This will create OAuth credentials for users without them"
+	@read -p "Continue? (y/N): " confirm && [ "$$confirm" = "y" ] || exit 1
+	@cd backends/advanced && uv run python scripts/sync_chronicle_mycelia.py --sync-all
+
+mycelia-sync-user: ## Sync specific user to Mycelia OAuth (usage: make mycelia-sync-user EMAIL=user@example.com)
+	@echo "👤 Syncing specific user to Mycelia OAuth..."
+	@if [ -z "$(EMAIL)" ]; then \
+		echo "❌ EMAIL parameter is required. Usage: make mycelia-sync-user EMAIL=user@example.com"; \
+		exit 1; \
+	fi
+	@cd backends/advanced && uv run python scripts/sync_chronicle_mycelia.py --email $(EMAIL)
+
+mycelia-check-orphans: ## Find Mycelia objects without Chronicle owner
+	@echo "🔍 Checking for orphaned Mycelia objects..."
+	@cd backends/advanced && uv run python scripts/sync_chronicle_mycelia.py --check-orphans
+
+mycelia-reassign-orphans: ## Reassign orphaned objects to user (usage: make mycelia-reassign-orphans EMAIL=admin@example.com)
+	@echo "♻️  Reassigning orphaned Mycelia objects..."
+	@if [ -z "$(EMAIL)" ]; then \
+		echo "❌ EMAIL parameter is required. Usage: make mycelia-reassign-orphans EMAIL=admin@example.com"; \
+		exit 1; \
+	fi
+	@echo "⚠️  This will reassign all orphaned objects to: $(EMAIL)"
+	@read -p "Continue? (y/N): " confirm && [ "$$confirm" = "y" ] || exit 1
+	@cd backends/advanced && uv run python scripts/sync_chronicle_mycelia.py --reassign-orphans --target-email $(EMAIL)
 
 # ========================================
 # TESTING TARGETS
