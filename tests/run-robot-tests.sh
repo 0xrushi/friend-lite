@@ -112,7 +112,7 @@ docker compose -f docker-compose-ci.yml down -v 2>/dev/null || true
 
 # Force remove any stuck containers with test names
 print_info "Removing any stuck test containers..."
-docker rm -f advanced-mongo-test-1 advanced-redis-test-1 advanced-qdrant-test-1 advanced-friend-backend-test-1 advanced-workers-test-1 advanced-webui-test-1 2>/dev/null || true
+docker rm -f advanced-mongo-test-1 advanced-redis-test-1 advanced-qdrant-test-1 advanced-chronicle-backend-test-1 advanced-workers-test-1 advanced-webui-test-1 2>/dev/null || true
 
 # Start infrastructure services (MongoDB, Redis, Qdrant)
 print_info "Starting MongoDB, Redis, and Qdrant (fresh containers)..."
@@ -150,10 +150,10 @@ done
 
 # Build and start backend
 print_info "Building backend..."
-docker compose -f docker-compose-ci.yml build friend-backend-test
+docker compose -f docker-compose-ci.yml build chronicle-backend-test
 
 print_info "Starting backend..."
-docker compose -f docker-compose-ci.yml up -d friend-backend-test
+docker compose -f docker-compose-ci.yml up -d chronicle-backend-test
 
 # Wait for backend
 print_info "Waiting for backend (up to 120s)..."
@@ -164,7 +164,7 @@ for i in {1..40}; do
     fi
     if [ $i -eq 40 ]; then
         print_error "Backend failed to start"
-        docker compose -f docker-compose-ci.yml logs friend-backend-test
+        docker compose -f docker-compose-ci.yml logs chronicle-backend-test
         exit 1
     fi
     sleep 3
@@ -236,7 +236,7 @@ if [ $TEST_EXIT_CODE -ne 0 ]; then
     print_info "Showing service logs..."
     cd ../backends/advanced
     echo "=== Backend Logs (last 50 lines) ==="
-    docker compose -f docker-compose-ci.yml logs --tail=50 friend-backend-test
+    docker compose -f docker-compose-ci.yml logs --tail=50 chronicle-backend-test
     echo ""
     echo "=== Worker Logs (last 50 lines) ==="
     docker compose -f docker-compose-ci.yml logs --tail=50 workers-test
