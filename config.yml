@@ -35,8 +35,8 @@ models:
     model_type: llm
     model_provider: ollama
     api_family: openai
-    model_name: ${OLLAMA_MODEL:-llama3.1:latest}
-    model_url: ${OLLAMA_BASE_URL:-http://localhost:11434/v1}
+    model_name: llama3.1:latest
+    model_url: http://localhost:11434/v1
     api_key: ${OPENAI_API_KEY:-ollama}
     model_params:
       temperature: 0.2
@@ -49,8 +49,8 @@ models:
     model_type: embedding
     model_provider: ollama
     api_family: openai
-    model_name: ${OLLAMA_EMBEDDER_MODEL:-nomic-embed-text:latest}
-    model_url: ${OLLAMA_BASE_URL:-http://localhost:11434/v1}
+    model_name: nomic-embed-text:latest
+    model_url: http://localhost:11434/v1
     api_key: ${OPENAI_API_KEY:-ollama}
     embedding_dimensions: 768
     model_output: vector
@@ -61,8 +61,8 @@ models:
     model_type: llm
     model_provider: openai
     api_family: openai
-    model_name: ${OPENAI_MODEL:-gpt-4o-mini}
-    model_url: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+    model_name: gpt-4o-mini
+    model_url: https://api.openai.com/v1
     api_key: ${OPENAI_API_KEY:-}
     model_params:
       temperature: 0.2
@@ -74,10 +74,10 @@ models:
     model_type: embedding
     model_provider: openai
     api_family: openai
-    model_name: ${OPENAI_EMBEDDER_MODEL:-text-embedding-3-small}
-    model_url: ${OPENAI_EMBEDDER_BASE_URL:-https://api.openai.com/v1}
+    model_name: text-embedding-3-small
+    model_url: https://api.openai.com/v1
     api_key: ${OPENAI_API_KEY:-}
-    embedding_dimensions: ${OPENAI_EMBEDDING_DIMS:-1536}
+    embedding_dimensions: 1536
     model_output: vector
 
   # Hosted Groq (OpenAI-compatible chat)
@@ -86,8 +86,8 @@ models:
     model_type: llm
     model_provider: groq
     api_family: openai
-    model_name: ${GROQ_MODEL:-llama-3.1-70b-versatile}
-    model_url: ${GROQ_API_BASE:-https://api.groq.com/openai/v1}
+    model_name: llama-3.1-70b-versatile
+    model_url: https://api.groq.com/openai/v1
     api_key: ${GROQ_API_KEY:-}
     model_params:
       temperature: 0.2
@@ -102,8 +102,8 @@ models:
     api_family: qdrant
     model_url: http://qdrant:6333
     model_params:
-      host: ${QDRANT_HOST:-qdrant}
-      port: ${QDRANT_PORT:-6333}
+      host: qdrant
+      port: 6333
       collection_name: omi_memories
 
   # STT (Parakeet over HTTP, batch transcription)
@@ -146,9 +146,9 @@ models:
           language: multi
           smart_format: "true"
           punctuate: "true"
-          diarize: ${DIARIZE:-false}
+          diarize: false
           encoding: linear16
-          sample_rate: ${SAMPLE_RATE:-16000}
+          sample_rate: 16000
           channels: "1"
         response:
           type: json
@@ -179,7 +179,7 @@ models:
     model_type: stt_stream
     model_provider: parakeet
     api_family: websocket
-    model_url: ${PARAKEET_WS_URL:-ws://localhost:9001/stream}
+    model_url: ws://localhost:9001/stream
     operations:
       start:
         message:
@@ -193,7 +193,7 @@ models:
       chunk_header:
         message:
           type: audio_chunk
-          rate: ${SAMPLE_RATE:-16000}
+          rate: 16000
           width: 2
           channels: 1
       end:

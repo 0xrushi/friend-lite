@@ -73,12 +73,11 @@ PARAKEET_ASR_URL = os.environ.get("PARAKEET_ASR_URL", "http://host.docker.intern
 
 # Test Environment Configuration
 # Base configuration for both providers
+# NOTE: LLM configuration is now in config.yml (defaults.llm)
 TEST_ENV_VARS_BASE = {
     "AUTH_SECRET_KEY": "test-jwt-signing-key-for-integration-tests",
     "ADMIN_PASSWORD": "test-admin-password-123",
     "ADMIN_EMAIL": "test-admin@example.com",
-    "LLM_PROVIDER": "openai",
-    "OPENAI_MODEL": "gpt-4o-mini",  # Cheaper model for tests
     "MONGODB_URI": "mongodb://localhost:27018",  # Test port (database specified in backend)
     "QDRANT_BASE_URL": "localhost",
     "DISABLE_SPEAKER_RECOGNITION": "true",  # Prevent segment duplication in tests

@@ -201,19 +201,22 @@ class ChronicleSetup:
             self.console.print("[blue][INFO][/blue] Skipping transcription setup")
 
     def setup_llm(self):
-        """Configure LLM provider"""
+        """Configure LLM provider - shows guidance for config.yml"""
         self.print_section("LLM Provider Configuration")
+        
+        self.console.print("[blue][INFO][/blue] LLM configuration is now managed in config.yml")
+        self.console.print("Edit the 'defaults.llm' field and model definitions in config.yml")
+        self.console.print()
         
         choices = {
             "1": "OpenAI (GPT-4, GPT-3.5 - requires API key)",
-            "2": "Ollama (local models - requires Ollama server)",
+            "2": "Ollama (local models - configure in config.yml)",
             "3": "Skip (no memory extraction)"
         }
         
-        choice = self.prompt_choice("Choose your LLM provider for memory extraction:", choices, "1")
+        choice = self.prompt_choice("Which LLM provider will you use?", choices, "1")
 
         if choice == "1":
-            self.config["LLM_PROVIDER"] = "openai"
             self.console.print("[blue][INFO][/blue] OpenAI selected")
             self.console.print("Get your API key from: https://platform.openai.com/api-keys")
 
@@ -227,35 +230,20 @@ class ChronicleSetup:
             else:
                 api_key = self.prompt_value("OpenAI API key (leave empty to skip)", "")
 
-            model = self.prompt_value("OpenAI model", "gpt-5-mini")
-            base_url = self.prompt_value("OpenAI base URL (for proxies/compatible APIs)", "https://api.openai.com/v1")
-
             if api_key:
                 self.config["OPENAI_API_KEY"] = api_key
-                self.config["OPENAI_MODEL"] = model
-                self.config["OPENAI_BASE_URL"] = base_url
-                self.console.print("[green][SUCCESS][/green] OpenAI configured")
+                self.console.print("[green][SUCCESS][/green] OpenAI API key configured")
+                self.console.print("[blue][INFO][/blue] Set 'defaults.llm: openai-llm' in config.yml to use OpenAI")
             else:
                 self.console.print("[yellow][WARNING][/yellow] No API key provided - memory extraction will not work")
 
         elif choice == "2":
-            self.config["LLM_PROVIDER"] = "ollama"
             self.console.print("[blue][INFO][/blue] Ollama selected")
-            
-            base_url = self.prompt_value("Ollama server URL", "http://host.docker.internal:11434")
-            if not base_url.endswith("/v1"):
-                base_url = base_url.rstrip("/") + "/v1"
-                self.console.print(f"[blue][INFO][/blue] Automatically appending /v1 to Ollama URL: {base_url}")
-
-            model = self.prompt_value("Ollama model", "llama3.2")
-            
-            embedder_model = self.prompt_value("Ollama embedder model", "nomic-embed-text:latest")
-            
-            self.config["OLLAMA_BASE_URL"] = base_url
-            self.config["OLLAMA_MODEL"] = model
-            self.config["OLLAMA_EMBEDDER_MODEL"] = embedder_model
-            self.console.print("[green][SUCCESS][/green] Ollama configured")
-            self.console.print("[yellow][WARNING][/yellow] Make sure Ollama is running and all required models (LLM and embedder) are pulled")
+            self.console.print("[blue][INFO][/blue] Configure Ollama in config.yml:")
+            self.console.print("  1. Set 'defaults.llm: local-llm'")
+            self.console.print("  2. Edit the 'local-llm' model definition with your Ollama URL and model")
+            self.console.print("[green][SUCCESS][/green] See config.yml for Ollama configuration")
+            self.console.print("[yellow][WARNING][/yellow] Make sure Ollama is running and models are pulled")
 
         elif choice == "3":
             self.console.print("[blue][INFO][/blue] Skipping LLM setup - memory extraction disabled")
@@ -469,7 +457,7 @@ class ChronicleSetup:
         
         self.console.print(f"✅ Admin Account: {self.config.get('ADMIN_EMAIL', 'Not configured')}")
         self.console.print(f"✅ Transcription: {self.config.get('TRANSCRIPTION_PROVIDER', 'Not configured')}")
-        self.console.print(f"✅ LLM Provider: {self.config.get('LLM_PROVIDER', 'Not configured')}")
+        self.console.print(f"✅ LLM: Configured in config.yml (defaults.llm)")
         self.console.print(f"✅ Memory Provider: {self.config.get('MEMORY_PROVIDER', 'chronicle')}")
         # Auto-determine URLs based on HTTPS configuration
         if self.config.get('HTTPS_ENABLED') == 'true':

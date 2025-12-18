@@ -24,10 +24,7 @@ services:
       # Import API keys from environment
       - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - OPENAI_BASE_URL=https://api.openai.com/v1
-      # LLM provider configuration (required for memory service)
-      - LLM_PROVIDER=${LLM_PROVIDER:-openai}
-      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
+      - GROQ_API_KEY=${GROQ_API_KEY}
       # Authentication (test-specific)
       - AUTH_SECRET_KEY=test-jwt-signing-key-for-integration-tests
       - ADMIN_PASSWORD=test-admin-password-123
@@ -140,8 +137,7 @@ services:
       - DEBUG_DIR=/app/debug_dir
       - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - LLM_PROVIDER=${LLM_PROVIDER:-openai}
-      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
+      - GROQ_API_KEY=${GROQ_API_KEY}
       - AUTH_SECRET_KEY=test-jwt-signing-key-for-integration-tests
       - ADMIN_PASSWORD=test-admin-password-123
       - ADMIN_EMAIL=test-admin@example.com

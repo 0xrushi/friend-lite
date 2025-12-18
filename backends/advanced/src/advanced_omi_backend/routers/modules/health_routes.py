@@ -221,14 +221,14 @@ async def health_check():
             "healthy": "✅" in llm_health.get("status", ""),
             "base_url": llm_health.get("base_url", ""),
             "model": llm_health.get("default_model", ""),
-            "provider": os.getenv("LLM_PROVIDER", "openai"),
+            "provider": (_llm_def.model_provider if _llm_def else "unknown"),
             "critical": False,
         }
     except asyncio.TimeoutError:
         health_status["services"]["audioai"] = {
             "status": "⚠️ Connection Timeout (8s) - Service may not be running",
             "healthy": False,
-            "provider": os.getenv("LLM_PROVIDER", "openai"),
+            "provider": (_llm_def.model_provider if _llm_def else "unknown"),
             "critical": False,
         }
         overall_healthy = False
@@ -236,7 +236,7 @@ async def health_check():
         health_status["services"]["audioai"] = {
             "status": f"⚠️ Connection Failed: {str(e)} - Service may not be running",
             "healthy": False,
-            "provider": os.getenv("LLM_PROVIDER", "openai"),
+            "provider": (_llm_def.model_provider if _llm_def else "unknown"),
             "critical": False,
         }
         overall_healthy = False
