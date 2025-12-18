@@ -6,17 +6,49 @@ central model registry (config.yml). No environment-based selection
 or provider-specific branching is used for batch transcription.
 """
 
+import asyncio
+import json
 import logging
 from typing import Optional
 
-from .base import BaseTranscriptionProvider, BatchTranscriptionProvider, StreamingTranscriptionProvider
-from advanced_omi_backend.model_registry import get_models_registry
 import httpx
-import asyncio
-import json
 import websockets
 
+from advanced_omi_backend.model_registry import get_models_registry
+from .base import BaseTranscriptionProvider, BatchTranscriptionProvider, StreamingTranscriptionProvider
+
 logger = logging.getLogger(__name__)
+
+
+def _dotted_get(d: dict | list | None, dotted: Optional[str]):
+    """Safely extract a value from nested dict/list using dotted paths.
+
+    Supports simple dot separators and list indexes like "results[0].alternatives[0].transcript".
+    Returns None when the path can't be fully resolved.
+    """
+    if d is None or not dotted:
+        return None
+    cur = d
+    for part in dotted.split('.'):
+        if not part:
+            continue
+        if '[' in part and part.endswith(']'):
+            name, idx_str = part[:-1].split('[', 1)
+            if name:
+                cur = cur.get(name, {}) if isinstance(cur, dict) else {}
+            try:
+                idx = int(idx_str)
+            except Exception:
+                return None
+            if isinstance(cur, list) and 0 <= idx < len(cur):
+                cur = cur[idx]
+            else:
+                return None
+        else:
+            cur = cur.get(part, None) if isinstance(cur, dict) else None
+        if cur is None:
+            return None
+    return cur
 
 
 class RegistryBatchTranscriptionProvider(BatchTranscriptionProvider):
@@ -95,34 +127,12 @@ class RegistryBatchTranscriptionProvider(BatchTranscriptionProvider):
             data = resp.json()
 
         # Extract normalized shape
+        text, words, segments = "", [], []
         extract = (op.get("response", {}) or {}).get("extract") or {}
         if extract:
-            # naive dotted path extractor
-            def _extract(d, dotted):
-                cur = d
-                for part in dotted.split('.'):
-                    if not part:
-                        continue
-                    if '[' in part and part.endswith(']'):
-                        name, idx_str = part[:-1].split('[', 1)
-                        if name:
-                            cur = cur.get(name, {}) if isinstance(cur, dict) else {}
-                        try:
-                            idx = int(idx_str)
-                        except Exception:
-                            return None
-                        if isinstance(cur, list) and 0 <= idx < len(cur):
-                            cur = cur[idx]
-                        else:
-                            return None
-                    else:
-                        cur = cur.get(part, None) if isinstance(cur, dict) else None
-                    if cur is None:
-                        return None
-                return cur
-            text = _extract(data, extract.get("text")) or ""
-            words = _extract(data, extract.get("words")) or []
-            segments = _extract(data, extract.get("segments")) or []
+            text = _dotted_get(data, extract.get("text")) or ""
+            words = _dotted_get(data, extract.get("words")) or []
+            segments = _dotted_get(data, extract.get("segments")) or []
         return {"text": text, "words": words, "segments": segments}
 
 class RegistryStreamingTranscriptionProvider(StreamingTranscriptionProvider):
@@ -156,7 +166,7 @@ class RegistryStreamingTranscriptionProvider(StreamingTranscriptionProvider):
             if diarize:
                 start_msg["config"]["diarize"] = True
 
-        ws = await websockets.connect(url)
+        ws = await websockets.connect(url, open_timeout=10)
         await ws.send(json.dumps(start_msg))
         # Wait for confirmation; non-fatal if not provided
         try:
@@ -221,35 +231,12 @@ class RegistryStreamingTranscriptionProvider(StreamingTranscriptionProvider):
 
         self._streams.pop(client_id, None)
 
-        def _extract(d, dotted):
-            if not dotted:
-                return None
-            cur = d
-            for part in dotted.split('.'):
-                if '[' in part and part.endswith(']'):
-                    name, idx_str = part[:-1].split('[', 1)
-                    if name:
-                        cur = cur.get(name, {}) if isinstance(cur, dict) else {}
-                    try:
-                        idx = int(idx_str)
-                    except Exception:
-                        return None
-                    if isinstance(cur, list) and 0 <= idx < len(cur):
-                        cur = cur[idx]
-                    else:
-                        return None
-                else:
-                    cur = cur.get(part, None) if isinstance(cur, dict) else None
-                if cur is None:
-                    return None
-            return cur
-
         if not isinstance(final, dict):
             return {"text": "", "words": [], "segments": []}
         return {
-            "text": _extract(final, extract.get("text")) if extract else final.get("text", ""),
-            "words": _extract(final, extract.get("words")) if extract else final.get("words", []),
-            "segments": _extract(final, extract.get("segments")) if extract else final.get("segments", []),
+            "text": _dotted_get(final, extract.get("text")) if extract else final.get("text", ""),
+            "words": _dotted_get(final, extract.get("words")) if extract else final.get("words", []),
+            "segments": _dotted_get(final, extract.get("segments")) if extract else final.get("segments", []),
         }
 
 
