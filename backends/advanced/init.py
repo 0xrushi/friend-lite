@@ -457,7 +457,7 @@ class ChronicleSetup:
         
         self.console.print(f"✅ Admin Account: {self.config.get('ADMIN_EMAIL', 'Not configured')}")
         self.console.print(f"✅ Transcription: {self.config.get('TRANSCRIPTION_PROVIDER', 'Not configured')}")
-        self.console.print(f"✅ LLM: Configured in config.yml (defaults.llm)")
+        self.console.print("✅ LLM: Configured in config.yml (defaults.llm)")
         self.console.print(f"✅ Memory Provider: {self.config.get('MEMORY_PROVIDER', 'chronicle')}")
         # Auto-determine URLs based on HTTPS configuration
         if self.config.get('HTTPS_ENABLED') == 'true':
