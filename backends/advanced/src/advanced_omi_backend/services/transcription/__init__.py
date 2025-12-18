@@ -268,9 +268,9 @@ def get_transcription_provider(provider_name: Optional[str] = None, mode: Option
 
 __all__ = [
     "get_transcription_provider",
-    "DeepgramProvider",
-    "DeepgramStreamingProvider",
-    "DeepgramStreamConsumer",
-    "ParakeetProvider",
-    "ParakeetStreamingProvider",
+    "RegistryBatchTranscriptionProvider",
+    "RegistryStreamingTranscriptionProvider",
+    "BaseTranscriptionProvider",
+    "BatchTranscriptionProvider",
+    "StreamingTranscriptionProvider",
 ]
