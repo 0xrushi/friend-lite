@@ -125,10 +125,6 @@ class RegistryBatchTranscriptionProvider(BatchTranscriptionProvider):
             segments = _extract(data, extract.get("segments")) or []
         return {"text": text, "words": words, "segments": segments}
 
-        # Fallback if no extract mapping provided
-        return {"text": data.get("text", ""), "words": data.get("words", []), "segments": data.get("segments", [])}
-
-
 class RegistryStreamingTranscriptionProvider(StreamingTranscriptionProvider):
     """Streaming transcription provider using a config-driven WebSocket template."""
 
@@ -262,14 +258,25 @@ def get_transcription_provider(provider_name: Optional[str] = None, mode: Option
 
     - mode="batch": HTTP-based STT (default)
     - mode="streaming": WebSocket-based STT
+
+    Note: The models registry returns None when config.yml is missing or invalid.
+    We avoid broad exception handling here and simply return None when the
+    required defaults are not configured.
     """
-    try:
-        if (mode or "batch").lower() == "streaming":
-            return RegistryStreamingTranscriptionProvider()
-        return RegistryBatchTranscriptionProvider()
-    except Exception as e:
-        logger.warning(f"No registry-driven STT available: {e}")
+    registry = get_models_registry()
+    if not registry:
         return None
+
+    selected_mode = (mode or "batch").lower()
+    if selected_mode == "streaming":
+        if not registry.get_default("stt_stream"):
+            return None
+        return RegistryStreamingTranscriptionProvider()
+
+    # batch mode
+    if not registry.get_default("stt"):
+        return None
+    return RegistryBatchTranscriptionProvider()
 
 
 __all__ = [
