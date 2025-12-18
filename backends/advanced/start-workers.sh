@@ -51,9 +51,17 @@ start_workers() {
     uv run python -m advanced_omi_backend.workers.rq_worker_entry audio &
     AUDIO_PERSISTENCE_WORKER_PID=$!
 
-    echo "🎵 Starting audio stream Deepgram worker (1 worker for sequential processing)..."
-    uv run python -m advanced_omi_backend.workers.audio_stream_deepgram_worker &
-    AUDIO_STREAM_WORKER_PID=$!
+    # Start the appropriate audio stream worker based on TRANSCRIPTION_PROVIDER
+    TRANSCRIPTION_PROVIDER=${TRANSCRIPTION_PROVIDER:-deepgram}
+    if [ "$TRANSCRIPTION_PROVIDER" = "parakeet" ] || [ "$TRANSCRIPTION_PROVIDER" = "offline" ]; then
+        echo "🎵 Starting audio stream Parakeet worker (1 worker for sequential processing)..."
+        uv run python -m advanced_omi_backend.workers.audio_stream_parakeet_worker &
+        AUDIO_STREAM_WORKER_PID=$!
+    else
+        echo "🎵 Starting audio stream Deepgram worker (1 worker for sequential processing)..."
+        uv run python -m advanced_omi_backend.workers.audio_stream_deepgram_worker &
+        AUDIO_STREAM_WORKER_PID=$!
+    fi
 
     echo "✅ All workers started:"
     echo "  - RQ worker 1: PID $RQ_WORKER_1_PID (transcription, memory, default)"

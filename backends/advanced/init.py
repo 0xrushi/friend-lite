@@ -457,9 +457,6 @@ class ChronicleSetup:
 
     def copy_config_templates(self):
         """Copy other configuration files"""
-        if not Path("memory_config.yaml").exists() and Path("memory_config.yaml.template").exists():
-            shutil.copy2("memory_config.yaml.template", "memory_config.yaml")
-            self.console.print("[green][SUCCESS][/green] memory_config.yaml created")
 
         if not Path("diarization_config.json").exists() and Path("diarization_config.json.template").exists():
             shutil.copy2("diarization_config.json.template", "diarization_config.json")

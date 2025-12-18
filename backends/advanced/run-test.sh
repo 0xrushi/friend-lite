@@ -67,12 +67,7 @@ fi
 print_info "DEEPGRAM_API_KEY length: ${#DEEPGRAM_API_KEY}"
 print_info "OPENAI_API_KEY length: ${#OPENAI_API_KEY}"
 
-# Ensure memory_config.yaml exists
-if [ ! -f "memory_config.yaml" ] && [ -f "memory_config.yaml.template" ]; then
-    print_info "Creating memory_config.yaml from template..."
-    cp memory_config.yaml.template memory_config.yaml
-    print_success "memory_config.yaml created"
-fi
+# memory_config.yaml deprecated; using config.yml for memory settings
 
 # Ensure diarization_config.json exists
 if [ ! -f "diarization_config.json" ] && [ -f "diarization_config.json.template" ]; then

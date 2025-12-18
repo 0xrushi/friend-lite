@@ -3,8 +3,7 @@
 #########################  builder #################################
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS builder
 
-# Accept CUDA version as build argument
-ARG CUDA_VERSION
+ARG CUDA_VERSION=cu128
 
 WORKDIR /app
 

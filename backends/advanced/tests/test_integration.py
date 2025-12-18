@@ -483,12 +483,7 @@ class IntegrationTestRunner:
                 # Stop existing test services and remove volumes for fresh start
                 subprocess.run(["docker", "compose", "-f", "docker-compose-test.yml", "down", "-v"], capture_output=True)
             
-            # Ensure memory_config.yaml exists by copying from template
-            memory_config_path = "memory_config.yaml"
-            memory_template_path = "memory_config.yaml.template"
-            if not os.path.exists(memory_config_path) and os.path.exists(memory_template_path):
-                logger.info(f"📋 Creating {memory_config_path} from template...")
-                shutil.copy2(memory_template_path, memory_config_path)
+            # memory_config.yaml deprecated; memory configuration provided via config.yml
             
             # Check if we're in CI environment
             is_ci = os.environ.get("CI") == "true" or os.environ.get("GITHUB_ACTIONS") == "true"

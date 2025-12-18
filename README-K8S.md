@@ -313,7 +313,7 @@ chronicle/
    # cp backends/advanced/.env.template backends/advanced/.env
    
    # Note: Most environment variables are automatically set by Skaffold during deployment
-   # including MONGODB_URI, QDRANT_BASE_URL, and other Kubernetes-specific values
+   # including MONGODB_URI and other Kubernetes-specific values
    ```
 
 2. **Configure Skaffold Environment**
@@ -335,7 +335,7 @@ chronicle/
    HF_TOKEN=hf_your_huggingface_token_here
    DEEPGRAM_API_KEY=your_deepgram_api_key_here
    
-   # Note: MONGODB_URI and QDRANT_BASE_URL are automatically generated
+   # Note: MONGODB_URI is automatically generated
    # by Skaffold based on your infrastructure namespace and service names
    ```
 

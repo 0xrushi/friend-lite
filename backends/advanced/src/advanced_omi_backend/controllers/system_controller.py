@@ -284,159 +284,100 @@ async def get_speaker_service_status():
 # Memory Configuration Management Functions
 
 async def get_memory_config_raw():
-    """Get current memory configuration YAML as plain text."""
+    """Get current memory configuration (memory section of config.yml) as YAML."""
     try:
-        from advanced_omi_backend.memory_config_loader import get_config_loader
-        
-        config_loader = get_config_loader()
-        config_path = config_loader.config_path
-        
-        if not os.path.exists(config_path):
-            return JSONResponse(
-                status_code=404, content={"error": f"Memory config file not found: {config_path}"}
-            )
-        
-        with open(config_path, 'r') as file:
-            config_yaml = file.read()
-        
+        import yaml
+        from advanced_omi_backend.model_registry import _find_config_path
+
+        cfg_path = _find_config_path()
+        if not os.path.exists(cfg_path):
+            return JSONResponse(status_code=404, content={"error": f"Config file not found: {cfg_path}"})
+
+        with open(cfg_path, 'r') as f:
+            data = yaml.safe_load(f) or {}
+        memory_section = data.get("memory", {})
+        config_yaml = yaml.safe_dump(memory_section, sort_keys=False)
+
         return {
             "config_yaml": config_yaml,
-            "config_path": config_path,
-            "status": "success"
+            "config_path": str(cfg_path),
+            "section": "memory",
+            "status": "success",
         }
-        
     except Exception as e:
         logger.error(f"Error reading memory config: {e}")
-        return JSONResponse(
-            status_code=500, content={"error": f"Failed to read memory config: {str(e)}"}
-        )
+        return JSONResponse(status_code=500, content={"error": f"Failed to read memory config: {str(e)}"})
 
 
 async def update_memory_config_raw(config_yaml: str):
-    """Update memory configuration YAML and hot reload."""
+    """Update memory configuration in config.yml and hot reload registry."""
     try:
         import yaml
-        from advanced_omi_backend.memory_config_loader import get_config_loader
+        from advanced_omi_backend.model_registry import _find_config_path, load_models_config
 
-        # First validate YAML syntax
+        # Validate YAML
         try:
-            yaml.safe_load(config_yaml)
+            new_mem = yaml.safe_load(config_yaml) or {}
         except yaml.YAMLError as e:
-            return JSONResponse(
-                status_code=400, content={"error": f"Invalid YAML syntax: {str(e)}"}
-            )
-        
-        config_loader = get_config_loader()
-        config_path = config_loader.config_path
-        
-        # Create backup
-        backup_path = f"{config_path}.bak"
-        if os.path.exists(config_path):
-            shutil.copy2(config_path, backup_path)
-            logger.info(f"Created backup at {backup_path}")
-        
-        # Write new configuration
-        with open(config_path, 'w') as file:
-            file.write(config_yaml)
-        
-        # Hot reload configuration
-        reload_success = config_loader.reload_config()
-        
-        if reload_success:
-            logger.info("Memory configuration updated and reloaded successfully")
-            return {
-                "message": "Memory configuration updated and reloaded successfully",
-                "config_path": config_path,
-                "backup_created": os.path.exists(backup_path),
-                "status": "success"
-            }
-        else:
-            return JSONResponse(
-                status_code=500, content={"error": "Configuration saved but reload failed"}
-            )
-        
+            return JSONResponse(status_code=400, content={"error": f"Invalid YAML syntax: {str(e)}"})
+
+        cfg_path = _find_config_path()
+        if not os.path.exists(cfg_path):
+            return JSONResponse(status_code=404, content={"error": f"Config file not found: {cfg_path}"})
+
+        # Backup
+        backup_path = f"{cfg_path}.bak"
+        shutil.copy2(cfg_path, backup_path)
+
+        # Update memory section and write file
+        with open(cfg_path, 'r') as f:
+            data = yaml.safe_load(f) or {}
+        data["memory"] = new_mem
+        with open(cfg_path, 'w') as f:
+            yaml.safe_dump(data, f, sort_keys=False)
+
+        # Reload registry
+        load_models_config(force_reload=True)
+
+        return {
+            "message": "Memory configuration updated and reloaded successfully",
+            "config_path": str(cfg_path),
+            "backup_created": os.path.exists(backup_path),
+            "status": "success",
+        }
     except Exception as e:
         logger.error(f"Error updating memory config: {e}")
-        return JSONResponse(
-            status_code=500, content={"error": f"Failed to update memory config: {str(e)}"}
-        )
+        return JSONResponse(status_code=500, content={"error": f"Failed to update memory config: {str(e)}"})
 
 
 async def validate_memory_config(config_yaml: str):
-    """Validate memory configuration YAML syntax."""
+    """Validate memory configuration YAML syntax (memory section)."""
     try:
         import yaml
-        from advanced_omi_backend.memory_config_loader import MemoryConfigLoader
-
-        # Parse YAML
         try:
-            parsed_config = yaml.safe_load(config_yaml)
-            if not parsed_config:
-                return JSONResponse(
-                    status_code=400, content={"error": "Configuration file is empty"}
-                )
+            parsed = yaml.safe_load(config_yaml)
         except yaml.YAMLError as e:
-            return JSONResponse(
-                status_code=400, content={"error": f"Invalid YAML syntax: {str(e)}"}
-            )
-        
-        # Create a temporary config loader to validate structure
-        try:
-            # Create a temporary file for validation
-            import tempfile
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as tmp_file:
-                tmp_file.write(config_yaml)
-                tmp_path = tmp_file.name
-            
-            # Try to load with MemoryConfigLoader to validate structure
-            temp_loader = MemoryConfigLoader(tmp_path)
-            temp_loader.validate_config()
-            
-            # Clean up temp file
-            os.unlink(tmp_path)
-            
-            return {
-                "message": "Configuration is valid",
-                "status": "success"
-            }
-            
-        except ValueError as e:
-            return JSONResponse(
-                status_code=400, content={"error": f"Configuration validation failed: {str(e)}"}
-            )
-        
+            return JSONResponse(status_code=400, content={"error": f"Invalid YAML syntax: {str(e)}"})
+        if not isinstance(parsed, dict):
+            return JSONResponse(status_code=400, content={"error": "Configuration must be a YAML object"})
+        # Minimal checks
+        # provider optional; timeout_seconds optional; extraction enabled/prompt optional
+        return {"message": "Configuration is valid", "status": "success"}
     except Exception as e:
         logger.error(f"Error validating memory config: {e}")
-        return JSONResponse(
-            status_code=500, content={"error": f"Failed to validate memory config: {str(e)}"}
-        )
+        return JSONResponse(status_code=500, content={"error": f"Failed to validate memory config: {str(e)}"})
 
 
 async def reload_memory_config():
-    """Reload memory configuration from file."""
+    """Reload config.yml (registry)."""
     try:
-        from advanced_omi_backend.memory_config_loader import get_config_loader
-        
-        config_loader = get_config_loader()
-        reload_success = config_loader.reload_config()
-        
-        if reload_success:
-            logger.info("Memory configuration reloaded successfully")
-            return {
-                "message": "Memory configuration reloaded successfully",
-                "config_path": config_loader.config_path,
-                "status": "success"
-            }
-        else:
-            return JSONResponse(
-                status_code=500, content={"error": "Failed to reload memory configuration"}
-            )
-        
+        from advanced_omi_backend.model_registry import load_models_config, _find_config_path
+        cfg_path = _find_config_path()
+        load_models_config(force_reload=True)
+        return {"message": "Configuration reloaded", "config_path": str(cfg_path), "status": "success"}
     except Exception as e:
-        logger.error(f"Error reloading memory config: {e}")
-        return JSONResponse(
-            status_code=500, content={"error": f"Failed to reload memory config: {str(e)}"}
-        )
+        logger.error(f"Error reloading config: {e}")
+        return JSONResponse(status_code=500, content={"error": f"Failed to reload config: {str(e)}"})
 
 
 async def delete_all_user_memories(user: User):
@@ -560,5 +501,4 @@ async def set_memory_provider(provider: str):
         return JSONResponse(
             status_code=500, content={"error": f"Failed to set memory provider: {str(e)}"}
         )
-
 
