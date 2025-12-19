@@ -165,14 +165,13 @@ class RegistryStreamingTranscriptionProvider(StreamingTranscriptionProvider):
             start_msg["config"].setdefault("sample_rate", sample_rate)
             if diarize:
                 start_msg["config"]["diarize"] = True
-
-        ws = await websockets.connect(url, open_timeout=10)
-        await ws.send(json.dumps(start_msg))
-        # Wait for confirmation; non-fatal if not provided
         try:
+            ws = await websockets.connect(url, open_timeout=10)
+            await ws.send(json.dumps(start_msg))
             await asyncio.wait_for(ws.recv(), timeout=2.0)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.exception("Failed to start stream for client %s error %s", client_id, e)
+            raise RuntimeError(f"Failed to start stream for client {client_id} error {e}") from e
         self._streams[client_id] = {"ws": ws, "sample_rate": sample_rate, "final": None, "interim": []}
 
     async def process_audio_chunk(self, client_id: str, audio_chunk: bytes) -> dict | None:
