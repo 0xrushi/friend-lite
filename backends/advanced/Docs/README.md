@@ -189,7 +189,7 @@ backends/advanced-backend/
 
 - **Debug API**: `GET /api/debug/memory/*` endpoints show real-time system status
 - **Configuration**: Check `memory_config.yaml` for behavior controls
-- **Logs**: Check Docker logs with `docker compose logs friend-backend`
+- **Logs**: Check Docker logs with `docker compose logs chronicle-backend`
 - **Documentation**: Each doc file links to relevant code sections
 
 ---
