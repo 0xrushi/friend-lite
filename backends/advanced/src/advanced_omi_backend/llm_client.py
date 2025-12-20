@@ -9,7 +9,10 @@ import asyncio
 import logging
 import os
 from abc import ABC, abstractmethod
-from typing import Dict
+from typing import Dict, Any, Optional
+
+from advanced_omi_backend.services.memory.config import load_config_yml as _load_root_config
+from advanced_omi_backend.services.memory.config import resolve_value as _resolve_value
 
 logger = logging.getLogger(__name__)
 
@@ -51,9 +54,10 @@ class OpenAILLMClient(LLMClient):
         temperature: float = 0.1,
     ):
         super().__init__(model, temperature)
-        self.api_key = api_key or os.getenv("OPENAI_API_KEY")
-        self.base_url = base_url or os.getenv("OPENAI_BASE_URL")
-        self.model = model or os.getenv("OPENAI_MODEL")
+        # Do not read from environment here; values are provided by config.yml
+        self.api_key = api_key
+        self.base_url = base_url
+        self.model = model
         if not self.api_key or not self.base_url or not self.model:
             raise ValueError("OPENAI_API_KEY, OPENAI_BASE_URL, and OPENAI_MODEL must be set")
 
@@ -145,17 +149,27 @@ class LLMClientFactory:
 
     @staticmethod
     def create_client() -> LLMClient:
-        """Create an LLM client based on LLM_PROVIDER environment variable."""
-        provider = os.getenv("LLM_PROVIDER", "openai").lower()
+        """Create an LLM client based on config.yml defaults only."""
+        cfg = _load_root_config() or {}
+        defaults = cfg.get("defaults", {}) or {}
+        models = cfg.get("models", []) or []
+        default_llm_name = defaults.get("llm")
+        if not default_llm_name:
+            raise ValueError("defaults.llm not defined in config.yml")
 
-        if provider in ["openai", "ollama"]:
-            return OpenAILLMClient(
-                api_key=os.getenv("OPENAI_API_KEY"),
-                base_url=os.getenv("OPENAI_BASE_URL"),
-                model=os.getenv("OPENAI_MODEL"),
-            )
-        else:
-            raise ValueError(f"Unsupported LLM provider: {provider}")
+        llm_def: Optional[Dict[str, Any]] = next((m for m in models if m.get("name") == default_llm_name), None)
+        if not llm_def:
+            raise ValueError(f"Default LLM model '{default_llm_name}' not found in config.yml")
+
+        api_family = (llm_def.get("api_family") or "openai").lower()
+        if api_family != "openai":
+            raise ValueError(f"Unsupported llm api_family: {api_family}. Only 'openai' compatible APIs are supported.")
+
+        api_key = str(_resolve_value(llm_def.get("api_key", "dummy")))
+        base_url = str(_resolve_value(llm_def.get("model_url", "")))
+        model = str(_resolve_value(llm_def.get("model_name", "")))
+
+        return OpenAILLMClient(api_key=api_key, base_url=base_url, model=model)
 
     @staticmethod
     def get_supported_providers() -> list:

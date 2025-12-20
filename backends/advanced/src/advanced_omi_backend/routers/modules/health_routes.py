@@ -20,6 +20,8 @@ from advanced_omi_backend.client_manager import get_client_manager
 from advanced_omi_backend.llm_client import async_health_check
 from advanced_omi_backend.services.memory import get_memory_service
 from advanced_omi_backend.services.transcription import get_transcription_provider
+from advanced_omi_backend.services.memory.config import load_config_yml as _load_root_config
+from advanced_omi_backend.services.memory.config import resolve_value as _resolve_value
 
 # Create router
 router = APIRouter(tags=["health"])
@@ -83,6 +85,21 @@ async def auth_health_check():
 @router.get("/health")
 async def health_check():
     """Comprehensive health check for all services."""
+    # Load model config once for display fields
+    try:
+        _cfg = _load_root_config() or {}
+        _defaults = _cfg.get("defaults", {}) or {}
+        _models = _cfg.get("models", []) or []
+        _llm_name = _defaults.get("llm")
+        _stt_name = _defaults.get("stt")
+        _llm_def = next((m for m in _models if m.get("name") == _llm_name), None)
+        _stt_def = next((m for m in _models if m.get("name") == _stt_name), None)
+        _llm_provider = (_llm_def.get("model_provider") if _llm_def else None) or "openai"
+        _llm_model = str(_resolve_value(_llm_def.get("model_name", ""))) if _llm_def else None
+        _llm_base_url = str(_resolve_value(_llm_def.get("model_url", ""))) if _llm_def else None
+    except Exception:
+        _llm_provider, _llm_model, _llm_base_url, _stt_name = "openai", None, None, None
+        raise ValueError(f"Failed to load configuration from config.yml for health check: {e}")
     health_status = {
         "status": "healthy",
         "timestamp": int(time.time()),
@@ -100,7 +117,7 @@ async def health_check():
                 if transcription_provider
                 else "Not configured"
             ),
-            "transcription_provider": os.getenv("TRANSCRIPTION_PROVIDER", "auto-detect"),
+            "transcription_provider": _stt_name or "not set",
             "provider_type": (
                 transcription_provider.mode if transcription_provider else "none"
             ),
@@ -108,9 +125,9 @@ async def health_check():
             "active_clients": get_client_manager().get_client_count(),
             "new_conversation_timeout_minutes": float(os.getenv("NEW_CONVERSATION_TIMEOUT_MINUTES", "1.5")),
             "audio_cropping_enabled": os.getenv("AUDIO_CROPPING_ENABLED", "true").lower() == "true",
-            "llm_provider": os.getenv("LLM_PROVIDER"),
-            "llm_model": os.getenv("OPENAI_MODEL"),
-            "llm_base_url": os.getenv("OPENAI_BASE_URL"),
+            "llm_provider": _llm_provider,
+            "llm_model": _llm_model,
+            "llm_base_url": _llm_base_url,
         },
     }
 
@@ -215,14 +232,14 @@ async def health_check():
             "healthy": "✅" in llm_health.get("status", ""),
             "base_url": llm_health.get("base_url", ""),
             "model": llm_health.get("default_model", ""),
-            "provider": os.getenv("LLM_PROVIDER", "openai"),
+            "provider": _llm_provider,
             "critical": False,
         }
     except asyncio.TimeoutError:
         health_status["services"]["audioai"] = {
             "status": "⚠️ Connection Timeout (8s) - Service may not be running",
             "healthy": False,
-            "provider": os.getenv("LLM_PROVIDER", "openai"),
+            "provider": _llm_provider,
             "critical": False,
         }
         overall_healthy = False
@@ -230,7 +247,7 @@ async def health_check():
         health_status["services"]["audioai"] = {
             "status": f"⚠️ Connection Failed: {str(e)} - Service may not be running",
             "healthy": False,
-            "provider": os.getenv("LLM_PROVIDER", "openai"),
+            "provider": _llm_provider,
             "critical": False,
         }
         overall_healthy = False

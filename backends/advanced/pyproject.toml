@@ -10,6 +10,7 @@ dependencies = [
     "fastmcp>=0.5.0", # MCP server for conversation access
     "mem0ai", # Using main branch with PR #3250 AsyncMemory fix
     "langchain_neo4j",
+    "neo4j>=5.0.0",
     "motor>=3.7.1",
     "ollama>=0.4.8",
     "friend-lite-sdk",

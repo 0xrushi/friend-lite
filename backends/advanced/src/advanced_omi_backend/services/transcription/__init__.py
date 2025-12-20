@@ -10,6 +10,9 @@ import logging
 import os
 from typing import Optional
 
+from advanced_omi_backend.services.memory.config import load_config_yml as _load_root_config
+from advanced_omi_backend.services.memory.config import resolve_value as _resolve_value
+
 from .base import BaseTranscriptionProvider
 from advanced_omi_backend.services.transcription.deepgram import (
     DeepgramProvider,
@@ -42,67 +45,43 @@ def get_transcription_provider(
     Raises:
         RuntimeError: If a specific provider is requested but not properly configured.
     """
-    deepgram_key = os.getenv("DEEPGRAM_API_KEY")
-    parakeet_url = os.getenv("PARAKEET_ASR_URL")
-
-    if provider_name:
-        provider_name = provider_name.lower()
-
+    # Prefer config.yml driven selection; no direct env access
     if mode is None:
         mode = "batch"
     mode = mode.lower()
 
-    # Handle specific provider requests
-    if provider_name == "deepgram":
-        if not deepgram_key:
-            raise RuntimeError(
-                "Deepgram transcription provider requested but DEEPGRAM_API_KEY not configured"
-            )
-        logger.info(f"Using Deepgram transcription provider in {mode} mode")
-        if mode == "streaming":
-            return DeepgramStreamingProvider(deepgram_key)
-        else:
-            return DeepgramProvider(deepgram_key)
+    try:
+        cfg = _load_root_config() or {}
+        defaults = cfg.get("defaults", {}) or {}
+        models = cfg.get("models", []) or []
+        stt_name = defaults.get("stt")
+        if stt_name:
+            stt_def = next((m for m in models if m.get("name") == stt_name), None)
+            if stt_def:
+                provider = (stt_def.get("model_provider") or "").lower()
+                api_family = (stt_def.get("api_family") or "http").lower()
+                if provider == "deepgram":
+                    api_key = str(_resolve_value(stt_def.get("api_key", "")))
+                    if not api_key:
+                        logger.warning("Deepgram selected in config.yml but api_key missing or empty")
+                        return None
+                    return DeepgramStreamingProvider(api_key) if mode == "streaming" else DeepgramProvider(api_key)
+                elif provider == "parakeet":
+                    service_url = str(_resolve_value(stt_def.get("model_url", "")))
+                    if not service_url:
+                        logger.warning("Parakeet selected in config.yml but model_url missing or empty")
+                        return None
+                    return ParakeetStreamingProvider(service_url) if mode == "streaming" else ParakeetProvider(service_url)
+                else:
+                    logger.warning(f"Unsupported STT provider in config.yml: {provider}")
+                    return None
+    except Exception as e:
+        logger.warning(f"Failed to load STT provider from config.yml: {e}")
+        raise e
 
-    elif provider_name == "parakeet":
-        if not parakeet_url:
-            raise RuntimeError(
-                "Parakeet ASR provider requested but PARAKEET_ASR_URL not configured"
-            )
-        logger.info(f"Using Parakeet transcription provider in {mode} mode")
-        if mode == "streaming":
-            return ParakeetStreamingProvider(parakeet_url)
-        else:
-            return ParakeetProvider(parakeet_url)
-
-    # Auto-select provider based on available configuration (when provider_name is None)
-    if provider_name is None:
-        # Check TRANSCRIPTION_PROVIDER environment variable first
-        env_provider = os.getenv("TRANSCRIPTION_PROVIDER")
-        if env_provider:
-            # Recursively call with the specified provider
-            return get_transcription_provider(env_provider, mode)
-
-        # Auto-select: prefer Deepgram if available, fallback to Parakeet
-        if deepgram_key:
-            logger.info(f"Auto-selected Deepgram transcription provider in {mode} mode")
-            if mode == "streaming":
-                return DeepgramStreamingProvider(deepgram_key)
-            else:
-                return DeepgramProvider(deepgram_key)
-        elif parakeet_url:
-            logger.info(f"Auto-selected Parakeet transcription provider in {mode} mode")
-            if mode == "streaming":
-                return ParakeetStreamingProvider(parakeet_url)
-            else:
-                return ParakeetProvider(parakeet_url)
-        else:
-            logger.warning(
-                "No transcription provider configured (DEEPGRAM_API_KEY or PARAKEET_ASR_URL required)"
-            )
-            return None
-    else:
-        return None
+    # If no config present, no provider configured
+    logger.warning("No STT default configured in config.yml (defaults.stt)")
+    return None
 
 
 __all__ = [
