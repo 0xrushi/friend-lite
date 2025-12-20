@@ -447,8 +447,8 @@ async def get_memory_config_raw():
         yaml_text = yaml.safe_dump({"memory": memory_section}, sort_keys=False)
         return {"config_yaml": yaml_text}
     except Exception as e:
-        logger.error(f"Failed to load memory configuration: {e}")
-        return JSONResponse(status_code=500, content={"error": f"Failed to load memory configuration: {str(e)}"})
+        logger.exception(f"Failed to load memory configuration: {e}")
+        raise e
 
 
 def _parse_memory_yaml(config_yaml: str) -> dict:
@@ -464,7 +464,8 @@ def _parse_memory_yaml(config_yaml: str) -> dict:
             raise ValueError("'memory' section must be a mapping")
         return mem
     except Exception as e:
-        raise ValueError(f"Invalid YAML: {e}")
+        logger.exception(f"Invalid YAML: {e}")
+        raise e
 
 
 async def validate_memory_config_raw(config_yaml: str):

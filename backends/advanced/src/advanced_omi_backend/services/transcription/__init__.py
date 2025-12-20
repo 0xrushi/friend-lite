@@ -77,7 +77,7 @@ def get_transcription_provider(
                     return None
     except Exception as e:
         logger.warning(f"Failed to load STT provider from config.yml: {e}")
-        raise e
+        raise
 
     # If no config present, no provider configured
     logger.warning("No STT default configured in config.yml (defaults.stt)")

@@ -56,8 +56,6 @@ def graph_rag_query(question: str) -> str:
     # 1. Embed the question
     question_vector = get_embedding(question)
     
-    driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
-    
     # 2. Hybrid Cypher Query: Vector Search + Graph Neighbors
     cypher_query = """
     CALL db.index.vector.queryNodes('chunk_embeddings', 5, $vector)
@@ -81,19 +79,19 @@ def graph_rag_query(question: str) -> str:
     
     context_entries: list[str] = []
     
-    with driver.session() as session:
-        results = session.run(cypher_query, vector=question_vector)
-        
-        for record in results:
-            # Format each result into a snippet for the LLM
-            entry = f"SOURCE: {record['source']}\n"
-            entry += f"TAGS: {', '.join(record['tags'])}\n"
-            entry += f"RELATED NOTES: {', '.join(record['outgoing_links'])}\n"
-            entry += f"CONTENT: {record['content']}\n"
-            entry += "---"
-            context_entries.append(entry)
+    # Use context manager to ensure driver is always closed
+    with GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD)) as driver:
+        with driver.session() as session:
+            results = session.run(cypher_query, vector=question_vector)
             
-    driver.close()
+            for record in results:
+                # Format each result into a snippet for the LLM
+                entry = f"SOURCE: {record['source']}\n"
+                entry += f"TAGS: {', '.join(record['tags'])}\n"
+                entry += f"RELATED NOTES: {', '.join(record['outgoing_links'])}\n"
+                entry += f"CONTENT: {record['content']}\n"
+                entry += "---"
+                context_entries.append(entry)
 
     if not context_entries:
         return "No relevant information found in the graph."

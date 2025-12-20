@@ -367,7 +367,7 @@ class ObsidianService:
         errors = []
         
         for root, dirs, files in os.walk(vault_path):
-            dirs[:] = [d for d in dirs if not d.startswith('.')] # noqa
+            dirs[:] = [d for d in dirs if not d.startswith('.')]
             for file in files:
                 if file.endswith(".md"):
                     try:
@@ -378,9 +378,30 @@ class ObsidianService:
                             self.ingest_note_and_chunks(note_data, chunk_payloads)
                             processed += 1
                     except Exception as e:
-                        logger.error(f"Processing {file} failed: {e}")
+                        logger.exception(f"Processing {file} failed")
                         errors.append(f"{file}: {str(e)}")
 
         return {"status": "success", "processed": processed, "errors": errors}
 
-obsidian_service = ObsidianService()
+# Lazy initialization to avoid startup failures
+_obsidian_service: Optional[ObsidianService] = None
+
+def get_obsidian_service() -> ObsidianService:
+    """Get or create the Obsidian service singleton.
+    
+    Returns:
+        ObsidianService instance, creating it on first access.
+    """
+    global _obsidian_service
+    if _obsidian_service is None:
+        _obsidian_service = ObsidianService()
+    return _obsidian_service
+
+# Backward compatibility: module-level access uses lazy initialization
+# This property-like access ensures the service is only created when first used
+class _ObsidianServiceProxy:
+    """Proxy for lazy access to obsidian_service."""
+    def __getattr__(self, name):
+        return getattr(get_obsidian_service(), name)
+
+obsidian_service = _ObsidianServiceProxy()
