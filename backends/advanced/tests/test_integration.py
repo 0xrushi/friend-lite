@@ -456,7 +456,7 @@ class IntegrationTestRunner:
                 logger.info(f"🔄 Found {len(running_services)} running test services")
                 # Check if test backend is healthy (only skip if not rebuilding)
                 try:
-                    health_check = subprocess.run(["docker", "compose", "-f", "docker-compose-test.yml", "ps", "friend-backend-test"], capture_output=True, text=True)
+                    health_check = subprocess.run(["docker", "compose", "-f", "docker-compose-test.yml", "ps", "chronicle-backend-test"], capture_output=True, text=True)
                     if "healthy" in health_check.stdout or "Up" in health_check.stdout:
                         logger.info("✅ Test services already running and healthy, skipping restart")
                         self.services_started = True

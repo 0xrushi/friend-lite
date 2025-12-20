@@ -396,7 +396,7 @@ uv sync --group (whatever group you want to sync)
 ## Troubleshooting
 
 **Service Issues:**
-- Check logs: `docker compose logs friend-backend`
+- Check logs: `docker compose logs chronicle-backend`
 - Restart services: `docker compose restart`
 - View all services: `docker compose ps`
 
