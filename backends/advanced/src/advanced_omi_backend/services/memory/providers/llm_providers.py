@@ -68,6 +68,25 @@ def _get_openai_client(api_key: str, base_url: str, is_async: bool = False):
     else:
         return openai.OpenAI(api_key=api_key, base_url=base_url)
 
+
+async def generate_openai_embeddings(
+    texts: List[str],
+    api_key: str,
+    base_url: str,
+    model: str,
+) -> List[List[float]]:
+    """Generate embeddings with the async OpenAI client."""
+    client = _get_openai_client(
+        api_key=api_key,
+        base_url=base_url,
+        is_async=True,
+    )
+    response = await client.embeddings.create(
+        model=model,
+        input=texts,
+    )
+    return [data.embedding for data in response.data]
+
 # TODO: Re-enable spacy when Docker build is fixed
 # try:
 #     nlp = spacy.load("en_core_web_sm")
@@ -249,22 +268,15 @@ class OpenAIProvider(LLMProviderBase):
             List of embedding vectors, one per input text
         """
         try:
-            client = _get_openai_client(
+            return await generate_openai_embeddings(
+                texts,
                 api_key=self.api_key,
                 base_url=self.base_url,
-                is_async=True
-            )
-            
-            response = await client.embeddings.create(
                 model=self.embedding_model,
-                input=texts
             )
-            
-            return [data.embedding for data in response.data]
-            
         except Exception as e:
             memory_logger.error(f"OpenAI embedding generation failed: {e}")
-            raise e
+            raise
 
     async def test_connection(self) -> bool:
         """Test OpenAI connection.

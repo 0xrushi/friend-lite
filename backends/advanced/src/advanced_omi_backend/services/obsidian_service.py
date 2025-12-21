@@ -16,12 +16,19 @@ import logging
 import os
 import re
 import hashlib
-import yaml
 from typing import TypedDict, List, Optional
 from pathlib import Path
-from neo4j import GraphDatabase, Driver
-from advanced_omi_backend.services.memory.providers.llm_providers import _get_openai_client
+from advanced_omi_backend.services.memory.providers.llm_providers import (
+    generate_openai_embeddings,
+    chunk_text_with_spacy,
+)
 from advanced_omi_backend.services.memory.config import load_config_yml as load_root_config
+from advanced_omi_backend.utils.model_utils import get_model_config
+from advanced_omi_backend.services.neo4j_client import (
+    Neo4jClient,
+    Neo4jReadInterface,
+    Neo4jWriteInterface,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -94,21 +101,12 @@ class ObsidianService:
         # Fallbacks handled by shared utility
         config_data = load_root_config()
 
-        # Helper to get model config
-        def get_model_config(model_role: str):
-            default_name = config_data.get('defaults', {}).get(model_role)
-            if not default_name:
-                raise ValueError(f"Configuration for 'defaults.{model_role}' not found in config.yml")
-            for model in config_data.get('models', []):
-                if model.get('name') == default_name:
-                    return model
-            raise ValueError(f"Configuration for 'defaults.{model_role}' not found in config.yml")
-
-        llm_config = get_model_config('llm')
+        # Get model configurations using shared utility
+        llm_config = get_model_config(config_data, 'llm')
         if not llm_config:
             raise ValueError("Configuration for 'defaults.llm' not found in config.yml")
 
-        embed_config = get_model_config('embedding')
+        embed_config = get_model_config(config_data, 'embedding')
         if not embed_config:
             raise ValueError("Configuration for 'defaults.embedding' not found in config.yml")
 
@@ -142,47 +140,26 @@ class ObsidianService:
         self.openai_base_url = str(resolve_value(llm_config['model_url']))
         self.openai_api_key = str(resolve_value(llm_config['api_key']))
 
-        # Chunking - can have defaults
-        self.chunk_char_limit = 1000
-        self.chunk_overlap = 200
-        
-        self.client = _get_openai_client(
-            api_key=self.openai_api_key,
-            base_url=self.openai_base_url,
-            is_async=False
-        )
-        
-        self.driver: Optional[Driver] = None
+        # Chunking - uses shared spaCy/text fallback utility
+        self.chunk_word_limit = 120
 
-    def _get_driver(self) -> Driver:
-        """Get or create Neo4j driver connection.
-        
-        Returns:
-            Neo4j driver instance, creating it if it doesn't exist.
-        """
-        if not self.driver:
-            self.driver = GraphDatabase.driver(
-                    self.neo4j_uri, 
-                    auth=(self.neo4j_user, self.neo4j_password)
-                )
-        return self.driver
+        self.neo4j_client = Neo4jClient(self.neo4j_uri, self.neo4j_user, self.neo4j_password)
+        self.read_interface = Neo4jReadInterface(self.neo4j_client)
+        self.write_interface = Neo4jWriteInterface(self.neo4j_client)
 
     def close(self):
         """Close the Neo4j driver connection and clean up resources."""
-        if self.driver:
-            self.driver.close()
-            self.driver = None
+        self.neo4j_client.close()
 
     def reset_driver(self):
         """Reset the driver connection, forcing it to be recreated with current credentials."""
-        self.close()
+        self.neo4j_client.reset()
 
     def setup_database(self) -> None:
         """Create database constraints and vector index for notes and chunks."""
         # Reset driver to ensure we use current credentials
         self.reset_driver()
-        driver = self._get_driver()
-        with driver.session() as session:
+        with self.write_interface.session() as session:
             session.run("CREATE CONSTRAINT note_path IF NOT EXISTS FOR (n:Note) REQUIRE n.path IS UNIQUE")
             session.run("CREATE CONSTRAINT chunk_id IF NOT EXISTS FOR (c:Chunk) REQUIRE c.id IS UNIQUE")
             index_query = f"""
@@ -195,46 +172,10 @@ class ObsidianService:
             """
             session.run(index_query)
 
-    def get_embedding(self, text: str) -> Optional[List[float]]:
-        """Generate embedding vector for text using the configured embedding model.
-        
-        Args:
-            text: Text to generate embedding for.
-        
-        Returns:
-            Embedding vector as list of floats, or None if generation fails.
-        """
-        try:
-            clean_text = re.sub(r'\s+', ' ', text).strip()
-            if not clean_text: return None
-            
-            response = self.client.embeddings.create(input=[clean_text], model=self.embedding_model)
-            return response.data[0].embedding
-        except Exception as e:
-            logger.error(f"Embedding failed for text length {len(text)}: {e}")
-            return None
-
-    def character_chunker(self, text: str) -> List[str]:
-        """Split text into overlapping character-based chunks.
-        
-        Args:
-            text: Text to chunk.
-        
-        Returns:
-            List of text chunks with configured overlap.
-        """
-        chunks = []
-        start = 0
-        limit = self.chunk_char_limit
-        overlap = self.chunk_overlap
-        while start < len(text):
-            end = start + limit
-            chunk = text[start:end]
-            chunks.append(chunk)
-            if end >= len(text):
-                break
-            start += (limit - overlap)
-        return chunks
+    @staticmethod
+    def _clean_text(text: str) -> str:
+        """Normalize whitespace for embedding inputs."""
+        return re.sub(r'\s+', ' ', text).strip()
 
     def parse_obsidian_note(self, root: str, filename: str, vault_path: str) -> NoteData:
         """Parse an Obsidian markdown file and extract metadata.
@@ -270,6 +211,14 @@ class ObsidianService:
         fm_match = re.match(r'^---\s*\n(.*?)\n---\s*\n', raw_text, re.DOTALL)
         content = raw_text[fm_match.end():] if fm_match else raw_text
         
+        '''
+        Pattern breakdown:
+        \[\[ matches [[
+        ([^\]|]+) captures the link name (one or more chars except ] or |)
+        (?:\|[^\]]+)? optionally matches |display text
+        \]\] matches ]]
+        Matches: [[note]] and [[note|display text]]
+        '''
         links = re.findall(r'\[\[([^\]|]+)(?:\|[^\]]+)?\]\]', content)
         tags = re.findall(r'#([a-zA-Z0-9_\-/]+)', content)
         
@@ -283,7 +232,7 @@ class ObsidianService:
             "tags": tags
         }
 
-    def chunking_and_embedding(self, note_data: NoteData) -> List[ChunkPayload]:
+    async def chunking_and_embedding(self, note_data: NoteData) -> List[ChunkPayload]:
         """Chunk note content and generate embeddings for each chunk.
         
         Args:
@@ -292,18 +241,44 @@ class ObsidianService:
         Returns:
             List of chunk payloads with text and embedding vectors.
         """
-        text_chunks = self.character_chunker(note_data["content"])
+        text_chunks = chunk_text_with_spacy(
+            note_data["content"],
+            max_tokens=self.chunk_word_limit,
+        )
         logger.info(
             f"Processing: {note_data['path']} ({len(note_data['content'])} chars -> {len(text_chunks)} chunks)"
         )
 
-        chunk_payloads: List[ChunkPayload] = []
-        for i, txt in enumerate(text_chunks):
-            vector = self.get_embedding(txt)
-            if vector:
-                chunk_payloads.append({"text": txt, "embedding": vector})
+        cleaned_chunks: List[str] = []
+        original_chunks: List[str] = []
+        for txt in text_chunks:
+            cleaned = self._clean_text(txt)
+            if cleaned:
+                cleaned_chunks.append(cleaned)
+                original_chunks.append(txt)
             else:
-                logger.warning(f"Failed to embed chunk {i} for {note_data['path']}")
+                logger.warning(f"Skipping empty chunk for {note_data['path']}")
+
+        if not cleaned_chunks:
+            return []
+
+        try:
+            vectors = await generate_openai_embeddings(
+                cleaned_chunks,
+                api_key=self.openai_api_key,
+                base_url=self.openai_base_url,
+                model=self.embedding_model,
+            )
+        except Exception as e:
+            logger.error(f"Embedding generation failed for {note_data['path']}: {e}")
+            return []
+
+        chunk_payloads: List[ChunkPayload] = []
+        for orig_text, vector in zip(original_chunks, vectors):
+            if vector:
+                chunk_payloads.append({"text": orig_text, "embedding": vector})
+            else:
+                logger.warning(f"Embedding missing for chunk in {note_data['path']}")
 
         return chunk_payloads
 
@@ -314,8 +289,7 @@ class ObsidianService:
             note_data: Parsed note data to store.
             chunks: List of chunks with embeddings to store.
         """
-        driver = self._get_driver()
-        with driver.session() as session:
+        with self.write_interface.session() as session:
             session.run("""
                 MERGE (f:Folder {name: $folder})
                 MERGE (n:Note {path: $path})
@@ -342,7 +316,7 @@ class ObsidianService:
                             "ON CREATE SET target.path = $link + '.md' MERGE (source)-[:LINKS_TO]->(target)",
                             path=note_data['path'], link=link)
 
-    def ingest_vault(self, vault_path: str) -> dict:
+    async def ingest_vault(self, vault_path: str) -> dict:
         """Ingest an entire Obsidian vault into Neo4j.
         
         Processes all markdown files in the vault, chunks them, generates embeddings,
@@ -371,7 +345,7 @@ class ObsidianService:
                 if file.endswith(".md"):
                     try:
                         note_data = self.parse_obsidian_note(root, file, vault_path)
-                        chunk_payloads = self.chunking_and_embedding(note_data)
+                        chunk_payloads = await self.chunking_and_embedding(note_data)
 
                         if chunk_payloads:
                             self.ingest_note_and_chunks(note_data, chunk_payloads)
@@ -382,7 +356,7 @@ class ObsidianService:
 
         return {"status": "success", "processed": processed, "errors": errors}
 
-    def search_obsidian(self, query: str, limit: int = 5) -> List[str]:
+    async def search_obsidian(self, query: str, limit: int = 5) -> List[str]:
         """Search Obsidian vault for relevant context using vector search and graph traversal.
         
         Args:
@@ -392,7 +366,19 @@ class ObsidianService:
         Returns:
             List of formatted context strings from relevant notes.
         """
-        query_vector = self.get_embedding(query)
+        try:
+            clean_query = self._clean_text(query)
+            vectors = await generate_openai_embeddings(
+                [clean_query],
+                api_key=self.openai_api_key,
+                base_url=self.openai_base_url,
+                model=self.embedding_model,
+            )
+            query_vector = vectors[0] if vectors else None
+        except Exception as e:
+            logger.exception(f"Embedding failed for search query: {e}")
+            raise e
+
         if not query_vector:
             return []
             
@@ -417,9 +403,8 @@ class ObsidianService:
         """
         
         context_entries = []
-        driver = self._get_driver()
         try:
-            with driver.session() as session:
+            with self.read_interface.session() as session:
                 results = session.run(cypher_query, vector=query_vector, limit=limit)
                 
                 for record in results:

@@ -1,5 +1,6 @@
 import unittest
-from unittest.mock import MagicMock, patch
+import asyncio
+from unittest.mock import MagicMock, patch, AsyncMock
 import sys
 import os
 
@@ -22,15 +23,16 @@ class TestObsidianService(unittest.TestCase):
         }
         self.addCleanup(self.config_patcher.stop)
 
-        # Patch _get_openai_client
-        self.client_patcher = patch('advanced_omi_backend.services.obsidian_service._get_openai_client')
-        self.mock_get_client = self.client_patcher.start()
-        self.mock_openai_client = MagicMock()
-        self.mock_get_client.return_value = self.mock_openai_client
-        self.addCleanup(self.client_patcher.stop)
+        # Patch embedding helper
+        self.embedding_patcher = patch(
+            'advanced_omi_backend.services.obsidian_service.generate_openai_embeddings',
+            new_callable=AsyncMock
+        )
+        self.mock_generate_embeddings = self.embedding_patcher.start()
+        self.addCleanup(self.embedding_patcher.stop)
 
         # Patch GraphDatabase
-        self.graph_db_patcher = patch('advanced_omi_backend.services.obsidian_service.GraphDatabase')
+        self.graph_db_patcher = patch('advanced_omi_backend.services.neo4j_client.GraphDatabase')
         self.mock_graph_db = self.graph_db_patcher.start()
         self.mock_driver = MagicMock()
         self.mock_session = MagicMock()
@@ -53,7 +55,7 @@ class TestObsidianService(unittest.TestCase):
     def test_search_obsidian_success(self):
         # Setup mock embedding response
         mock_embedding = [0.1, 0.2, 0.3]
-        self.mock_openai_client.embeddings.create.return_value.data = [MagicMock(embedding=mock_embedding)]
+        self.mock_generate_embeddings.return_value = [mock_embedding]
         
         # Setup mock Neo4j results
         mock_record1 = {
@@ -75,11 +77,11 @@ class TestObsidianService(unittest.TestCase):
         self.mock_session.run.return_value = [mock_record1, mock_record2]
         
         # Execute search
-        results = self.service.search_obsidian("test query", limit=2)
+        results = asyncio.run(self.service.search_obsidian("test query", limit=2))
         
         # Assertions
         # 1. Check embedding call
-        self.mock_openai_client.embeddings.create.assert_called_once()
+        self.mock_generate_embeddings.assert_awaited_once()
         
         # 2. Check Neo4j query execution
         self.mock_session.run.assert_called_once()
@@ -110,18 +112,23 @@ class TestObsidianService(unittest.TestCase):
         self.assertTrue(any("CREATE CONSTRAINT chunk_id" in c for c in calls))
         self.assertTrue(any("CREATE VECTOR INDEX chunk_embeddings" in c for c in calls))
 
-    def test_character_chunker(self):
-        text = "a" * 1500
-        self.service.chunk_char_limit = 1000
-        self.service.chunk_overlap = 200
-        
-        chunks = self.service.character_chunker(text)
-        
-        # First chunk: 0 to 1000
-        # Second chunk: starts at 1000 - 200 = 800. Ends at 800 + 1000 = 1800 (but limited to 1500)
-        self.assertEqual(len(chunks), 2)
-        self.assertEqual(len(chunks[0]), 1000)
-        self.assertEqual(len(chunks[1]), 700) # 1500 - 800 = 700
+    @patch('advanced_omi_backend.services.obsidian_service.chunk_text_with_spacy')
+    def test_chunking_and_embedding_uses_shared_chunker(self, mock_chunker):
+        mock_chunker.return_value = ["part1"]
+        self.mock_generate_embeddings.return_value = [[0.1, 0.2]]
+        note_data = {
+            "path": "x",
+            "name": "n",
+            "folder": "f",
+            "content": "sample",
+            "wordcount": 1,
+            "links": [],
+            "tags": [],
+        }
+        chunks = asyncio.run(self.service.chunking_and_embedding(note_data))
+        mock_chunker.assert_called_once_with("sample", max_tokens=self.service.chunk_word_limit)
+        self.mock_generate_embeddings.assert_awaited_once()
+        self.assertEqual(len(chunks), 1)
 
     def test_ingest_note_and_chunks(self):
         note_data = {
@@ -153,11 +160,10 @@ class TestObsidianService(unittest.TestCase):
         self.assertTrue(any("MATCH (source:Note" in c for c in calls))
 
     def test_search_obsidian_embedding_fail(self):
-        # Mock embedding failure (returns None)
-        # The service catches exception and returns None, or if create raises, get_embedding catches it
-        self.mock_openai_client.embeddings.create.side_effect = Exception("API Error")
+        # Mock embedding failure (raises exception)
+        self.mock_generate_embeddings.side_effect = Exception("API Error")
         
-        results = self.service.search_obsidian("test query")
+        results = asyncio.run(self.service.search_obsidian("test query"))
         
         self.assertEqual(results, [])
         self.mock_session.run.assert_not_called()
@@ -165,12 +171,12 @@ class TestObsidianService(unittest.TestCase):
     def test_search_obsidian_db_fail(self):
         # Setup mock embedding
         mock_embedding = [0.1]
-        self.mock_openai_client.embeddings.create.return_value.data = [MagicMock(embedding=mock_embedding)]
+        self.mock_generate_embeddings.return_value = [mock_embedding]
         
         # Mock DB failure
         self.mock_session.run.side_effect = Exception("DB Connection Failed")
         
-        results = self.service.search_obsidian("test query")
+        results = asyncio.run(self.service.search_obsidian("test query"))
         
         # Should return empty list and handle error gracefully (log it)
         self.assertEqual(results, [])
@@ -178,12 +184,12 @@ class TestObsidianService(unittest.TestCase):
     def test_search_obsidian_empty_results(self):
         # Setup mock embedding
         mock_embedding = [0.1]
-        self.mock_openai_client.embeddings.create.return_value.data = [MagicMock(embedding=mock_embedding)]
+        self.mock_generate_embeddings.return_value = [mock_embedding]
         
         # Mock empty DB results
         self.mock_session.run.return_value = []
         
-        results = self.service.search_obsidian("test query")
+        results = asyncio.run(self.service.search_obsidian("test query"))
         
         self.assertEqual(results, [])
 

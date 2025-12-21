@@ -323,7 +323,7 @@ class ChatService:
         if include_obsidian_memory:
             try:
                 obsidian_service = get_obsidian_service()
-                obsidian_context = obsidian_service.search_obsidian(current_message)
+                obsidian_context = await obsidian_service.search_obsidian(current_message)
                 if obsidian_context:
                     context_parts.append("# Relevant Obsidian Notes:")
                     for entry in obsidian_context:
