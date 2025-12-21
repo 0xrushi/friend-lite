@@ -16,7 +16,7 @@ import logging
 import os
 import re
 import hashlib
-from typing import TypedDict, List, Optional
+from typing import TypedDict, List, Optional, Literal
 from pathlib import Path
 from advanced_omi_backend.services.memory.providers.llm_providers import (
     generate_openai_embeddings,
@@ -44,6 +44,15 @@ class NoteData(TypedDict):
 class ChunkPayload(TypedDict):
     text: str
     embedding: List[float]
+
+class ObsidianSearchResult(TypedDict):
+    results: List[str]
+
+class ObsidianSearchError(Exception):
+    """Raised when Obsidian search fails at a specific stage."""
+    def __init__(self, stage: Literal["embedding", "database"], message: str):
+        super().__init__(message)
+        self.stage = stage
 
 def load_env_file(filepath: Path) -> dict[str, str]:
     """Load environment variables from a .env file.
@@ -356,7 +365,7 @@ class ObsidianService:
 
         return {"status": "success", "processed": processed, "errors": errors}
 
-    async def search_obsidian(self, query: str, limit: int = 5) -> List[str]:
+    async def search_obsidian(self, query: str, limit: int = 5) -> ObsidianSearchResult:
         """Search Obsidian vault for relevant context using vector search and graph traversal.
         
         Args:
@@ -364,7 +373,7 @@ class ObsidianService:
             limit: Maximum number of chunks to retrieve.
         
         Returns:
-            List of formatted context strings from relevant notes.
+            Result payload containing the formatted contexts (if any) and structured error info.
         """
         try:
             clean_query = self._clean_text(query)
@@ -375,11 +384,12 @@ class ObsidianService:
                 model=self.embedding_model,
             )
             query_vector = vectors[0] if vectors else None
-        except Exception:
-            raise
+        except Exception as exc:
+            logger.error("Obsidian search embedding failed: %s", exc)
+            raise ObsidianSearchError("embedding", str(exc)) from exc
 
         if not query_vector:
-            return []
+            return {"results": []}
             
         cypher_query = """
         CALL db.index.vector.queryNodes('chunk_embeddings', $limit, $vector)
@@ -419,8 +429,9 @@ class ObsidianService:
                     context_entries.append(entry)
         except Exception as e:
             logger.error(f"Obsidian search failed: {e}")
+            raise ObsidianSearchError("database", str(e)) from e
             
-        return context_entries
+        return {"results": context_entries}
 
 # Lazy initialization to avoid startup failures
 _obsidian_service: Optional[ObsidianService] = None

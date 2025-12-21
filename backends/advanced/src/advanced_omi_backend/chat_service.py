@@ -24,7 +24,10 @@ from advanced_omi_backend.database import get_database
 from advanced_omi_backend.llm_client import get_llm_client
 from advanced_omi_backend.services.memory import get_memory_service
 from advanced_omi_backend.services.memory.base import MemoryEntry
-from advanced_omi_backend.services.obsidian_service import get_obsidian_service
+from advanced_omi_backend.services.obsidian_service import (
+    get_obsidian_service,
+    ObsidianSearchError,
+)
 from advanced_omi_backend.users import User
 
 logger = logging.getLogger(__name__)
@@ -323,13 +326,21 @@ class ChatService:
         if include_obsidian_memory:
             try:
                 obsidian_service = get_obsidian_service()
-                obsidian_context = await obsidian_service.search_obsidian(current_message)
+                obsidian_result = await obsidian_service.search_obsidian(current_message)
+                obsidian_context = obsidian_result["results"]
                 if obsidian_context:
                     context_parts.append("# Relevant Obsidian Notes:")
                     for entry in obsidian_context:
                         context_parts.append(entry)
                     context_parts.append("")
                     logger.info(f"Added {len(obsidian_context)} Obsidian notes to context")
+            except ObsidianSearchError as exc:
+                logger.error(
+                    "Failed to get Obsidian context (%s stage): %s",
+                    exc.stage,
+                    exc,
+                )
+                raise
             except Exception as e:
                 logger.error(f"Failed to get Obsidian context: {e}")
                 raise e

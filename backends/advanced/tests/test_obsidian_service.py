@@ -6,7 +6,10 @@ import os
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
 
-from advanced_omi_backend.services.obsidian_service import ObsidianService
+from advanced_omi_backend.services.obsidian_service import (
+    ObsidianService,
+    ObsidianSearchError,
+)
 
 class TestObsidianService(unittest.TestCase):
 
@@ -77,7 +80,7 @@ class TestObsidianService(unittest.TestCase):
         self.mock_session.run.return_value = [mock_record1, mock_record2]
         
         # Execute search
-        results = asyncio.run(self.service.search_obsidian("test query", limit=2))
+        response = asyncio.run(self.service.search_obsidian("test query", limit=2))
         
         # Assertions
         # 1. Check embedding call
@@ -91,13 +94,14 @@ class TestObsidianService(unittest.TestCase):
         self.assertEqual(kwargs['limit'], 2)
         
         # 3. Check results formatting
-        self.assertEqual(len(results), 2)
+        self.assertEqual(len(response['results']), 2)
         
         # Check first result format
-        self.assertIn("SOURCE: Note1", results[0])
-        self.assertIn("TAGS: tag1, tag2", results[0])
-        self.assertIn("RELATED NOTES: Note2", results[0])
-        self.assertIn("CONTENT: Content of chunk 1", results[0])
+        first_entry = response['results'][0]
+        self.assertIn("SOURCE: Note1", first_entry)
+        self.assertIn("TAGS: tag1, tag2", first_entry)
+        self.assertIn("RELATED NOTES: Note2", first_entry)
+        self.assertIn("CONTENT: Content of chunk 1", first_entry)
 
     def test_setup_database(self):
         self.service.setup_database()
@@ -163,9 +167,11 @@ class TestObsidianService(unittest.TestCase):
         # Mock embedding failure (raises exception)
         self.mock_generate_embeddings.side_effect = Exception("API Error")
         
-        results = asyncio.run(self.service.search_obsidian("test query"))
+        with self.assertRaises(ObsidianSearchError) as ctx:
+            asyncio.run(self.service.search_obsidian("test query"))
         
-        self.assertEqual(results, [])
+        self.assertEqual(ctx.exception.stage, "embedding")
+        self.assertIn("API Error", str(ctx.exception))
         self.mock_session.run.assert_not_called()
 
     def test_search_obsidian_db_fail(self):
@@ -176,10 +182,11 @@ class TestObsidianService(unittest.TestCase):
         # Mock DB failure
         self.mock_session.run.side_effect = Exception("DB Connection Failed")
         
-        results = asyncio.run(self.service.search_obsidian("test query"))
+        with self.assertRaises(ObsidianSearchError) as ctx:
+            asyncio.run(self.service.search_obsidian("test query"))
         
-        # Should return empty list and handle error gracefully (log it)
-        self.assertEqual(results, [])
+        self.assertEqual(ctx.exception.stage, "database")
+        self.assertIn("DB Connection Failed", str(ctx.exception))
 
     def test_search_obsidian_empty_results(self):
         # Setup mock embedding
@@ -189,9 +196,9 @@ class TestObsidianService(unittest.TestCase):
         # Mock empty DB results
         self.mock_session.run.return_value = []
         
-        results = asyncio.run(self.service.search_obsidian("test query"))
+        response = asyncio.run(self.service.search_obsidian("test query"))
         
-        self.assertEqual(results, [])
+        self.assertEqual(response['results'], [])
 
 if __name__ == '__main__':
     unittest.main()
