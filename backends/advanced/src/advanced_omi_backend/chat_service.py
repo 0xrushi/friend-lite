@@ -23,6 +23,7 @@ from motor.motor_asyncio import AsyncIOMotorCollection
 from advanced_omi_backend.database import get_database
 from advanced_omi_backend.llm_client import get_llm_client
 from advanced_omi_backend.services.memory import get_memory_service
+from advanced_omi_backend.services.memory.base import MemoryEntry
 from advanced_omi_backend.users import User
 
 logger = logging.getLogger(__name__)
@@ -280,7 +281,7 @@ class ChatService:
             logger.error(f"Failed to add message to session {message.session_id}: {e}")
             return False
 
-    async def get_relevant_memories(self, query: str, user_id: str) -> List[Dict]:
+    async def get_relevant_memories(self, query: str, user_id: str) -> List[MemoryEntry]:
         """Get relevant memories for the user's query."""
         try:
             memories = await self.memory_service.search_memories(
@@ -303,7 +304,7 @@ class ChatService:
         
         # Get relevant memories
         memories = await self.get_relevant_memories(current_message, user_id)
-        memory_ids = [memory.get("id", "") for memory in memories if memory.get("id")]
+        memory_ids = [memory.id for memory in memories if memory.id]
 
         # Build context string
         context_parts = []
@@ -312,7 +313,7 @@ class ChatService:
         if memories:
             context_parts.append("# Relevant Personal Memories:")
             for i, memory in enumerate(memories, 1):
-                memory_text = memory.get("memory", memory.get("text", ""))
+                memory_text = memory.content
                 if memory_text:
                     context_parts.append(f"{i}. {memory_text}")
             context_parts.append("")
