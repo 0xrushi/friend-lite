@@ -79,7 +79,7 @@ def get_transcription_provider(
         raise
 
     # If no config present, no provider configured
-    logger.warning("No STT default configured in config.yml (defaults.stt)")
+    logger.warning(f"STT default '{stt_name}' configured but no matching model definition found")
     return None
 
 

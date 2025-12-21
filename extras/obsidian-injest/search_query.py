@@ -22,13 +22,32 @@ from config import (
 logger = logging.getLogger(__name__)
 
 def get_embedding(text: str) -> list[float]:
-    """Encodes the question into a vector."""
-    response = client.embeddings.create(input=[text], model=EMBEDDING_MODEL)
-    return response.data[0].embedding
+    """Encodes the text into a vector.
+    Args:
+        text: The text to encode.
+    Returns:
+        The embedding vector.
+    Raises:
+        Exception: If embedding generation fails.
+    """
+    try:
+        response = client.embeddings.create(input=[text], model=EMBEDDING_MODEL)
+        return response.data[0].embedding
+    except Exception as e:
+        logger.error(f"Failed to generate embedding: {e}")
+        raise e
 
 
 def generate_answer(question: str, context: str) -> str:
-    """Sends the context and question to the LLM for the final answer."""
+    """Sends the context and question to the LLM for the final answer.
+    Args:
+        question: The user's question.
+        context: The context from the graph.
+    Returns:
+        The answer from the LLM.
+    Raises:
+        Exception: If LLM completion fails.
+    """
     prompt = f"""
 You are an expert assistant for an Obsidian Vault. Use the following retrieved documents and graph context to answer the user's question.
 If the answer is not in the context, say you don't know.
@@ -42,15 +61,19 @@ USER QUESTION: {question}
 
 FINAL ANSWER:"""
 
-    response = client.chat.completions.create(
-        model=LLM_MODEL,
-        messages=[
-            {"role": "system", "content": "You are a helpful assistant that answers questions based on provided knowledge graph context."},
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0.2 # Lower temperature for factual accuracy
-    )
-    return response.choices[0].message.content
+    try:
+        response = client.chat.completions.create(
+            model=LLM_MODEL,
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant that answers questions based on provided knowledge graph context."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.2  # Lower temperature for factual accuracy
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        logger.error(f"Failed to generate answer: {e}")
+        raise e
 
 def graph_rag_query(question: str) -> str:
     # 1. Embed the question

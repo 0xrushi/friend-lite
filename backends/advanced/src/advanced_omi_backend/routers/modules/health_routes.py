@@ -93,13 +93,12 @@ async def health_check():
         _llm_name = _defaults.get("llm")
         _stt_name = _defaults.get("stt")
         _llm_def = next((m for m in _models if m.get("name") == _llm_name), None)
-        _stt_def = next((m for m in _models if m.get("name") == _stt_name), None)
         _llm_provider = (_llm_def.get("model_provider") if _llm_def else None) or "openai"
         _llm_model = str(_resolve_value(_llm_def.get("model_name", ""))) if _llm_def else None
         _llm_base_url = str(_resolve_value(_llm_def.get("model_url", ""))) if _llm_def else None
     except Exception as e:
         _llm_provider, _llm_model, _llm_base_url, _stt_name = "openai", None, None, None
-        raise ValueError(f"Failed to load configuration from config.yml for health check: {e}")
+        raise e
     health_status = {
         "status": "healthy",
         "timestamp": int(time.time()),

@@ -161,7 +161,6 @@ class ObsidianService:
             Neo4j driver instance, creating it if it doesn't exist.
         """
         if not self.driver:
-            # Use basic auth when both user and password are provided; otherwise connect without auth
             self.driver = GraphDatabase.driver(
                     self.neo4j_uri, 
                     auth=(self.neo4j_user, self.neo4j_password)
