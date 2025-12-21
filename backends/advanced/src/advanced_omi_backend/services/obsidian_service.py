@@ -117,7 +117,7 @@ class ObsidianService:
         # Load .env file as fallback (for local dev or if env vars not set)
         candidate_env_files = [
             Path("/app/.env"),
-            self.CURRENT_DIR.parent.parent.parent.parent / ".env",          # /app/.env when running in container
+            self.CURRENT_DIR.parent.parent.parent.parent / ".env",          # Project root .env file ToDo cleanup needed after k8s is migrated and there is no .env file in the project root.
             self.CURRENT_DIR.parent.parent.parent.parent / "backends" / "advanced" / ".env",  # repo path
         ]
         env_data = {}
