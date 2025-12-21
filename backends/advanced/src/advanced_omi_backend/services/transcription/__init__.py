@@ -59,7 +59,6 @@ def get_transcription_provider(
             stt_def = next((m for m in models if m.get("name") == stt_name), None)
             if stt_def:
                 provider = (stt_def.get("model_provider") or "").lower()
-                api_family = (stt_def.get("api_family") or "http").lower()
                 if provider == "deepgram":
                     api_key = str(_resolve_value(stt_def.get("api_key", "")))
                     if not api_key:
