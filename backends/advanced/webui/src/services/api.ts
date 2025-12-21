@@ -268,10 +268,13 @@ export const chatApi = {
   getHealth: () => api.get('/api/chat/health'),
   
   // Streaming chat (returns EventSource for Server-Sent Events)
-  sendMessage: (message: string, sessionId?: string) => {
+  sendMessage: (message: string, sessionId?: string, includeObsidianMemory?: boolean) => {
     const requestBody: any = { message }
     if (sessionId) {
       requestBody.session_id = sessionId
+    }
+    if (includeObsidianMemory) {
+      requestBody.include_obsidian_memory = includeObsidianMemory
     }
     
     return fetch(`${BACKEND_URL}/api/chat/send`, {

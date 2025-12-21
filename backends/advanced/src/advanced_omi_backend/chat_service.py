@@ -24,6 +24,7 @@ from advanced_omi_backend.database import get_database
 from advanced_omi_backend.llm_client import get_llm_client
 from advanced_omi_backend.services.memory import get_memory_service
 from advanced_omi_backend.services.memory.base import MemoryEntry
+from advanced_omi_backend.services.obsidian_service import get_obsidian_service
 from advanced_omi_backend.users import User
 
 logger = logging.getLogger(__name__)
@@ -296,7 +297,7 @@ class ChatService:
             return []
 
     async def format_conversation_context(
-        self, session_id: str, user_id: str, current_message: str
+        self, session_id: str, user_id: str, current_message: str, include_obsidian_memory: bool = False
     ) -> Tuple[str, List[str]]:
         """Format conversation context with memory integration."""
         # Get recent conversation history
@@ -318,6 +319,21 @@ class ChatService:
                     context_parts.append(f"{i}. {memory_text}")
             context_parts.append("")
 
+        # Add Obsidian context if requested
+        if include_obsidian_memory:
+            try:
+                obsidian_service = get_obsidian_service()
+                obsidian_context = obsidian_service.search_obsidian(current_message)
+                if obsidian_context:
+                    context_parts.append("# Relevant Obsidian Notes:")
+                    for entry in obsidian_context:
+                        context_parts.append(entry)
+                    context_parts.append("")
+                    logger.info(f"Added {len(obsidian_context)} Obsidian notes to context")
+            except Exception as e:
+                logger.error(f"Failed to get Obsidian context: {e}")
+                raise e
+
         # Add conversation history
         if messages:
             context_parts.append("# Recent Conversation:")
@@ -334,7 +350,7 @@ class ChatService:
         return context, memory_ids
 
     async def generate_response_stream(
-        self, session_id: str, user_id: str, message_content: str
+        self, session_id: str, user_id: str, message_content: str, include_obsidian_memory: bool = False
     ) -> AsyncGenerator[Dict, None]:
         """Generate streaming response with memory context."""
         if not self._initialized:
@@ -353,7 +369,7 @@ class ChatService:
 
             # Format context with memories
             context, memory_ids = await self.format_conversation_context(
-                session_id, user_id, message_content
+                session_id, user_id, message_content, include_obsidian_memory=include_obsidian_memory
             )
 
             # Send memory context used

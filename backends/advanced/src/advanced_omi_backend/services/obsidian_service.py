@@ -382,6 +382,62 @@ class ObsidianService:
 
         return {"status": "success", "processed": processed, "errors": errors}
 
+    def search_obsidian(self, query: str, limit: int = 5) -> List[str]:
+        """Search Obsidian vault for relevant context using vector search and graph traversal.
+        
+        Args:
+            query: User's search query.
+            limit: Maximum number of chunks to retrieve.
+        
+        Returns:
+            List of formatted context strings from relevant notes.
+        """
+        query_vector = self.get_embedding(query)
+        if not query_vector:
+            return []
+            
+        cypher_query = """
+        CALL db.index.vector.queryNodes('chunk_embeddings', $limit, $vector)
+        YIELD node AS chunk, score
+        
+        // Find the parent Note
+        MATCH (note:Note)-[:HAS_CHUNK]->(chunk)
+        
+        // Get graph context: What tags and linked files are around this note?
+        OPTIONAL MATCH (note)-[:HAS_TAG]->(t:Tag)
+        OPTIONAL MATCH (note)-[:LINKS_TO]->(linked:Note)
+        
+        RETURN 
+            note.name AS source,
+            chunk.text AS content,
+            collect(DISTINCT t.name) AS tags,
+            collect(DISTINCT linked.name) AS outgoing_links,
+            score
+        ORDER BY score DESC
+        """
+        
+        context_entries = []
+        driver = self._get_driver()
+        try:
+            with driver.session() as session:
+                results = session.run(cypher_query, vector=query_vector, limit=limit)
+                
+                for record in results:
+                    entry = f"SOURCE: {record['source']}\n"
+                    tags = record['tags']
+                    if tags:
+                        entry += f"TAGS: {', '.join(tags)}\n"
+                    links = record['outgoing_links']
+                    if links:
+                        entry += f"RELATED NOTES: {', '.join(links)}\n"
+                    entry += f"CONTENT: {record['content']}\n"
+                    entry += "---"
+                    context_entries.append(entry)
+        except Exception as e:
+            logger.error(f"Obsidian search failed: {e}")
+            
+        return context_entries
+
 # Lazy initialization to avoid startup failures
 _obsidian_service: Optional[ObsidianService] = None
 
