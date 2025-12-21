@@ -1,7 +1,7 @@
 """Shared Neo4j client utilities for the advanced OMI backend."""
 
 from typing import Optional
-from neo4j import GraphDatabase, Driver
+from neo4j import GraphDatabase, Driver, READ_ACCESS, WRITE_ACCESS
 
 
 class Neo4jClient:
@@ -43,15 +43,21 @@ class Neo4jInterface:
         return self.client.session(access_mode=self.access_mode)
 
     def run(self, query: str, **parameters):
+        """Run a query and return consumed result data.
+
+        Note: For queries requiring iteration over results, use session()
+        directly with a context manager.
+        """
         with self.session() as session:
-            return session.run(query, **parameters)
+            result = session.run(query, **parameters)
+            return result.data()  # Consume result before session closes
 
 
 class Neo4jReadInterface(Neo4jInterface):
     def __init__(self, client: Neo4jClient):
-        super().__init__(client, access_mode="READ")
+        super().__init__(client, access_mode=READ_ACCESS)
 
 
 class Neo4jWriteInterface(Neo4jInterface):
     def __init__(self, client: Neo4jClient):
-        super().__init__(client, access_mode="WRITE")
+        super().__init__(client, access_mode=WRITE_ACCESS)

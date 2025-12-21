@@ -8,7 +8,7 @@ from config.yml that can be used across different LLM services.
 from typing import Dict, Any, Optional
 
 
-def get_model_config(config_data: Dict[str, Any], model_role: str) -> Optional[Dict[str, Any]]:
+def get_model_config(config_data: Dict[str, Any], model_role: str) -> Dict[str, Any]:
     """
     Get model configuration for a given role from config.yml data.
     
@@ -21,7 +21,7 @@ def get_model_config(config_data: Dict[str, Any], model_role: str) -> Optional[D
         model_role: The role to look up (e.g., 'llm', 'embedding', 'stt', 'tts')
     
     Returns:
-        Model configuration dictionary if found, None otherwise.
+        Model configuration dictionary if found
     
     Raises:
         ValueError: If the default for the role is not found or the model

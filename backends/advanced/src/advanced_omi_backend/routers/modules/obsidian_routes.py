@@ -118,7 +118,6 @@ async def upload_obsidian_zip(
                 zip_file_handle.close()
             except Exception as close_error:
                 logger.warning(f"Failed to close zip file handle: {close_error}")
-                raise close_error
 
 
 @router.post("/start")
@@ -220,8 +219,7 @@ async def get_status(job_id: str, current_user: User = Depends(current_active_us
                     "vault_path": job_data.get("vault_path")
                 }
             except:
-                pass
-                
+                raise HTTPException(status_code=500, detail="Failed to get job status")
         raise HTTPException(status_code=404, detail="Job not found")
 
 

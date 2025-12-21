@@ -375,9 +375,8 @@ class ObsidianService:
                 model=self.embedding_model,
             )
             query_vector = vectors[0] if vectors else None
-        except Exception as e:
-            logger.exception(f"Embedding failed for search query: {e}")
-            raise e
+        except Exception:
+            raise
 
         if not query_vector:
             return []

@@ -26,7 +26,7 @@ def count_markdown_files(vault_path: str) -> int:
 
 
 @async_job(redis=True, beanie=False)
-async def ingest_obsidian_vault_job(job_id: str, vault_path: str, redis_client=None) -> dict:
+async def ingest_obsidian_vault_job(job_id: str, vault_path: str, redis_client=None) -> dict: # type: ignore
     """
     Long-running ingestion job enqueued on the default RQ queue.
     """
