@@ -279,7 +279,7 @@ class ObsidianService:
                 model=self.embedding_model,
             )
         except Exception as e:
-            logger.error(f"Embedding generation failed for {note_data['path']}: {e}")
+            logger.exception(f"Embedding generation failed for {note_data['path']}: {e}")
             return []
 
         chunk_payloads: List[ChunkPayload] = []

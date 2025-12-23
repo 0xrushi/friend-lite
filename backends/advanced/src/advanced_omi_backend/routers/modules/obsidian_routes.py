@@ -86,7 +86,7 @@ async def upload_obsidian_zip(
         try:
             extract_zip(zip_path, extract_dir)
         except zipfile.BadZipFile as e:
-            logger.error(f"Invalid zip file: {e}")
+            logger.exception(f"Invalid zip file: {e}")
             raise HTTPException(status_code=400, detail=f"Invalid zip file: {e}")
         except ZipExtractionError as e:
             logger.error(f"Error extracting zip file: {e}")
@@ -109,7 +109,7 @@ async def upload_obsidian_zip(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to process uploaded zip: {e}")
+        logger.exception(f"Failed to process uploaded zip: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to process uploaded zip: {e}")
     finally:
         # Ensure file handle is closed (following upload_files_async pattern)
@@ -149,7 +149,7 @@ async def start_ingestion(
             
             return {"message": "Ingestion started", "job_id": job_id, "rq_job_id": rq_job.id}
         except Exception as e:
-            logger.error(f"Failed to start job {job_id}: {e}")
+            logger.exception(f"Failed to start job {job_id}: {e}")
             raise HTTPException(status_code=500, detail=f"Failed to start job: {e}")
             
     # Check if already in RQ

@@ -5,7 +5,7 @@ This module provides reusable utilities for retrieving model configurations
 from config.yml that can be used across different LLM services.
 """
 
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 
 def get_model_config(config_data: Dict[str, Any], model_role: str) -> Dict[str, Any]:
