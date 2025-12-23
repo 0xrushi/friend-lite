@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, Optional, Union
 
+from advanced_omi_backend.model_registry import get_models_registry
+
 memory_logger = logging.getLogger("memory_service")
 
 
@@ -87,101 +89,193 @@ def load_config_yml() -> Dict[str, Any]:
                 
     raise FileNotFoundError(f"config.yml not found in any of: {[str(p) for p in paths]}")
 
+def create_openmemory_config(
+    server_url: str = "http://localhost:8765",
+    client_name: str = "chronicle",
+    user_id: str = "default",
+    timeout: int = 30
+) -> Dict[str, Any]:
+    """Create OpenMemory MCP configuration."""
+    return {
+        "server_url": server_url,
+        "client_name": client_name,
+        "user_id": user_id,
+        "timeout": timeout
+    }
+
+
+def create_mycelia_config(
+    api_url: str = "http://localhost:8080",
+    api_key: str = None,
+    timeout: int = 30,
+    **kwargs
+) -> Dict[str, Any]:
+    """Create Mycelia configuration."""
+    config = {
+        "api_url": api_url,
+        "timeout": timeout,
+    }
+    if api_key:
+        config["api_key"] = api_key
+    config.update(kwargs)
+    return config
+
+
 def build_memory_config_from_env() -> MemoryConfig:
-    """Build memory configuration strictly from config.yml."""
-    root_config = load_config_yml()
-    
-    # 1. Basic Memory Provider Settings
-    mem_section = root_config.get('memory', {})
-    provider_name = mem_section.get('provider', 'chronicle').lower()
-    if provider_name not in [p.value for p in MemoryProvider]:
-        raise ValueError(f"Unsupported memory provider: {provider_name}")
-    
-    provider_enum = MemoryProvider(provider_name)
-    timeout_seconds = int(mem_section.get('timeout_seconds', 1200))
-    extraction_section = mem_section.get('extraction', {})
-    extraction_enabled = extraction_section.get('enabled', True)
-    extraction_prompt = extraction_section.get('prompt')
+    """Build memory configuration from environment variables and YAML config."""
+    try:
+        # Determine memory provider from registry
+        reg = get_models_registry()
+        mem_settings = (reg.memory if reg else {})
+        memory_provider = (mem_settings.get("provider") or "chronicle").lower()
 
-    # 2. OpenMemory MCP / Mycelia specific configs
-    openmemory_config = None
-    if provider_enum == MemoryProvider.OPENMEMORY_MCP:
-        om_raw = mem_section.get('openmemory_mcp', {})
-        openmemory_config = {
-            "server_url": resolve_value(om_raw.get('server_url', 'http://localhost:8765')),
-            "client_name": resolve_value(om_raw.get('client_name', 'chronicle')),
-            "user_id": resolve_value(om_raw.get('user_id', 'default')),
-            "timeout": int(resolve_value(om_raw.get('timeout', 30)))
-        }
+        # Map legacy provider names to current names
+        if memory_provider in ("friend-lite", "friend_lite"):
+            memory_logger.info(f"🔧 Mapping legacy provider '{memory_provider}' to 'chronicle'")
+            memory_provider = "chronicle"
 
-    mycelia_config = None
-    if provider_enum == MemoryProvider.MYCELIA:
-        my_raw = mem_section.get('mycelia', {})
-        mycelia_config = {
-            "api_url": resolve_value(my_raw.get('api_url', 'http://localhost:5173')),
-            "timeout": int(resolve_value(my_raw.get('timeout', 30)))
-        }
+        if memory_provider not in [p.value for p in MemoryProvider]:
+            raise ValueError(f"Unsupported memory provider: {memory_provider}")
 
-    # 3. LLM Configuration (for Chronicle or Mycelia temporal extraction)
-    default_llm_name = root_config.get('defaults', {}).get('llm')
-    default_embed_name = root_config.get('defaults', {}).get('embedding')
-    
-    def find_model(name):
-        for m in root_config.get('models', []):
-            if m.get('name') == name:
-                return m
-        return None
+        memory_provider_enum = MemoryProvider(memory_provider)
+        
+        # For OpenMemory MCP, configuration is much simpler
+        if memory_provider_enum == MemoryProvider.OPENMEMORY_MCP:
+            mcp = (mem_settings.get("openmemory_mcp") or {})
+            openmemory_config = create_openmemory_config(
+                server_url=mcp.get("server_url", "http://localhost:8765"),
+                client_name=mcp.get("client_name", "chronicle"),
+                user_id=mcp.get("user_id", "default"),
+                timeout=int(mcp.get("timeout", 30)),
+            )
 
-    llm_def = find_model(default_llm_name)
-    if not llm_def:
-        raise ValueError(f"Default LLM model '{default_llm_name}' not found in config.yml")
-    
-    embed_def = find_model(default_embed_name)
-    if not embed_def:
-        raise ValueError(f"Default embedding model '{default_embed_name}' not found in config.yml")
+            memory_logger.info(f"🔧 Memory config: Provider=OpenMemory MCP, URL={openmemory_config['server_url']}")
 
-    llm_provider_name = llm_def.get('model_provider', 'openai').lower()
-    llm_provider_enum = LLMProvider(llm_provider_name)
-    
-    llm_config = {
-        "api_key": str(resolve_value(llm_def.get('api_key', ''))),
-        "model": str(resolve_value(llm_def.get('model_name', ''))),
-        "base_url": str(resolve_value(llm_def.get('model_url', ''))),
-        "embedding_model": str(resolve_value(embed_def.get('model_name', ''))),
-        "temperature": llm_def.get('model_params', {}).get('temperature', 0.1),
-        "max_tokens": llm_def.get('model_params', {}).get('max_tokens', 2000)
-    }
+            return MemoryConfig(
+                memory_provider=memory_provider_enum,
+                openmemory_config=openmemory_config,
+                timeout_seconds=int(mem_settings.get("timeout_seconds", 1200)),
+            )
 
-    # 4. Vector Store Configuration
-    default_vs_name = root_config.get('defaults', {}).get('vector_store')
-    vs_def = find_model(default_vs_name)
-    if not vs_def:
-        raise ValueError(f"Default vector store '{default_vs_name}' not found in config.yml")
-    
-    vs_provider_name = vs_def.get('model_provider', 'qdrant').lower()
-    vs_provider_enum = VectorStoreProvider(vs_provider_name)
-    
-    # Get embedding dims for vector store
-    # Since we can't easily query model here without potentially hanging, 
-    # we'll use the dimension from embed_def if provided, or default
-    embedding_dims = int(resolve_value(embed_def.get('embedding_dimensions')))
+        # For Mycelia provider, build mycelia_config + llm_config (for temporal extraction)
+        if memory_provider_enum == MemoryProvider.MYCELIA:
+            # Registry-driven Mycelia configuration
+            mys = (mem_settings.get("mycelia") or {})
+            api_url = mys.get("api_url", "http://localhost:5173")
+            timeout = int(mys.get("timeout", 30))
+            mycelia_config = create_mycelia_config(api_url=api_url, timeout=timeout)
 
-    vs_config = {
-        "host": resolve_value(vs_def.get('model_params', {}).get('host', 'localhost')),
-        "port": int(resolve_value(vs_def.get('model_params', {}).get('port', 6333))),
-        "collection_name": resolve_value(vs_def.get('model_params', {}).get('collection_name', 'memories')),
-        "embedding_dims": embedding_dims
-    }
+            # Use default LLM from registry for temporal extraction
+            llm_config = None
+            if reg:
+                llm_def = reg.get_default("llm")
+                if llm_def:
+                    llm_config = create_openai_config(
+                        api_key=llm_def.api_key or "",
+                        model=llm_def.model_name,
+                        base_url=llm_def.model_url,
+                    )
+                    memory_logger.info(f"🔧 Mycelia temporal extraction (registry): LLM={llm_def.model_name}")
+            else:
+                memory_logger.warning("Registry not available for Mycelia temporal extraction; disabled")
 
-    return MemoryConfig(
-        memory_provider=provider_enum,
-        llm_provider=llm_provider_enum,
-        vector_store_provider=vs_provider_enum,
-        llm_config=llm_config,
-        vector_store_config=vs_config,
-        openmemory_config=openmemory_config,
-        mycelia_config=mycelia_config,
-        extraction_prompt=extraction_prompt,
-        extraction_enabled=extraction_enabled,
-        timeout_seconds=timeout_seconds
-    )
+            memory_logger.info(f"🔧 Memory config: Provider=Mycelia, URL={mycelia_config['api_url']}")
+
+            return MemoryConfig(
+                memory_provider=memory_provider_enum,
+                mycelia_config=mycelia_config,
+                llm_config=llm_config,
+                timeout_seconds=int(mem_settings.get("timeout_seconds", timeout)),
+            )
+        
+        # For Chronicle provider, use registry-driven configuration
+        
+        # Registry-driven configuration only (no env-based branching)
+        llm_config = None
+        llm_provider_enum = LLMProvider.OPENAI  # OpenAI-compatible API family
+        embedding_dims = 1536
+        if not reg:
+            raise ValueError("config.yml not found; cannot configure LLM provider")
+        llm_def = reg.get_default("llm")
+        embed_def = reg.get_default("embedding")
+        if not llm_def:
+            raise ValueError("No default LLM defined in config.yml")
+        model = llm_def.model_name
+        embedding_model = (embed_def.model_name if embed_def else "text-embedding-3-small")
+        base_url = llm_def.model_url
+        memory_logger.info(
+            f"🔧 Memory config (registry): LLM={model}, Embedding={embedding_model}, Base URL={base_url}"
+        )
+        llm_config = create_openai_config(
+            api_key=llm_def.api_key or "",
+            model=model,
+            embedding_model=embedding_model,
+            base_url=base_url,
+            temperature=float(llm_def.model_params.get("temperature", 0.1)),
+            max_tokens=int(llm_def.model_params.get("max_tokens", 2000)),
+        )
+        embedding_dims = get_embedding_dims(llm_config)
+        memory_logger.info(f"🔧 Setting Embedder dims {embedding_dims}")
+
+        # Build vector store configuration from registry (no env)
+        vs_def = reg.get_default("vector_store")
+        if not vs_def or (vs_def.model_provider or "").lower() != "qdrant":
+            raise ValueError("No default Qdrant vector_store defined in config.yml")
+
+        host = str(vs_def.model_params.get("host", "qdrant"))
+        port = int(vs_def.model_params.get("port", 6333))
+        collection_name = str(vs_def.model_params.get("collection_name", "omi_memories"))
+        vector_store_config = create_qdrant_config(
+            host=host,
+            port=port,
+            collection_name=collection_name,
+            embedding_dims=embedding_dims,
+        )
+        vector_store_provider_enum = VectorStoreProvider.QDRANT
+        
+        # Get memory extraction settings from registry
+        extraction_cfg = (mem_settings.get("extraction") or {})
+        extraction_enabled = bool(extraction_cfg.get("enabled", True))
+        extraction_prompt = extraction_cfg.get("prompt") if extraction_enabled else None
+
+        # Timeouts/tunables from registry.memory
+        timeout_seconds = int(mem_settings.get("timeout_seconds", 1200))
+
+        memory_logger.info(
+            f"🔧 Memory config: Provider=Chronicle, LLM={llm_def.model_provider if 'llm_def' in locals() else 'unknown'}, VectorStore={vector_store_provider_enum}, Extraction={extraction_enabled}"
+        )
+
+        return MemoryConfig(
+            memory_provider=memory_provider_enum,
+            llm_provider=llm_provider_enum,
+            vector_store_provider=vector_store_provider_enum,
+            llm_config=llm_config,
+            vector_store_config=vector_store_config,
+            embedder_config={},  # Included in llm_config
+            extraction_prompt=extraction_prompt,
+            extraction_enabled=extraction_enabled,
+            timeout_seconds=timeout_seconds,
+        )
+        
+    except ImportError:
+        memory_logger.warning("Config loader not available, using environment variables only")
+        raise
+
+
+def get_embedding_dims(llm_config: Dict[str, Any]) -> int:
+    """
+    Query the embedding endpoint and return the embedding vector length.
+    Works for OpenAI and OpenAI-compatible endpoints (e.g., Ollama).
+    """
+    embedding_model = llm_config.get('embedding_model')
+    try:
+        reg = get_models_registry()
+        if reg:
+            emb_def = reg.get_default("embedding")
+            if emb_def and emb_def.embedding_dimensions:
+                return int(emb_def.embedding_dimensions)
+    except Exception as e:
+        memory_logger.exception(
+            f"Failed to get embedding dimensions from registry for model '{embedding_model}'"
+        )
+        raise e
