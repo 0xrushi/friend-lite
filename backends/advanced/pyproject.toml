@@ -56,7 +56,7 @@ profile = "black"
 line-length = 100
 
 [tool.uv.sources]
-mem0ai = { git = "https://github.com/AnkushMalaker/mem0.git", rev = "async-client-unbound-var-fix" }
+mem0ai = { git = "https://github.com/AnkushMalaker/mem0.git", rev = "main" }
 
 [tool.poetry.dependencies]
 robotframework = "^6.1.1"

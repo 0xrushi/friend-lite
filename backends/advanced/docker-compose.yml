@@ -8,7 +8,6 @@ services:
     env_file:
       - .env
     volumes:
-      - ../../config.yml:/app/config.yml
       - ./src:/app/src  # Mount source code for development
       - ./data/audio_chunks:/app/audio_chunks
       - ./data/debug_dir:/app/debug_dir
@@ -62,7 +61,6 @@ services:
     env_file:
       - .env
     volumes:
-      - ../../config.yml:/app/config.yml
       - ./src:/app/src
       - ./start-workers.sh:/app/start-workers.sh
       - ./data/audio_chunks:/app/audio_chunks

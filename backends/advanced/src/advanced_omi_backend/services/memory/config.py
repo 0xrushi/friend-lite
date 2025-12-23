@@ -121,6 +121,41 @@ def create_mycelia_config(
     return config
 
 
+def create_openai_config(
+    api_key: str,
+    model: str,
+    *,
+    embedding_model: Optional[str] = None,
+    base_url: str = "https://api.openai.com/v1",
+    temperature: float = 0.1,
+    max_tokens: int = 2000,
+) -> Dict[str, Any]:
+    """Create OpenAI/OpenAI-compatible client configuration."""
+    return {
+        "api_key": api_key,
+        "model": model,
+        "embedding_model": embedding_model or model,
+        "base_url": base_url,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+    }
+
+
+def create_qdrant_config(
+    host: str = "localhost",
+    port: int = 6333,
+    collection_name: str = "omi_memories",
+    embedding_dims: int = 1536,
+) -> Dict[str, Any]:
+    """Create Qdrant vector store configuration."""
+    return {
+        "host": host,
+        "port": port,
+        "collection_name": collection_name,
+        "embedding_dims": embedding_dims,
+    }
+
+
 def build_memory_config_from_env() -> MemoryConfig:
     """Build memory configuration from environment variables and YAML config."""
     try:
