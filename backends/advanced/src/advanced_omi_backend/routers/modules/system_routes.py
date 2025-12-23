@@ -89,10 +89,20 @@ async def validate_memory_config_raw(
 @router.post("/admin/memory/config/raw")
 async def update_memory_config_raw(
     config_yaml: str = Body(..., media_type="text/plain"),
-    current_user: User = Depends(current_superuser),
+    current_user: User = Depends(current_superuser)
 ):
     """Save memory YAML to config.yml and hot-reload. Admin only."""
     return await system_controller.update_memory_config_raw(config_yaml)
+
+
+@router.post("/admin/memory/config/validate")
+async def validate_memory_config(
+    config_yaml: str = Body(..., media_type="text/plain"),
+    current_user: User = Depends(current_superuser)
+):
+    """Validate memory configuration YAML syntax. Admin only."""
+    return await system_controller.validate_memory_config(config_yaml)
+
 
 @router.post("/admin/memory/config/reload")
 async def reload_memory_config(current_user: User = Depends(current_superuser)):
