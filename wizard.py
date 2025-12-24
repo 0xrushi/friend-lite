@@ -387,12 +387,27 @@ def main():
         else:
             failed_services.append(service)
     
+    # Check for Obsidian/Neo4j configuration
+    obsidian_enabled = False
+    if 'advanced' in selected_services and 'advanced' not in failed_services:
+        backend_env_path = Path('backends/advanced/.env')
+        if backend_env_path.exists():
+            neo4j_host = read_env_value(str(backend_env_path), 'NEO4J_HOST')
+            if neo4j_host and not is_placeholder(neo4j_host, 'your-neo4j-host-here', 'your_neo4j_host_here'):
+                obsidian_enabled = True
+    
     # Final Summary
     console.print(f"\n🎊 [bold green]Setup Complete![/bold green]")
     console.print(f"✅ {success_count}/{len(selected_services)} services configured successfully")
     
     if failed_services:
         console.print(f"❌ Failed services: {', '.join(failed_services)}")
+    
+    # Inform about Obsidian/Neo4j if configured
+    if obsidian_enabled:
+        console.print(f"\n📚 [bold cyan]Obsidian Integration Detected[/bold cyan]")
+        console.print("   Neo4j will be automatically started with the 'obsidian' profile")
+        console.print("   when you start the backend service.")
     
     # Next Steps
     console.print("\n📖 [bold]Next Steps:[/bold]")
