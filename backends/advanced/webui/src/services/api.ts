@@ -164,7 +164,7 @@ export const systemApi = {
       headers: { 'Content-Type': 'text/plain' }
     }),
   validateMemoryConfig: (configYaml: string) =>
-    api.post('/api/admin/memory/config/validate', configYaml, {
+    api.post('/api/admin/memory/config/validate/raw', configYaml, {
       headers: { 'Content-Type': 'text/plain' }
     }),
   reloadMemoryConfig: () => api.post('/api/admin/memory/config/reload'),

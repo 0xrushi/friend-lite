@@ -93,19 +93,24 @@ async def auth_health_check():
 async def health_check():
     """Comprehensive health check for all services."""
     # Load model config once for display fields
+    _llm_def = None
+    _llm_provider = "openai"
+    _llm_model = None
+    _llm_base_url = None
+    _stt_name = None
+
     try:
-        _cfg = _load_root_config() or {}
-        _defaults = _cfg.get("defaults", {}) or {}
-        _models = _cfg.get("models", []) or []
-        _llm_name = _defaults.get("llm")
-        _stt_name = _defaults.get("stt")
-        _llm_def = next((m for m in _models if m.get("name") == _llm_name), None)
-        _llm_provider = (_llm_def.get("model_provider") if _llm_def else None) or "openai"
-        _llm_model = str(_resolve_value(_llm_def.get("model_name", ""))) if _llm_def else None
-        _llm_base_url = str(_resolve_value(_llm_def.get("model_url", ""))) if _llm_def else None
+        registry = get_models_registry()
+        if registry:
+            _defaults = registry.defaults
+            _llm_name = _defaults.get("llm")
+            _stt_name = _defaults.get("stt")
+            _llm_def = registry.models.get(_llm_name)
+            _llm_provider = _llm_def.model_provider if _llm_def else "openai"
+            _llm_model = _llm_def.model_name if _llm_def else None
+            _llm_base_url = _llm_def.model_url if _llm_def else None
     except Exception as e:
-        _llm_provider, _llm_model, _llm_base_url, _stt_name = "openai", None, None, None
-        raise e
+        logger.warning(f"Failed to load model config for health check: {e}")
     health_status = {
         "status": "healthy",
         "timestamp": int(time.time()),
