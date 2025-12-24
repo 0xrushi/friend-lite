@@ -89,14 +89,6 @@ async def get_memory_config_raw(current_user: User = Depends(current_superuser))
     """Get memory configuration YAML from config.yml. Admin only."""
     return await system_controller.get_memory_config_raw()
 
-@router.post("/admin/memory/config/validate")
-async def validate_memory_config_raw(
-    config_yaml: str = Body(..., media_type="text/plain"),
-    current_user: User = Depends(current_superuser),
-):
-    """Validate posted memory YAML (does not save). Admin only."""
-    return await system_controller.validate_memory_config_raw(config_yaml)
-
 @router.post("/admin/memory/config/raw")
 async def update_memory_config_raw(
     config_yaml: str = Body(..., media_type="text/plain"),
@@ -106,12 +98,21 @@ async def update_memory_config_raw(
     return await system_controller.update_memory_config_raw(config_yaml)
 
 
+@router.post("/admin/memory/config/validate/raw")
+async def validate_memory_config_raw(
+    config_yaml: str = Body(..., media_type="text/plain"),
+    current_user: User = Depends(current_superuser),
+):
+    """Validate posted memory YAML as plain text (used by Web UI). Admin only."""
+    return await system_controller.validate_memory_config(config_yaml)
+
+
 @router.post("/admin/memory/config/validate")
 async def validate_memory_config(
     request: MemoryConfigRequest,
     current_user: User = Depends(current_superuser)
 ):
-    """Validate memory configuration YAML syntax. Admin only."""
+    """Validate memory configuration YAML sent as JSON (used by tests). Admin only."""
     return await system_controller.validate_memory_config(request.config_yaml)
 
 
