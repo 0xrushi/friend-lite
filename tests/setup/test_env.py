@@ -1,25 +1,30 @@
 # Test Environment Configuration
 import os
 from pathlib import Path
+from dotenv import load_dotenv
 
-# Load .env file from backends/advanced directory if it exists
-# This allows tests to work when run from VSCode or command line
-def load_env_file():
-    """Load environment variables from .env file if it exists."""
-    # Look for .env in backends/advanced directory
-    env_file = Path(__file__).parent.parent.parent / "backends" / "advanced" / ".env"
-    if env_file.exists():
-        with open(env_file) as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith('#') and '=' in line:
-                    key, value = line.split('=', 1)
-                    # Only set if not already in environment (CI takes precedence)
-                    if key not in os.environ:
-                        os.environ[key] = value
+# Load environment files with correct precedence:
+# 1. Environment variables (highest priority - from shell, CI, etc.)
+# 2. .env.test (test-specific configuration)
+# 3. .env (default configuration)
 
-# Load .env file (CI environment variables take precedence)
-load_env_file()
+# Find repository root (tests/setup/test_env.py -> go up 2 levels)
+REPO_ROOT = Path(__file__).parent.parent.parent
+backend_dir = REPO_ROOT / "backends" / "advanced"
+
+# Export absolute paths for Robot Framework keywords
+BACKEND_DIR = str(backend_dir.absolute())
+REPO_ROOT_DIR = str(REPO_ROOT.absolute())
+SPEAKER_RECOGNITION_DIR = str((REPO_ROOT / "extras" / "speaker-recognition").absolute())
+
+# Load in reverse order of precedence (since override=False won't overwrite existing vars)
+# Load .env.test first (will set test-specific values)
+load_dotenv(backend_dir / ".env.test", override=False)
+
+# Load .env second (will only fill in missing values, won't override .env.test or existing env vars)
+load_dotenv(backend_dir / ".env", override=False)
+
+# Final precedence: environment variables > .env.test > .env
 
 # API Configuration
 API_URL = 'http://localhost:8001'  # Use BACKEND_URL from test.env

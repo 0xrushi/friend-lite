@@ -51,23 +51,36 @@ start_workers() {
     uv run python -m advanced_omi_backend.workers.rq_worker_entry audio &
     AUDIO_PERSISTENCE_WORKER_PID=$!
 
-    # Only start Deepgram worker if DEEPGRAM_API_KEY is set
-    if [ -n "$DEEPGRAM_API_KEY" ]; then
+    # Determine which STT provider to use from config.yml
+    echo "📋 Checking config.yml for default STT provider..."
+    DEFAULT_STT=$(uv run python -c "
+from advanced_omi_backend.model_registry import get_models_registry
+registry = get_models_registry()
+if registry and registry.defaults:
+    stt_model = registry.get_default('stt')
+    if stt_model:
+        print(stt_model.model_provider or '')
+" 2>/dev/null || echo "")
+
+    echo "📋 Configured STT provider: ${DEFAULT_STT:-none}"
+
+    # Only start Deepgram worker if configured as default STT
+    if [[ "$DEFAULT_STT" == "deepgram" ]] && [ -n "$DEEPGRAM_API_KEY" ]; then
         echo "🎵 Starting audio stream Deepgram worker (1 worker for sequential processing)..."
         uv run python -m advanced_omi_backend.workers.audio_stream_deepgram_worker &
         AUDIO_STREAM_DEEPGRAM_WORKER_PID=$!
     else
-        echo "⏭️  Skipping Deepgram stream worker (DEEPGRAM_API_KEY not set)"
+        echo "⏭️  Skipping Deepgram stream worker (not configured as default STT or API key missing)"
         AUDIO_STREAM_DEEPGRAM_WORKER_PID=""
     fi
 
-    # Only start Parakeet worker if PARAKEET_ASR_URL is set
-    if [ -n "$PARAKEET_ASR_URL" ]; then
+    # Only start Parakeet worker if configured as default STT
+    if [[ "$DEFAULT_STT" == "parakeet" ]]; then
         echo "🎵 Starting audio stream Parakeet worker (1 worker for sequential processing)..."
         uv run python -m advanced_omi_backend.workers.audio_stream_parakeet_worker &
         AUDIO_STREAM_PARAKEET_WORKER_PID=$!
     else
-        echo "⏭️  Skipping Parakeet stream worker (PARAKEET_ASR_URL not set)"
+        echo "⏭️  Skipping Parakeet stream worker (not configured as default STT)"
         AUDIO_STREAM_PARAKEET_WORKER_PID=""
     fi
 
@@ -168,12 +181,14 @@ monitor_worker_health &
 MONITOR_PID=$!
 echo "🩺 Self-healing monitor started: PID $MONITOR_PID"
 
-# Wait for any worker process to exit
-wait -n
+# Keep the script running and let the self-healing monitor handle worker failures
+# Don't use wait -n (fail-fast on first worker exit) - this kills all workers when one fails
+# Instead, wait for the monitor process or explicit shutdown signal
+echo "⏳ Workers running - self-healing monitor will restart failed workers automatically"
+wait $MONITOR_PID
 
-# If we get here, one worker process has exited - kill everything
-echo "⚠️  One worker exited, stopping all workers..."
-kill $MONITOR_PID 2>/dev/null || true
+# If monitor exits (should only happen on SIGTERM/SIGINT), shut down gracefully
+echo "🛑 Monitor exited, shutting down all workers..."
 kill $RQ_WORKER_1_PID 2>/dev/null || true
 kill $RQ_WORKER_2_PID 2>/dev/null || true
 kill $RQ_WORKER_3_PID 2>/dev/null || true
@@ -185,5 +200,5 @@ kill $AUDIO_PERSISTENCE_WORKER_PID 2>/dev/null || true
 [ -n "$AUDIO_STREAM_PARAKEET_WORKER_PID" ] && kill $AUDIO_STREAM_PARAKEET_WORKER_PID 2>/dev/null || true
 wait
 
-echo "🔄 All workers stopped"
-exit 1
+echo "✅ All workers stopped gracefully"
+exit 0
