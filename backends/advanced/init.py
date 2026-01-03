@@ -33,22 +33,21 @@ class ChronicleSetup:
         self.config: Dict[str, Any] = {}
         self.args = args or argparse.Namespace()
         self.config_yml_path = Path("../../config/config.yml")  # Main config at config/config.yml
-        self.config_yml_data = None
 
         # Check if we're in the right directory
         if not Path("pyproject.toml").exists() or not Path("src").exists():
             self.console.print("[red][ERROR][/red] Please run this script from the backends/advanced directory")
             sys.exit(1)
 
-        # Initialize ConfigManager
+        # Initialize ConfigManager (single source of truth for config.yml)
         self.config_manager = ConfigManager(service_path="backends/advanced")
         self.console.print(f"[blue][INFO][/blue] Using config.yml at: {self.config_manager.config_yml_path}")
 
-        # Load existing config or create default structure
-        self.config_yml_data = self.config_manager.get_full_config()
-        if not self.config_yml_data:
-            self.console.print("[yellow][WARNING][/yellow] config.yml not found, will create default structure")
-            self.config_yml_data = self._get_default_config_structure()
+        # Verify config.yml exists - fail fast if missing
+        if not self.config_manager.config_yml_path.exists():
+            self.console.print(f"[red][ERROR][/red] config.yml not found at {self.config_manager.config_yml_path}")
+            self.console.print("[red][ERROR][/red] Run wizard.py from project root to create config.yml")
+            sys.exit(1)
 
     def print_header(self, title: str):
         """Print a colorful header"""
@@ -138,28 +137,6 @@ class ChronicleSetup:
         return f"{key_clean[:show_chars]}{'*' * min(15, len(key_clean) - show_chars * 2)}{key_clean[-show_chars:]}"
 
 
-    def _get_default_config_structure(self) -> Dict[str, Any]:
-        """Return default config.yml structure if file doesn't exist"""
-        return {
-            "defaults": {
-                "llm": "openai-llm",
-                "embedding": "openai-embed",
-                "stt": "stt-deepgram",
-                "tts": "tts-http",
-                "vector_store": "vs-qdrant"
-            },
-            "models": [],
-            "memory": {
-                "provider": "chronicle",
-                "timeout_seconds": 1200,
-                "extraction": {
-                    "enabled": True,
-                    "prompt": "Extract important information from this conversation and return a JSON object with an array named \"facts\"."
-                }
-            }
-        }
-
-
     def setup_authentication(self):
         """Configure authentication settings"""
         self.print_section("Authentication Setup")
@@ -208,7 +185,6 @@ class ChronicleSetup:
 
                 # Update config.yml to use Deepgram
                 self.config_manager.update_config_defaults({"stt": "stt-deepgram"})
-                self.config_yml_data = self.config_manager.get_full_config()  # Reload
 
                 self.console.print("[green][SUCCESS][/green] Deepgram configured in config.yml and .env")
                 self.console.print("[blue][INFO][/blue] Set defaults.stt: stt-deepgram")
@@ -224,7 +200,6 @@ class ChronicleSetup:
 
             # Update config.yml to use Parakeet
             self.config_manager.update_config_defaults({"stt": "stt-parakeet-batch"})
-            self.config_yml_data = self.config_manager.get_full_config()  # Reload
 
             self.console.print("[green][SUCCESS][/green] Parakeet configured in config.yml and .env")
             self.console.print("[blue][INFO][/blue] Set defaults.stt: stt-parakeet-batch")
@@ -266,7 +241,6 @@ class ChronicleSetup:
                 self.config["OPENAI_API_KEY"] = api_key
                 # Update config.yml to use OpenAI models
                 self.config_manager.update_config_defaults({"llm": "openai-llm", "embedding": "openai-embed"})
-                self.config_yml_data = self.config_manager.get_full_config()  # Reload to stay in sync
                 self.console.print("[green][SUCCESS][/green] OpenAI configured in config.yml")
                 self.console.print("[blue][INFO][/blue] Set defaults.llm: openai-llm")
                 self.console.print("[blue][INFO][/blue] Set defaults.embedding: openai-embed")
@@ -277,7 +251,6 @@ class ChronicleSetup:
             self.console.print("[blue][INFO][/blue] Ollama selected")
             # Update config.yml to use Ollama models
             self.config_manager.update_config_defaults({"llm": "local-llm", "embedding": "local-embed"})
-            self.config_yml_data = self.config_manager.get_full_config()  # Reload to stay in sync
             self.console.print("[green][SUCCESS][/green] Ollama configured in config.yml")
             self.console.print("[blue][INFO][/blue] Set defaults.llm: local-llm")
             self.console.print("[blue][INFO][/blue] Set defaults.embedding: local-embed")
@@ -287,7 +260,6 @@ class ChronicleSetup:
             self.console.print("[blue][INFO][/blue] Skipping LLM setup - memory extraction disabled")
             # Disable memory extraction in config.yml
             self.config_manager.update_memory_config({"extraction": {"enabled": False}})
-            self.config_yml_data = self.config_manager.get_full_config()  # Reload to stay in sync
 
     def setup_memory(self):
         """Configure memory provider - updates config.yml"""
@@ -309,7 +281,6 @@ class ChronicleSetup:
 
             # Update config.yml (also updates .env automatically)
             self.config_manager.update_memory_config({"provider": "chronicle"})
-            self.config_yml_data = self.config_manager.get_full_config()  # Reload to stay in sync
             self.console.print("[green][SUCCESS][/green] Chronicle memory provider configured in config.yml and .env")
 
         elif choice == "2":
@@ -330,7 +301,6 @@ class ChronicleSetup:
                     "timeout": int(timeout)
                 }
             })
-            self.config_yml_data = self.config_manager.get_full_config()  # Reload to stay in sync
             self.console.print("[green][SUCCESS][/green] OpenMemory MCP configured in config.yml and .env")
             self.console.print("[yellow][WARNING][/yellow] Remember to start OpenMemory: cd ../../extras/openmemory-mcp && docker compose up -d")
 
@@ -348,7 +318,6 @@ class ChronicleSetup:
                     "timeout": int(timeout)
                 }
             })
-            self.config_yml_data = self.config_manager.get_full_config()  # Reload to stay in sync
             self.console.print("[green][SUCCESS][/green] Mycelia memory provider configured in config.yml and .env")
             self.console.print("[yellow][WARNING][/yellow] Make sure Mycelia is running at the configured URL")
 
@@ -405,21 +374,19 @@ class ChronicleSetup:
                 neo4j_password = self.prompt_password("Neo4j password (min 8 chars)")
 
         if enable_obsidian:
-            # Update .env with credentials
-            self.config["OBSIDIAN_ENABLED"] = "true"
+            # Update .env with credentials only (secrets, not feature flags)
             self.config["NEO4J_HOST"] = "neo4j-mem0"
             self.config["NEO4J_USER"] = "neo4j"
             self.config["NEO4J_PASSWORD"] = neo4j_password
 
-            # Update config.yml with feature flag
-            if "memory" not in self.config_yml_data:
-                self.config_yml_data["memory"] = {}
-            if "obsidian" not in self.config_yml_data["memory"]:
-                self.config_yml_data["memory"]["obsidian"] = {}
-
-            self.config_yml_data["memory"]["obsidian"]["enabled"] = True
-            self.config_yml_data["memory"]["obsidian"]["neo4j_host"] = "neo4j-mem0"
-            self.config_yml_data["memory"]["obsidian"]["timeout"] = 30
+            # Update config.yml with feature flag (source of truth) - auto-saves via ConfigManager
+            self.config_manager.update_memory_config({
+                "obsidian": {
+                    "enabled": True,
+                    "neo4j_host": "neo4j-mem0",
+                    "timeout": 30
+                }
+            })
 
             self.console.print("[green][SUCCESS][/green] Obsidian/Neo4j configured")
             self.console.print("[blue][INFO][/blue] Neo4j will start automatically with --profile obsidian")
@@ -585,28 +552,32 @@ class ChronicleSetup:
 
         self.console.print(f"✅ Admin Account: {self.config.get('ADMIN_EMAIL', 'Not configured')}")
 
+        # Get current config from ConfigManager (single source of truth)
+        config_yml = self.config_manager.get_full_config()
+
         # Show transcription from config.yml
-        stt_default = self.config_yml_data.get("defaults", {}).get("stt", "not set")
+        stt_default = config_yml.get("defaults", {}).get("stt", "not set")
         stt_model = next(
-            (m for m in self.config_yml_data.get("models", []) if m.get("name") == stt_default),
+            (m for m in config_yml.get("models", []) if m.get("name") == stt_default),
             None
         )
         stt_provider = stt_model.get("model_provider", "unknown") if stt_model else "not configured"
         self.console.print(f"✅ Transcription: {stt_provider} ({stt_default}) - config.yml")
 
         # Show LLM config from config.yml
-        llm_default = self.config_yml_data.get("defaults", {}).get("llm", "not set")
-        embedding_default = self.config_yml_data.get("defaults", {}).get("embedding", "not set")
+        llm_default = config_yml.get("defaults", {}).get("llm", "not set")
+        embedding_default = config_yml.get("defaults", {}).get("embedding", "not set")
         self.console.print(f"✅ LLM: {llm_default} (config.yml)")
         self.console.print(f"✅ Embedding: {embedding_default} (config.yml)")
 
         # Show memory provider from config.yml
-        memory_provider = self.config_yml_data.get("memory", {}).get("provider", "chronicle")
+        memory_provider = config_yml.get("memory", {}).get("provider", "chronicle")
         self.console.print(f"✅ Memory Provider: {memory_provider} (config.yml)")
 
-        # Show Obsidian/Neo4j status
-        if self.config.get('OBSIDIAN_ENABLED') == 'true':
-            neo4j_host = self.config.get('NEO4J_HOST', 'not set')
+        # Show Obsidian/Neo4j status (read from config.yml)
+        obsidian_config = config_yml.get("memory", {}).get("obsidian", {})
+        if obsidian_config.get("enabled", False):
+            neo4j_host = obsidian_config.get("neo4j_host", "not set")
             self.console.print(f"✅ Obsidian/Neo4j: Enabled ({neo4j_host})")
 
         # Auto-determine URLs based on HTTPS configuration
@@ -625,9 +596,13 @@ class ChronicleSetup:
         self.print_section("Next Steps")
         self.console.print()
 
+        # Get current config from ConfigManager (single source of truth)
+        config_yml = self.config_manager.get_full_config()
+
         self.console.print("1. Start the main services:")
-        # Include --profile obsidian if Obsidian is enabled
-        if self.config.get('OBSIDIAN_ENABLED') == 'true':
+        # Include --profile obsidian if Obsidian is enabled (read from config.yml)
+        obsidian_enabled = config_yml.get("memory", {}).get("obsidian", {}).get("enabled", False)
+        if obsidian_enabled:
             self.console.print("   [cyan]docker compose --profile obsidian up --build -d[/cyan]")
             self.console.print("   [dim](Includes Neo4j for Obsidian integration)[/dim]")
         else:
