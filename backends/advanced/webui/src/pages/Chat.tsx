@@ -51,14 +51,17 @@ export default function Chat() {
   const inputRef = useRef<HTMLTextAreaElement>(null)
   
 
-  // Auto-scroll to bottom
+  // Auto-scroll to bottom (only when actively sending messages)
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }
 
   useEffect(() => {
-    scrollToBottom()
-  }, [messages, streamingMessage])
+    // Only auto-scroll when streaming or sending messages
+    if (streamingMessage || isSending) {
+      scrollToBottom()
+    }
+  }, [messages, streamingMessage, isSending])
 
   // Load sessions on mount
   useEffect(() => {
@@ -288,9 +291,9 @@ export default function Chat() {
   }
 
   return (
-    <div className="flex h-screen bg-gray-50 dark:bg-gray-900">
+    <div className="flex h-full max-h-screen bg-gray-50 dark:bg-gray-900">
       {/* Sidebar */}
-      <div className="w-80 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col">
+      <div className="w-80 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col max-h-screen">
         {/* Header */}
         <div className="p-4 border-b border-gray-200 dark:border-gray-700">
           <div className="flex items-center justify-between mb-4">

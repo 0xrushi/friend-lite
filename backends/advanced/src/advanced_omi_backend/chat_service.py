@@ -152,17 +152,18 @@ class ChatService:
         """
         try:
             reg = get_models_registry()
-            if reg and hasattr(reg, 'config'):
-                chat_config = reg.config.get('chat', {})
+            if reg and hasattr(reg, 'chat'):
+                chat_config = reg.chat
                 prompt = chat_config.get('system_prompt')
                 if prompt:
-                    logger.debug("Loaded chat system prompt from config")
+                    logger.info(f"✅ Loaded chat system prompt from config (length: {len(prompt)} chars)")
+                    logger.debug(f"System prompt: {prompt[:100]}...")
                     return prompt
         except Exception as e:
             logger.warning(f"Failed to load chat system prompt from config: {e}")
 
         # Fallback to default
-        logger.debug("Using default chat system prompt")
+        logger.info("⚠️ Using default chat system prompt (config not found)")
         return """You are a helpful AI assistant with access to the user's personal memories and conversation history.
 
 Use the provided memories and conversation context to give personalized, contextual responses. If memories are relevant, reference them naturally in your response. Be conversational and helpful.
