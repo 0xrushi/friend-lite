@@ -364,6 +364,7 @@ class DeepgramStreamingConsumer:
                         continue
 
                     for stream, stream_messages in messages:
+                        logger.debug(f"📥 Read {len(stream_messages)} messages from {stream_name}")
                         for message_id, fields in stream_messages:
                             msg_id = message_id.decode() if isinstance(message_id, bytes) else message_id
 
@@ -378,12 +379,15 @@ class DeepgramStreamingConsumer:
                             # Extract audio data (producer sends as 'audio_data', not 'audio_chunk')
                             audio_chunk = fields.get(b'audio_data') or fields.get('audio_data')
                             if audio_chunk:
+                                logger.debug(f"🎵 Processing audio chunk {msg_id} ({len(audio_chunk)} bytes)")
                                 # Process audio chunk through Deepgram WebSocket
                                 await self.process_audio_chunk(
                                     session_id=session_id,
                                     audio_chunk=audio_chunk,
                                     chunk_id=msg_id
                                 )
+                            else:
+                                logger.warning(f"⚠️ Message {msg_id} has no audio_data field")
 
                             # ACK the message after processing
                             await self.redis_client.xack(stream_name, self.group_name, msg_id)
@@ -391,6 +395,15 @@ class DeepgramStreamingConsumer:
                         if stream_ended:
                             break
 
+                except redis_exceptions.ResponseError as e:
+                    if "NOGROUP" in str(e):
+                        # Stream has expired or been deleted - exit gracefully
+                        logger.info(f"Stream {stream_name} expired or deleted, ending processing")
+                        stream_ended = True
+                        break
+                    else:
+                        logger.error(f"Redis error reading from stream {stream_name}: {e}", exc_info=True)
+                        await asyncio.sleep(1)
                 except Exception as e:
                     logger.error(f"Error reading from stream {stream_name}: {e}", exc_info=True)
                     await asyncio.sleep(1)
@@ -398,6 +411,10 @@ class DeepgramStreamingConsumer:
         finally:
             # End WebSocket connection
             await self.end_session_stream(session_id)
+
+            # Remove from active streams tracking
+            self.active_streams.pop(stream_name, None)
+            logger.debug(f"Removed {stream_name} from active streams tracking")
 
     async def start_consuming(self):
         """

@@ -18,18 +18,19 @@ def normalize_text_for_wake_word(text: str) -> str:
     """
     Normalize text for wake word matching.
     - Lowercase
-    - Remove punctuation
+    - Replace punctuation with spaces
     - Collapse multiple spaces to single space
     - Strip leading/trailing whitespace
 
     Example:
         "Hey, Vivi!" -> "hey vivi"
         "HEY  VIVI" -> "hey vivi"
+        "Hey-Vivi" -> "hey vivi"
     """
     # Lowercase
     text = text.lower()
-    # Remove punctuation
-    text = text.translate(str.maketrans('', '', string.punctuation))
+    # Replace punctuation with spaces (instead of removing, to preserve word boundaries)
+    text = text.translate(str.maketrans(string.punctuation, ' ' * len(string.punctuation)))
     # Normalize whitespace (collapse multiple spaces to single space)
     text = re.sub(r'\s+', ' ', text)
     # Strip leading/trailing whitespace
@@ -61,16 +62,19 @@ def extract_command_after_wake_word(transcript: str, wake_word: str) -> str:
         return transcript.strip()
 
     # Create regex pattern that allows punctuation/whitespace between parts
-    # Example: "hey" + "vivi" -> r"hey[\s,.\-!?]*vivi"
+    # Example: "hey" + "vivi" -> r"hey[\s,.\-!?]*vivi[\s,.\-!?]*"
+    # The pattern matches the wake word parts with optional punctuation/whitespace between and after
     pattern_parts = [re.escape(part) for part in wake_word_parts]
-    pattern = r'\s*[\W_]*\s*'.join(pattern_parts)
-    pattern = '^' + pattern  # Must be at start of transcript
+    # Allow optional punctuation/whitespace between parts
+    pattern = r'[\s,.\-!?;:]*'.join(pattern_parts)
+    # Add trailing punctuation/whitespace consumption after last wake word part
+    pattern = '^' + pattern + r'[\s,.\-!?;:]*'
 
     # Try to match wake word at start of transcript (case-insensitive)
     match = re.match(pattern, transcript, re.IGNORECASE)
 
     if match:
-        # Extract everything after the matched wake word
+        # Extract everything after the matched wake word (including trailing punctuation)
         command = transcript[match.end():].strip()
         return command
     else:

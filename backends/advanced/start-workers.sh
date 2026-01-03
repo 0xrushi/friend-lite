@@ -64,15 +64,19 @@ if registry and registry.defaults:
 
     echo "📋 Configured STT provider: ${DEFAULT_STT:-none}"
 
-    # Only start Deepgram worker if configured as default STT
-    if [[ "$DEFAULT_STT" == "deepgram" ]] && [ -n "$DEEPGRAM_API_KEY" ]; then
-        echo "🎵 Starting audio stream Deepgram worker (1 worker for sequential processing)..."
-        uv run python -m advanced_omi_backend.workers.audio_stream_deepgram_worker &
-        AUDIO_STREAM_DEEPGRAM_WORKER_PID=$!
-    else
-        echo "⏭️  Skipping Deepgram stream worker (not configured as default STT or API key missing)"
-        AUDIO_STREAM_DEEPGRAM_WORKER_PID=""
-    fi
+    # DISABLED: Batch Deepgram worker - using streaming worker instead
+    # The deepgram-streaming-worker container handles audio:stream:* streams with plugin support
+    # Batch worker is disabled to prevent race condition with streaming worker
+    # if [[ "$DEFAULT_STT" == "deepgram" ]] && [ -n "$DEEPGRAM_API_KEY" ]; then
+    #     echo "🎵 Starting audio stream Deepgram worker (1 worker for sequential processing)..."
+    #     uv run python -m advanced_omi_backend.workers.audio_stream_deepgram_worker &
+    #     AUDIO_STREAM_DEEPGRAM_WORKER_PID=$!
+    # else
+    #     echo "⏭️  Skipping Deepgram stream worker (not configured as default STT or API key missing)"
+    #     AUDIO_STREAM_DEEPGRAM_WORKER_PID=""
+    # fi
+    echo "⏭️  Batch Deepgram worker disabled - using deepgram-streaming-worker container instead"
+    AUDIO_STREAM_DEEPGRAM_WORKER_PID=""
 
     # Only start Parakeet worker if configured as default STT
     if [[ "$DEFAULT_STT" == "parakeet" ]]; then

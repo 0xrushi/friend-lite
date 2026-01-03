@@ -62,6 +62,14 @@ async def main():
         plugin_router = init_plugin_router()
         if plugin_router:
             logger.info(f"✅ Plugin router initialized with {len(plugin_router.plugins)} plugins")
+
+            # Initialize async plugins
+            for plugin_id, plugin in plugin_router.plugins.items():
+                try:
+                    await plugin.initialize()
+                    logger.info(f"✅ Plugin '{plugin_id}' initialized in streaming worker")
+                except Exception as e:
+                    logger.exception(f"Failed to initialize plugin '{plugin_id}' in streaming worker: {e}")
         else:
             logger.warning("No plugin router available - plugins will not be triggered")
     except Exception as e:
