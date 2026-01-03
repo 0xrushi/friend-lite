@@ -9,6 +9,7 @@ import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
+import yaml
 
 from dotenv import get_key
 from rich import print as rprint
@@ -449,17 +450,18 @@ def main():
         else:
             failed_services.append(service)
 
-    # Check for Obsidian/Neo4j configuration
+    # Check for Obsidian/Neo4j configuration (read from config.yml)
     obsidian_enabled = False
     if 'advanced' in selected_services and 'advanced' not in failed_services:
-        backend_env_path = Path('backends/advanced/.env')
-        if backend_env_path.exists():
-            neo4j_host = read_env_value(str(backend_env_path), 'NEO4J_HOST')
-            obsidian_enabled_flag = read_env_value(str(backend_env_path), 'OBSIDIAN_ENABLED')
-            if neo4j_host and not is_placeholder(neo4j_host, 'your-neo4j-host-here', 'your_neo4j_host_here'):
-                obsidian_enabled = True
-            elif obsidian_enabled_flag == 'true':
-                obsidian_enabled = True
+        config_yml_path = Path('config/config.yml')
+        if config_yml_path.exists():
+            try:
+                with open(config_yml_path, 'r') as f:
+                    config_data = yaml.safe_load(f)
+                    obsidian_config = config_data.get('memory', {}).get('obsidian', {})
+                    obsidian_enabled = obsidian_config.get('enabled', False)
+            except Exception as e:
+                console.print(f"[yellow]Warning: Could not read config.yml: {e}[/yellow]")
 
     # Final Summary
     console.print(f"\n🎊 [bold green]Setup Complete![/bold green]")
