@@ -190,6 +190,10 @@ Save And Retrieve Chat Configuration Test
     [Documentation]    Test saving and retrieving chat configuration
     [Tags]    infra	permissions
 
+    # Get original prompt to restore later
+    ${response}=       GET On Session    api    /api/admin/chat/config
+    ${original_prompt}=    Set Variable    ${response.text}
+
     # Save custom prompt
     ${custom_prompt}=  Set Variable    You are a specialized AI assistant for technical support and troubleshooting.
     &{headers}=        Create Dictionary    Content-Type=text/plain
@@ -205,6 +209,12 @@ Save And Retrieve Chat Configuration Test
     Should Be Equal As Integers    ${response.status_code}    200
     ${retrieved}=      Set Variable    ${response.text}
     Should Be Equal    ${retrieved}    ${custom_prompt}    msg=Retrieved prompt should match saved prompt
+
+    # Restore original prompt to avoid test interference
+    ${response}=       POST On Session    api    /api/admin/chat/config
+    ...                data=${original_prompt}
+    ...                headers=${headers}
+    Should Be Equal As Integers    ${response.status_code}    200
 
 
 Non-Admin Cannot Access Admin Endpoints Test
