@@ -53,6 +53,7 @@ services:
       - NEO4J_HOST=${NEO4J_HOST}
       - NEO4J_USER=${NEO4J_USER}
       - NEO4J_PASSWORD=${NEO4J_PASSWORD}
+      - HA_TOKEN=${HA_TOKEN}
       - CORS_ORIGINS=http://localhost:3010,http://localhost:8000,http://192.168.1.153:3010,http://192.168.1.153:8000,https://localhost:3010,https://localhost:8000,https://100.105.225.45,https://localhost
       - REDIS_URL=redis://redis:6379/0
     depends_on:
@@ -96,6 +97,7 @@ services:
       - PARAKEET_ASR_URL=${PARAKEET_ASR_URL}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - GROQ_API_KEY=${GROQ_API_KEY}
+      - HA_TOKEN=${HA_TOKEN}
       - REDIS_URL=redis://redis:6379/0
     depends_on:
       redis:
@@ -104,6 +106,35 @@ services:
         condition: service_healthy
       qdrant:
         condition: service_started
+    restart: unless-stopped
+
+  # Deepgram WebSocket streaming worker
+  # Real-time transcription worker that processes audio via Deepgram's WebSocket API
+  # Publishes interim results to Redis Pub/Sub for client display
+  # Publishes final results to Redis Streams for storage
+  # Triggers plugins on final results only
+  deepgram-streaming-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: >
+      uv run python -m advanced_omi_backend.workers.audio_stream_deepgram_streaming_worker
+    env_file:
+      - .env
+    volumes:
+      - ./src:/app/src
+      - ./data:/app/data
+      - ../../config/config.yml:/app/config.yml
+      - ../../config/plugins.yml:/app/plugins.yml
+    environment:
+      - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY}
+      - REDIS_URL=redis://redis:6379/0
+      - HA_TOKEN=${HA_TOKEN}
+    depends_on:
+      redis:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped
 
   webui:

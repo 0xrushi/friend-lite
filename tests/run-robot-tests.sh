@@ -85,6 +85,38 @@ print_info "DEEPGRAM_API_KEY length: ${#DEEPGRAM_API_KEY}"
 print_info "OPENAI_API_KEY length: ${#OPENAI_API_KEY}"
 print_info "Using config file: $CONFIG_FILE"
 
+# Load HF_TOKEN from speaker-recognition/.env for test environment
+SPEAKER_ENV="../extras/speaker-recognition/.env"
+if [ -f "$SPEAKER_ENV" ] && [ -z "$HF_TOKEN" ]; then
+    print_info "Loading HF_TOKEN from speaker-recognition service..."
+    set -a
+    source "$SPEAKER_ENV"
+    set +a
+
+    if [ -n "$HF_TOKEN" ]; then
+        # Mask token for display
+        if [ ${#HF_TOKEN} -gt 15 ]; then
+            MASKED_TOKEN="${HF_TOKEN:0:5}***************${HF_TOKEN: -5}"
+        else
+            MASKED_TOKEN="***************"
+        fi
+        print_info "HF_TOKEN configured: $MASKED_TOKEN"
+    fi
+elif [ -n "$HF_TOKEN" ]; then
+    # Already set (e.g., from CI)
+    if [ ${#HF_TOKEN} -gt 15 ]; then
+        MASKED_TOKEN="${HF_TOKEN:0:5}***************${HF_TOKEN: -5}"
+    else
+        MASKED_TOKEN="***************"
+    fi
+    print_info "HF_TOKEN configured: $MASKED_TOKEN"
+else
+    print_warning "HF_TOKEN not found - speaker recognition tests may fail"
+    print_info "Configure via wizard: uv run --with-requirements ../setup-requirements.txt python ../wizard.py"
+fi
+
+export HF_TOKEN
+
 # Create test environment file if it doesn't exist
 if [ ! -f "setup/.env.test" ]; then
     print_info "Creating test environment file..."

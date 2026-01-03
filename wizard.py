@@ -101,7 +101,7 @@ PLUGINS = {
         'description': 'Control Home Assistant devices via natural language with wake word',
         'enabled_by_default': False,
         'requires_tailscale': True,  # Requires Tailscale for remote HA access
-        'access_level': 'transcript',  # When to trigger
+        'access_level': 'streaming_transcript',  # When to trigger
         'trigger_type': 'wake_word',   # How to trigger
         'config': {
             'ha_url': {
@@ -115,11 +115,11 @@ PLUGINS = {
                 'type': 'password',
                 'help': 'Create at: Home Assistant > Profile > Long-Lived Access Tokens'
             },
-            'wake_word': {
-                'prompt': 'Wake word for HA commands',
-                'default': 'vivi',
+            'wake_words': {
+                'prompt': 'Wake words for HA commands (comma-separated)',
+                'default': 'hey vivi, hey jarvis',
                 'type': 'text',
-                'help': 'Say this word before commands (e.g., "Vivi, turn off hall lights")'
+                'help': 'Say these words before commands. Use comma-separated list for multiple (e.g., "hey vivi, hey jarvis")'
             }
         }
     }
@@ -210,7 +210,7 @@ def cleanup_unselected_services(selected_services):
                 console.print(f"🧹 [dim]Backed up {service_name} configuration to {backup_file.name} (service not selected)[/dim]")
 
 def run_service_setup(service_name, selected_services, https_enabled=False, server_ip=None,
-                     obsidian_enabled=False, neo4j_password=None, ts_authkey=None):
+                     obsidian_enabled=False, neo4j_password=None, ts_authkey=None, hf_token=None):
     """Execute individual service setup script"""
     if service_name == 'advanced':
         service = SERVICES['backend'][service_name]
@@ -241,35 +241,15 @@ def run_service_setup(service_name, selected_services, https_enabled=False, serv
         # Add HTTPS configuration for services that support it
         if service_name == 'speaker-recognition' and https_enabled and server_ip:
             cmd.extend(['--enable-https', '--server-ip', server_ip])
-        
-        # For speaker-recognition, validate HF_TOKEN is required
+
+        # For speaker-recognition, pass HF_TOKEN from centralized configuration
         if service_name == 'speaker-recognition':
-            # HF_TOKEN is required for speaker-recognition
-            speaker_env_path = 'extras/speaker-recognition/.env'
-            hf_token = read_env_value(speaker_env_path, 'HF_TOKEN')
-            
-            # Check if HF_TOKEN is missing or is a placeholder
-            if not hf_token or is_placeholder(hf_token, 'your_huggingface_token_here', 'your-huggingface-token-here', 'hf_xxxxx'):
-                console.print("\n[red][ERROR][/red] HF_TOKEN is required for speaker-recognition service")
-                console.print("[yellow]Speaker recognition requires a Hugging Face token to download models[/yellow]")
-                console.print("Get your token from: https://huggingface.co/settings/tokens")
-                console.print()
-                
-                # Prompt for HF_TOKEN
-                try:
-                    hf_token_input = console.input("[cyan]Enter your HF_TOKEN[/cyan]: ").strip()
-                    if not hf_token_input or is_placeholder(hf_token_input, 'your_huggingface_token_here', 'your-huggingface-token-here', 'hf_xxxxx'):
-                        console.print("[red][ERROR][/red] Invalid HF_TOKEN provided. Speaker-recognition setup cancelled.")
-                        return False
-                    hf_token = hf_token_input
-                except EOFError:
-                    console.print("[red][ERROR][/red] HF_TOKEN is required. Speaker-recognition setup cancelled.")
-                    return False
-            
-            # Pass HF Token to init script
-            cmd.extend(['--hf-token', hf_token])
-            console.print("[green][SUCCESS][/green] HF_TOKEN configured")
-            
+            # HF Token should have been provided via setup_hf_token_if_needed()
+            if hf_token:
+                cmd.extend(['--hf-token', hf_token])
+            else:
+                console.print("[yellow][WARNING][/yellow] No HF_TOKEN provided - speaker recognition may fail to download models")
+
             # Pass Deepgram API key from backend if available
             backend_env_path = 'backends/advanced/.env'
             deepgram_key = read_env_value(backend_env_path, 'DEEPGRAM_API_KEY')
@@ -485,11 +465,14 @@ def select_plugins():
                     default=config_spec.get('default', '')
                 )
 
-                plugin_config[config_key] = value
-
-                # For wake_word trigger, add to trigger config
-                if config_key == 'wake_word':
-                    plugin_config['trigger']['wake_word'] = value
+                # For wake_words, convert comma-separated string to list and store in trigger
+                if config_key == 'wake_words':
+                    # Split by comma and strip whitespace
+                    wake_words_list = [w.strip() for w in value.split(',') if w.strip()]
+                    plugin_config['trigger']['wake_words'] = wake_words_list
+                    # Don't store at root level - only in trigger section
+                else:
+                    plugin_config[config_key] = value
 
             selected_plugins[plugin_id] = plugin_config
             console.print(f"  [green]✅ {plugin_meta['name']} configured[/green]\n")
@@ -600,6 +583,46 @@ def setup_git_hooks():
     except Exception as e:
         console.print(f"⚠️  [yellow]Could not setup git hooks: {e} (optional)[/yellow]")
 
+def setup_hf_token_if_needed(selected_services):
+    """Prompt for Hugging Face token if needed by selected services.
+
+    Args:
+        selected_services: List of service names selected by user
+
+    Returns:
+        HF_TOKEN string if provided, None otherwise
+    """
+    # Check if any selected services need HF_TOKEN
+    needs_hf_token = 'speaker-recognition' in selected_services or 'advanced' in selected_services
+
+    if not needs_hf_token:
+        return None
+
+    console.print("\n🤗 [bold cyan]Hugging Face Token Configuration[/bold cyan]")
+    console.print("Required for speaker recognition (PyAnnote models)")
+    console.print("\n[blue][INFO][/blue] Get yours from: https://huggingface.co/settings/tokens\n")
+
+    # Check for existing token from speaker-recognition service
+    speaker_env_path = 'extras/speaker-recognition/.env'
+    existing_token = read_env_value(speaker_env_path, 'HF_TOKEN')
+
+    # Use the masked prompt function
+    hf_token = prompt_with_existing_masked(
+        prompt_text="Hugging Face Token",
+        existing_value=existing_token,
+        placeholders=['your_huggingface_token_here', 'your-huggingface-token-here', 'hf_xxxxx'],
+        is_password=True,
+        default=""
+    )
+
+    if hf_token:
+        masked = mask_value(hf_token)
+        console.print(f"[green]✅ HF_TOKEN configured: {masked}[/green]\n")
+        return hf_token
+    else:
+        console.print("[yellow]⚠️  No HF_TOKEN provided - speaker recognition may fail[/yellow]\n")
+        return None
+
 def setup_config_file():
     """Setup config/config.yml from template if it doesn't exist"""
     config_file = Path("config/config.yml")
@@ -645,6 +668,9 @@ def main():
     ts_authkey = None
     if selected_plugins:
         ts_authkey = setup_tailscale_if_needed(selected_plugins)
+
+    # HF Token Configuration (if services require it)
+    hf_token = setup_hf_token_if_needed(selected_services)
 
     # HTTPS Configuration (for services that need it)
     https_enabled = False
@@ -731,7 +757,7 @@ def main():
     
     for service in selected_services:
         if run_service_setup(service, selected_services, https_enabled, server_ip,
-                            obsidian_enabled, neo4j_password, ts_authkey):
+                            obsidian_enabled, neo4j_password, ts_authkey, hf_token):
             success_count += 1
         else:
             failed_services.append(service)

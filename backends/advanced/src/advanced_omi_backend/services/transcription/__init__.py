@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 from typing import Optional
+from urllib.parse import urlencode
 
 import httpx
 import websockets
@@ -167,26 +168,65 @@ class RegistryStreamingTranscriptionProvider(StreamingTranscriptionProvider):
     def name(self) -> str:
         return self._name
 
-    async def start_stream(self, client_id: str, sample_rate: int = 16000, diarize: bool = False):
-        url = self.model.model_url
-        ops = self.model.operations or {}
-        start_msg = (ops.get("start", {}) or {}).get("message", {})
-        # Inject session_id if placeholder present
-        start_msg = json.loads(json.dumps(start_msg))  # deep copy
-        start_msg.setdefault("session_id", client_id)
-        # Apply sample rate and diarization if present
-        if "config" in start_msg and isinstance(start_msg["config"], dict):
-            start_msg["config"].setdefault("sample_rate", sample_rate)
-            if diarize:
-                start_msg["config"]["diarize"] = True
+    async def transcribe(self, audio_data: bytes, sample_rate: int, **kwargs) -> dict:
+        """Not used for streaming providers - use start_stream/process_audio_chunk/end_stream instead."""
+        raise NotImplementedError("Streaming providers do not support batch transcription")
 
-        ws = await websockets.connect(url, open_timeout=10)
-        await ws.send(json.dumps(start_msg))
-        # Wait for confirmation; non-fatal if not provided
-        try:
-            await asyncio.wait_for(ws.recv(), timeout=2.0)
-        except Exception:
-            pass
+    async def start_stream(self, client_id: str, sample_rate: int = 16000, diarize: bool = False):
+        base_url = self.model.model_url
+        ops = self.model.operations or {}
+
+        # Build WebSocket URL with query parameters (for Deepgram streaming)
+        query_params = ops.get("query", {})
+        query_dict = dict(query_params) if query_params else {}
+
+        # Override sample_rate if provided
+        if sample_rate and "sample_rate" in query_dict:
+            query_dict["sample_rate"] = sample_rate
+        if diarize and "diarize" in query_dict:
+            query_dict["diarize"] = "true"
+
+        # Normalize boolean values to lowercase strings (Deepgram expects "true"/"false", not "True"/"False")
+        normalized_query = {}
+        for k, v in query_dict.items():
+            if isinstance(v, bool):
+                normalized_query[k] = "true" if v else "false"
+            else:
+                normalized_query[k] = v
+
+        # Build query string with proper URL encoding (NO token in query)
+        query_str = urlencode(normalized_query)
+        url = f"{base_url}?{query_str}" if query_str else base_url
+
+        # Debug: Log the URL
+        logger.info(f"🔗 Connecting to Deepgram WebSocket: {url}")
+
+        # Connect to WebSocket with Authorization header (Deepgram requires this for server-side connections)
+        headers = {}
+        if self.model.api_key:
+            headers["Authorization"] = f"Token {self.model.api_key}"
+
+        ws = await websockets.connect(url, additional_headers=headers)
+
+        # Send start message if required by provider
+        start_msg = (ops.get("start", {}) or {}).get("message", {})
+        if start_msg:
+            # Inject session_id if placeholder present
+            start_msg = json.loads(json.dumps(start_msg))  # deep copy
+            start_msg.setdefault("session_id", client_id)
+            # Apply sample rate and diarization if present
+            if "config" in start_msg and isinstance(start_msg["config"], dict):
+                start_msg["config"].setdefault("sample_rate", sample_rate)
+                if diarize:
+                    start_msg["config"]["diarize"] = True
+            await ws.send(json.dumps(start_msg))
+
+            # Wait for confirmation; non-fatal if not provided
+            try:
+                await asyncio.wait_for(ws.recv(), timeout=2.0)
+            except Exception:
+                pass
+
         self._streams[client_id] = {"ws": ws, "sample_rate": sample_rate, "final": None, "interim": []}
 
     async def process_audio_chunk(self, client_id: str, audio_chunk: bytes) -> dict | None:
@@ -194,26 +234,67 @@ class RegistryStreamingTranscriptionProvider(StreamingTranscriptionProvider):
             return None
         ws = self._streams[client_id]["ws"]
         ops = self.model.operations or {}
+
+        # Send chunk header if required (for providers like Parakeet)
         chunk_hdr = (ops.get("chunk_header", {}) or {}).get("message", {})
-        hdr = json.loads(json.dumps(chunk_hdr))
-        hdr.setdefault("type", "audio_chunk")
-        hdr.setdefault("session_id", client_id)
-        hdr.setdefault("rate", self._streams[client_id]["sample_rate"])
-        await ws.send(json.dumps(hdr))
+        if chunk_hdr:
+            hdr = json.loads(json.dumps(chunk_hdr))
+            hdr.setdefault("type", "audio_chunk")
+            hdr.setdefault("session_id", client_id)
+            hdr.setdefault("rate", self._streams[client_id]["sample_rate"])
+            await ws.send(json.dumps(hdr))
+
+        # Send audio chunk (raw bytes for Deepgram, or after header for others)
         await ws.send(audio_chunk)
 
-        # Non-blocking read for interim results
+        # Non-blocking read for results
         expect = (ops.get("expect", {}) or {})
+        extract = expect.get("extract", {})
         interim_type = expect.get("interim_type")
+        final_type = expect.get("final_type")
+
         try:
-            while True:
-                msg = await asyncio.wait_for(ws.recv(), timeout=0.01)
-                data = json.loads(msg)
-                if interim_type and data.get("type") == interim_type:
-                    self._streams[client_id]["interim"].append(data)
+            # Try to read a message (non-blocking)
+            msg = await asyncio.wait_for(ws.recv(), timeout=0.05)
+            data = json.loads(msg)
+
+            # Determine if this is interim or final result
+            is_final = False
+            if final_type and data.get("type") == final_type:
+                # Check if Deepgram marks it as final
+                is_final = data.get("is_final", False)
+            elif interim_type and data.get("type") == interim_type:
+                is_final = data.get("is_final", False)
+
+            # Extract result data
+            text = _dotted_get(data, extract.get("text")) if extract.get("text") else data.get("text", "")
+            words = _dotted_get(data, extract.get("words")) if extract.get("words") else data.get("words", [])
+            segments = _dotted_get(data, extract.get("segments")) if extract.get("segments") else data.get("segments", [])
+
+            # Calculate confidence if available
+            confidence = data.get("confidence", 0.0)
+            if not confidence and words and isinstance(words, list):
+                # Calculate average word confidence
+                confidences = [w.get("confidence", 0.0) for w in words if isinstance(w, dict) and "confidence" in w]
+                if confidences:
+                    confidence = sum(confidences) / len(confidences)
+
+            # Return result with is_final flag
+            # Consumer decides what to do with interim vs final
+            return {
+                "text": text,
+                "words": words,
+                "segments": segments,
+                "is_final": is_final,
+                "confidence": confidence
+            }
+
         except asyncio.TimeoutError:
-            pass
-        return None
+            # No message available yet
+            return None
+        except Exception as e:
+            logger.error(f"Error processing audio chunk result for {client_id}: {e}")
+            return None
 
     async def end_stream(self, client_id: str) -> dict:
         if client_id not in self._streams:

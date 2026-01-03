@@ -91,6 +91,29 @@ if [ -n "$_CONFIG_FILE_OVERRIDE" ]; then
     print_info "Using command-line override: CONFIG_FILE=$CONFIG_FILE"
 fi
 
+# Load HF_TOKEN from speaker-recognition/.env (proper location for this credential)
+SPEAKER_ENV="../../extras/speaker-recognition/.env"
+if [ -f "$SPEAKER_ENV" ] && [ -z "$HF_TOKEN" ]; then
+    print_info "Loading HF_TOKEN from speaker-recognition service..."
+    set -a
+    source "$SPEAKER_ENV"
+    set +a
+fi
+
+# Display HF_TOKEN status with masking
+if [ -n "$HF_TOKEN" ]; then
+    if [ ${#HF_TOKEN} -gt 15 ]; then
+        MASKED_TOKEN="${HF_TOKEN:0:5}***************${HF_TOKEN: -5}"
+    else
+        MASKED_TOKEN="***************"
+    fi
+    print_info "HF_TOKEN configured: $MASKED_TOKEN"
+    export HF_TOKEN
+else
+    print_warning "HF_TOKEN not found - speaker recognition tests may fail"
+    print_info "Configure via wizard: uv run --with-requirements ../../setup-requirements.txt python ../../wizard.py"
+fi
+
 # Set default CONFIG_FILE if not provided
 # This allows testing with different provider combinations
 # Usage: CONFIG_FILE=../../tests/configs/parakeet-ollama.yml ./run-test.sh
@@ -164,6 +187,18 @@ if [ ! -f "diarization_config.json" ] && [ -f "diarization_config.json.template"
     print_info "Creating diarization_config.json from template..."
     cp diarization_config.json.template diarization_config.json
     print_success "diarization_config.json created"
+fi
+
+# Ensure plugins.yml exists (required for Docker volume mount)
+if [ ! -f "../../config/plugins.yml" ]; then
+    if [ -f "../../config/plugins.yml.template" ]; then
+        print_info "Creating config/plugins.yml from template..."
+        cp ../../config/plugins.yml.template ../../config/plugins.yml
+        print_success "config/plugins.yml created"
+    else
+        print_error "config/plugins.yml.template not found - repository structure incomplete"
+        exit 1
+    fi
 fi
 
 # Note: Robot Framework dependencies are managed via tests/test-requirements.txt

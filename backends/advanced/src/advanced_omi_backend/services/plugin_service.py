@@ -5,7 +5,9 @@ worker jobs to trigger plugins without accessing FastAPI app state directly.
 """
 
 import logging
-from typing import Optional
+import os
+import re
+from typing import Optional, Any
 from pathlib import Path
 import yaml
 
@@ -15,6 +17,57 @@ logger = logging.getLogger(__name__)
 
 # Global plugin router instance
 _plugin_router: Optional[PluginRouter] = None
+
+
+def expand_env_vars(value: Any) -> Any:
+    """
+    Recursively expand environment variables in configuration values.
+
+    Supports ${ENV_VAR} syntax. If the environment variable is not set,
+    the original placeholder is kept.
+
+    Args:
+        value: Configuration value (can be str, dict, list, or other)
+
+    Returns:
+        Value with environment variables expanded
+
+    Examples:
+        >>> os.environ['MY_TOKEN'] = 'secret123'
+        >>> expand_env_vars('token: ${MY_TOKEN}')
+        'token: secret123'
+        >>> expand_env_vars({'token': '${MY_TOKEN}'})
+        {'token': 'secret123'}
+    """
+    if isinstance(value, str):
+        # Pattern: ${ENV_VAR} or ${ENV_VAR:-default}
+        def replacer(match):
+            var_expr = match.group(1)
+            # Support default values: ${VAR:-default}
+            if ':-' in var_expr:
+                var_name, default = var_expr.split(':-', 1)
+                return os.environ.get(var_name.strip(), default.strip())
+            else:
+                var_name = var_expr.strip()
+                env_value = os.environ.get(var_name)
+                if env_value is None:
+                    logger.warning(
+                        f"Environment variable '{var_name}' not found, "
+                        f"keeping placeholder: ${{{var_name}}}"
+                    )
+                    return match.group(0)  # Keep original placeholder
+                return env_value
+
+        return re.sub(r'\$\{([^}]+)\}', replacer, value)
+
+    elif isinstance(value, dict):
+        return {k: expand_env_vars(v) for k, v in value.items()}
+
+    elif isinstance(value, list):
+        return [expand_env_vars(item) for item in value]
+
+    else:
+        return value
 
 
 def get_plugin_router() -> Optional[PluginRouter]:
@@ -62,6 +115,8 @@ def init_plugin_router() -> Optional[PluginRouter]:
         if plugins_yml.exists():
             with open(plugins_yml, 'r') as f:
                 plugins_config = yaml.safe_load(f)
+                # Expand environment variables in configuration
+                plugins_config = expand_env_vars(plugins_config)
                 plugins_data = plugins_config.get('plugins', {})
 
             # Initialize each enabled plugin

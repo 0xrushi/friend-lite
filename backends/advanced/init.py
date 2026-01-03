@@ -49,6 +49,9 @@ class ChronicleSetup:
             self.console.print("[red][ERROR][/red] Run wizard.py from project root to create config.yml")
             sys.exit(1)
 
+        # Ensure plugins.yml exists (copy from template if missing)
+        self._ensure_plugins_yml_exists()
+
     def print_header(self, title: str):
         """Print a colorful header"""
         self.console.print()
@@ -106,6 +109,26 @@ class ChronicleSetup:
             except EOFError:
                 self.console.print(f"Using default choice: {default}")
                 return default
+
+    def _ensure_plugins_yml_exists(self):
+        """Ensure plugins.yml exists by copying from template if missing."""
+        plugins_yml = Path("../../config/plugins.yml")
+        plugins_template = Path("../../config/plugins.yml.template")
+
+        if not plugins_yml.exists():
+            if plugins_template.exists():
+                self.console.print("[blue][INFO][/blue] plugins.yml not found, creating from template...")
+                shutil.copy2(plugins_template, plugins_yml)
+                self.console.print(f"[green]✅[/green] Created {plugins_yml} from template")
+                self.console.print("[yellow][NOTE][/yellow] Edit config/plugins.yml to configure plugins")
+                self.console.print("[yellow][NOTE][/yellow] Set HA_TOKEN in .env for Home Assistant integration")
+            else:
+                raise RuntimeError(
+                    f"Template file not found: {plugins_template}\n"
+                    f"The repository structure is incomplete. Please ensure config/plugins.yml.template exists."
+                )
+        else:
+            self.console.print(f"[blue][INFO][/blue] Found existing {plugins_yml}")
 
     def backup_existing_env(self):
         """Backup existing .env file"""
@@ -384,7 +407,6 @@ class ChronicleSetup:
         if hasattr(self.args, 'ts_authkey') and self.args.ts_authkey:
             self.config["TS_AUTHKEY"] = self.args.ts_authkey
             self.console.print(f"[green][SUCCESS][/green] Tailscale auth key configured (Docker integration enabled)")
-            self.console.print("[blue][INFO][/blue] Start Tailscale with: docker compose --profile tailscale up -d")
 
     def setup_obsidian(self):
         """Configure Obsidian/Neo4j integration"""
