@@ -200,6 +200,39 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  deepgram-streaming-worker-test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: >
+      uv run python -m advanced_omi_backend.workers.audio_stream_deepgram_streaming_worker
+    volumes:
+      - ./src:/app/src
+      - ./data/test_data:/app/data
+      - ${CONFIG_FILE:-../../config/config.yml}:/app/config.yml
+      - ${PLUGINS_CONFIG:-../../config/plugins.yml}:/app/plugins.yml
+    environment:
+      - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY}
+      - REDIS_URL=redis://redis-test:6379/0
+      - HA_TOKEN=${HA_TOKEN}
+      - MONGODB_URI=mongodb://mongo-test:27017/test_db
+      - QDRANT_BASE_URL=qdrant-test
+      - QDRANT_PORT=6333
+      - DEBUG_DIR=/app/debug_dir
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - AUTH_SECRET_KEY=test-jwt-signing-key-for-integration-tests
+      - ADMIN_PASSWORD=test-admin-password-123
+      - ADMIN_EMAIL=test-admin@example.com
+      - TRANSCRIPTION_PROVIDER=${TRANSCRIPTION_PROVIDER:-deepgram}
+      - MEMORY_PROVIDER=${MEMORY_PROVIDER:-chronicle}
+    depends_on:
+      redis-test:
+        condition: service_started
+      mongo-test:
+        condition: service_healthy
+    restart: unless-stopped
+
   # Mycelia - AI memory and timeline service (test environment)
   # mycelia-backend-test:
   #   build:
