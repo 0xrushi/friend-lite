@@ -1,4 +1,30 @@
 services:
+  tailscale:
+    image: tailscale/tailscale:latest
+    container_name: advanced-tailscale
+    hostname: chronicle-tailscale
+    environment:
+      - TS_AUTHKEY=${TS_AUTHKEY}
+      - TS_STATE_DIR=/var/lib/tailscale
+      - TS_USERSPACE=false
+      - TS_ACCEPT_DNS=true
+    volumes:
+      - tailscale-state:/var/lib/tailscale
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    cap_add:
+      - NET_ADMIN
+    restart: unless-stopped
+    profiles:
+      - tailscale  # Optional profile
+    ports:
+      - "18123:18123"  # HA proxy port
+    command: >
+      sh -c "tailscaled &
+             tailscale up --authkey=$${TS_AUTHKEY} --accept-dns=true &&
+             apk add --no-cache socat 2>/dev/null || true &&
+             socat TCP-LISTEN:18123,fork,reuseaddr TCP:100.99.62.5:8123"
+
   chronicle-backend:
     build:
       context: .
@@ -12,7 +38,8 @@ services:
       - ./data/audio_chunks:/app/audio_chunks
       - ./data/debug_dir:/app/debug_dir
       - ./data:/app/data
-      - ../../config/config.yml:/app/config.yml  # Removed :ro to allow UI config saving
+      - ../../config/config.yml:/app/config.yml  # Main config file
+      - ../../config/plugins.yml:/app/plugins.yml  # Plugin configuration
     environment:
       - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY}
       - PARAKEET_ASR_URL=${PARAKEET_ASR_URL}
@@ -35,6 +62,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  # Access host's Tailscale network
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/readiness"]
       interval: 30s
@@ -61,6 +90,7 @@ services:
       - ./data/audio_chunks:/app/audio_chunks
       - ./data:/app/data
       - ../../config/config.yml:/app/config.yml  # Removed :ro for consistency
+      - ../../config/plugins.yml:/app/plugins.yml  # Plugin configuration
     environment:
       - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY}
       - PARAKEET_ASR_URL=${PARAKEET_ASR_URL}
@@ -225,4 +255,6 @@ volumes:
   neo4j_data:
     driver: local
   neo4j_logs:
+    driver: local
+  tailscale-state:
     driver: local

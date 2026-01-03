@@ -180,6 +180,17 @@ export const systemApi = {
       headers: { 'Content-Type': 'text/plain' }
     }),
 
+  // Plugin Configuration Management
+  getPluginsConfigRaw: () => api.get('/api/admin/plugins/config'),
+  updatePluginsConfigRaw: (configYaml: string) =>
+    api.post('/api/admin/plugins/config', configYaml, {
+      headers: { 'Content-Type': 'text/plain' }
+    }),
+  validatePluginsConfig: (configYaml: string) =>
+    api.post('/api/admin/plugins/config/validate', configYaml, {
+      headers: { 'Content-Type': 'text/plain' }
+    }),
+
   // Memory Provider Management
   getMemoryProvider: () => api.get('/api/admin/memory/provider'),
   setMemoryProvider: (provider: string) => api.post('/api/admin/memory/provider', { provider }),

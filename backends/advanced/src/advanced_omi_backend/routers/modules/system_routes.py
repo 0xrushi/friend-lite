@@ -8,7 +8,7 @@ import logging
 from typing import Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
 from advanced_omi_backend.auth import current_active_user, current_superuser
@@ -152,7 +152,7 @@ async def save_chat_config(
         yaml_content = await request.body()
         yaml_str = yaml_content.decode('utf-8')
         result = await system_controller.save_chat_config_yaml(yaml_str)
-        return result
+        return JSONResponse(content=result)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -170,9 +170,56 @@ async def validate_chat_config(
         yaml_content = await request.body()
         yaml_str = yaml_content.decode('utf-8')
         result = await system_controller.validate_chat_config_yaml(yaml_str)
-        return result
+        return JSONResponse(content=result)
     except Exception as e:
         logger.error(f"Failed to validate chat config: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Plugin Configuration Management Endpoints
+
+@router.get("/admin/plugins/config", response_class=Response)
+async def get_plugins_config(current_user: User = Depends(current_superuser)):
+    """Get plugins configuration as YAML. Admin only."""
+    try:
+        yaml_content = await system_controller.get_plugins_config_yaml()
+        return Response(content=yaml_content, media_type="text/plain")
+    except Exception as e:
+        logger.error(f"Failed to get plugins config: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/admin/plugins/config")
+async def save_plugins_config(
+    request: Request,
+    current_user: User = Depends(current_superuser)
+):
+    """Save plugins configuration from YAML. Admin only."""
+    try:
+        yaml_content = await request.body()
+        yaml_str = yaml_content.decode('utf-8')
+        result = await system_controller.save_plugins_config_yaml(yaml_str)
+        return JSONResponse(content=result)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to save plugins config: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/admin/plugins/config/validate")
+async def validate_plugins_config(
+    request: Request,
+    current_user: User = Depends(current_superuser)
+):
+    """Validate plugins configuration YAML. Admin only."""
+    try:
+        yaml_content = await request.body()
+        yaml_str = yaml_content.decode('utf-8')
+        result = await system_controller.validate_plugins_config_yaml(yaml_str)
+        return JSONResponse(content=result)
+    except Exception as e:
+        logger.error(f"Failed to validate plugins config: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

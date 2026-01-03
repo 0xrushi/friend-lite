@@ -19,6 +19,7 @@ from advanced_omi_backend.controllers.queue_controller import (
     REDIS_URL,
 )
 from advanced_omi_backend.utils.conversation_utils import analyze_speech, mark_conversation_deleted
+from advanced_omi_backend.services.plugin_service import get_plugin_router
 
 logger = logging.getLogger(__name__)
 
@@ -167,6 +168,10 @@ async def transcribe_full_audio_job(
     if not conversation:
         raise ValueError(f"Conversation {conversation_id} not found")
 
+    # Extract user_id and client_id for plugin context
+    user_id = str(conversation.user_id) if conversation.user_id else None
+    client_id = conversation.client_id if hasattr(conversation, 'client_id') else None
+
     # Use the provided audio path
     actual_audio_path = audio_path
     logger.info(f"📁 Using audio for transcription: {audio_path}")
@@ -201,6 +206,59 @@ async def transcribe_full_audio_job(
     logger.info(
         f"📊 Transcription complete: {len(transcript_text)} chars, {len(segments)} segments, {len(words)} words"
     )
+
+    # Trigger transcript-level plugins BEFORE speech validation
+    # This ensures wake-word commands execute even if conversation gets deleted
+    logger.info(f"🔍 DEBUG: About to trigger plugins - transcript_text exists: {bool(transcript_text)}")
+    if transcript_text:
+        try:
+            from advanced_omi_backend.services.plugin_service import init_plugin_router
+
+            # Initialize plugin router if not already initialized (worker context)
+            plugin_router = get_plugin_router()
+            if not plugin_router:
+                logger.info("🔧 Initializing plugin router in worker process...")
+                plugin_router = init_plugin_router()
+
+                # Initialize async plugins
+                if plugin_router:
+                    for plugin_id, plugin in plugin_router.plugins.items():
+                        try:
+                            await plugin.initialize()
+                            logger.info(f"✅ Plugin '{plugin_id}' initialized in worker")
+                        except Exception as e:
+                            logger.exception(f"Failed to initialize plugin '{plugin_id}' in worker: {e}")
+
+            logger.info(f"🔍 DEBUG: Plugin router retrieved: {plugin_router is not None}")
+
+            if plugin_router:
+                logger.info(f"🔍 DEBUG: Preparing to trigger transcript plugins for conversation {conversation_id}")
+                plugin_data = {
+                    'transcript': transcript_text,
+                    'segment_id': f"{conversation_id}_batch",
+                    'conversation_id': conversation_id,
+                    'segments': segments,
+                    'word_count': len(words),
+                }
+
+                logger.info(f"🔍 DEBUG: Calling trigger_plugins with user_id={user_id}, client_id={client_id}")
+                plugin_results = await plugin_router.trigger_plugins(
+                    access_level='transcript',  # Batch mode - only 'transcript' plugins, NOT 'streaming_transcript'
+                    user_id=user_id,
+                    data=plugin_data,
+                    metadata={'client_id': client_id}
+                )
+                logger.info(f"🔍 DEBUG: Plugin trigger returned {len(plugin_results) if plugin_results else 0} results")
+
+                if plugin_results:
+                    logger.info(f"✅ Triggered {len(plugin_results)} transcript plugins in batch mode")
+                    for result in plugin_results:
+                        if result.message:
+                            logger.info(f"  Plugin: {result.message}")
+        except Exception as e:
+            logger.exception(f"⚠️ Error triggering transcript plugins in batch mode: {e}")
+
+    logger.info(f"🔍 DEBUG: Plugin processing complete, moving to speech validation")
 
     # Validate meaningful speech BEFORE any further processing
     transcript_data = {"text": transcript_text, "words": words}

@@ -16,6 +16,7 @@ from advanced_omi_backend.controllers.queue_controller import (
 )
 from advanced_omi_backend.models.job import BaseRQJob, JobPriority, async_job
 from advanced_omi_backend.services.memory.base import MemoryEntry
+from advanced_omi_backend.services.plugin_service import get_plugin_router
 
 logger = logging.getLogger(__name__)
 
@@ -239,6 +240,41 @@ async def process_memory_job(conversation_id: str, *, redis_client=None) -> Dict
             # NOTE: Listening jobs are restarted by open_conversation_job (not here)
             # This allows users to resume talking immediately after conversation closes,
             # without waiting for memory processing to complete.
+
+            # Trigger memory-level plugins
+            try:
+                plugin_router = get_plugin_router()
+                if plugin_router:
+                    plugin_data = {
+                        'memories': created_memory_ids,
+                        'conversation': {
+                            'conversation_id': conversation_id,
+                            'client_id': client_id,
+                            'user_id': user_id,
+                            'user_email': user_email,
+                        },
+                        'memory_count': len(created_memory_ids),
+                        'conversation_id': conversation_id,
+                    }
+
+                    plugin_results = await plugin_router.trigger_plugins(
+                        access_level='memory',
+                        user_id=user_id,
+                        data=plugin_data,
+                        metadata={
+                            'processing_time': processing_time,
+                            'memory_provider': str(memory_provider),
+                        }
+                    )
+
+                    if plugin_results:
+                        logger.info(f"📌 Triggered {len(plugin_results)} memory-level plugins")
+                        for result in plugin_results:
+                            if result.message:
+                                logger.info(f"  Plugin result: {result.message}")
+
+            except Exception as e:
+                logger.warning(f"⚠️ Error triggering memory-level plugins: {e}")
 
             return {
                 "success": True,
