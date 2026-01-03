@@ -22,6 +22,7 @@ from motor.motor_asyncio import AsyncIOMotorCollection
 
 from advanced_omi_backend.database import get_database
 from advanced_omi_backend.llm_client import get_llm_client
+from advanced_omi_backend.model_registry import get_models_registry
 from advanced_omi_backend.services.memory import get_memory_service
 from advanced_omi_backend.services.memory.base import MemoryEntry
 from advanced_omi_backend.services.obsidian_service import (
@@ -133,7 +134,7 @@ class ChatSession:
 
 class ChatService:
     """Service for managing chat sessions and memory-enhanced conversations."""
-    
+
     def __init__(self):
         self.db = None
         self.sessions_collection: Optional[AsyncIOMotorCollection] = None
@@ -141,6 +142,32 @@ class ChatService:
         self.llm_client = None
         self.memory_service = None
         self._initialized = False
+
+    def _get_system_prompt(self) -> str:
+        """
+        Get system prompt from config with fallback to default.
+
+        Returns:
+            str: System prompt for chat interactions
+        """
+        try:
+            reg = get_models_registry()
+            if reg and hasattr(reg, 'config'):
+                chat_config = reg.config.get('chat', {})
+                prompt = chat_config.get('system_prompt')
+                if prompt:
+                    logger.debug("Loaded chat system prompt from config")
+                    return prompt
+        except Exception as e:
+            logger.warning(f"Failed to load chat system prompt from config: {e}")
+
+        # Fallback to default
+        logger.debug("Using default chat system prompt")
+        return """You are a helpful AI assistant with access to the user's personal memories and conversation history.
+
+Use the provided memories and conversation context to give personalized, contextual responses. If memories are relevant, reference them naturally in your response. Be conversational and helpful.
+
+If no relevant memories are available, respond normally based on the conversation context."""
 
     async def initialize(self):
         """Initialize the chat service with database connections."""
@@ -392,12 +419,8 @@ class ChatService:
                 "timestamp": time.time()
             }
 
-            # Create system prompt
-            system_prompt = """You are a helpful AI assistant with access to the user's personal memories and conversation history. 
-
-Use the provided memories and conversation context to give personalized, contextual responses. If memories are relevant, reference them naturally in your response. Be conversational and helpful.
-
-If no relevant memories are available, respond normally based on the conversation context."""
+            # Get system prompt from config
+            system_prompt = self._get_system_prompt()
 
             # Prepare full prompt
             full_prompt = f"{system_prompt}\n\n{context}"
