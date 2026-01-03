@@ -18,6 +18,7 @@ import redis.asyncio as redis
 
 from advanced_omi_backend.services.plugin_service import init_plugin_router
 from advanced_omi_backend.services.transcription.deepgram_stream_consumer import DeepgramStreamingConsumer
+from advanced_omi_backend.client_manager import initialize_redis_for_client_manager
 
 logging.basicConfig(
     level=logging.INFO,
@@ -48,6 +49,10 @@ async def main():
             decode_responses=False
         )
         logger.info(f"✅ Connected to Redis: {redis_url}")
+
+        # Initialize ClientManager Redis for cross-container client→user mapping
+        initialize_redis_for_client_manager(redis_url)
+
     except Exception as e:
         logger.error(f"Failed to connect to Redis: {e}", exc_info=True)
         sys.exit(1)

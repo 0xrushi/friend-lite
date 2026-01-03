@@ -111,6 +111,11 @@ async def lifespan(app: FastAPI):
         from advanced_omi_backend.services.audio_stream import AudioStreamProducer
         app.state.audio_stream_producer = AudioStreamProducer(app.state.redis_audio_stream)
         application_logger.info("✅ Redis client for audio streaming producer initialized")
+
+        # Initialize ClientManager Redis for cross-container client→user mapping
+        from advanced_omi_backend.client_manager import initialize_redis_for_client_manager
+        initialize_redis_for_client_manager(config.redis_url)
+
     except Exception as e:
         application_logger.error(f"Failed to initialize Redis client for audio streaming: {e}", exc_info=True)
         application_logger.warning("Audio streaming producer will not be available")

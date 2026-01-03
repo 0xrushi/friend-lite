@@ -189,9 +189,9 @@ async def create_client_state(client_id: str, user, device_name: Optional[str] =
         client_id, CHUNK_DIR, user.user_id, user.email
     )
 
-    # Also track in persistent mapping (for database queries)
-    from advanced_omi_backend.client_manager import track_client_user_relationship
-    track_client_user_relationship(client_id, user.user_id)
+    # Also track in persistent mapping (for database queries + cross-container Redis)
+    from advanced_omi_backend.client_manager import track_client_user_relationship_async
+    await track_client_user_relationship_async(client_id, user.user_id)
 
     # Register client in user model (persistent)
     from advanced_omi_backend.users import register_client_to_user
@@ -265,12 +265,12 @@ async def cleanup_client_state(client_id: str):
         if sessions_closed > 0:
             logger.info(f"✅ Closed {sessions_closed} active session(s) for client {client_id}")
 
-        # Delete Redis Streams for this client
+        # Set TTL on Redis Streams for this client (allows consumer groups to finish processing)
         stream_pattern = f"audio:stream:{client_id}"
         stream_key = await async_redis.exists(stream_pattern)
         if stream_key:
-            await async_redis.delete(stream_pattern)
-            logger.info(f"🧹 Deleted Redis stream: {stream_pattern}")
+            await async_redis.expire(stream_pattern, 60)  # 60 second TTL for consumer group fan-out
+            logger.info(f"⏰ Set 60s TTL on Redis stream: {stream_pattern}")
         else:
             logger.debug(f"No Redis stream found for client {client_id}")
 

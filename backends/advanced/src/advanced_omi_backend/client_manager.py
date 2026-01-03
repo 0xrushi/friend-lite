@@ -9,6 +9,7 @@ this information without tight coupling to the main.py module.
 import logging
 import uuid
 from typing import TYPE_CHECKING, Dict, Optional
+import redis.asyncio as redis
 
 if TYPE_CHECKING:
     from advanced_omi_backend.client import ClientState
@@ -20,6 +21,9 @@ logger = logging.getLogger(__name__)
 # These will be initialized by main.py
 _client_to_user_mapping: Dict[str, str] = {}  # Active clients only
 _all_client_user_mappings: Dict[str, str] = {}  # All clients including disconnected
+
+# Redis client for cross-container client→user mapping
+_redis_client: Optional[redis.Redis] = None
 
 
 class ClientManager:
@@ -372,9 +376,33 @@ def unregister_client_user_mapping(client_id: str):
         logger.warning(f"⚠️ Attempted to unregister non-existent client {client_id}")
 
 
+async def track_client_user_relationship_async(client_id: str, user_id: str, ttl: int = 86400):
+    """
+    Track that a client belongs to a user (async, writes to Redis for cross-container support).
+
+    Args:
+        client_id: The client ID
+        user_id: The user ID that owns this client
+        ttl: Time-to-live in seconds (default 24 hours)
+    """
+    _all_client_user_mappings[client_id] = user_id  # In-memory fallback
+
+    if _redis_client:
+        try:
+            await _redis_client.setex(f"client:owner:{client_id}", ttl, user_id)
+            logger.debug(f"✅ Tracked client {client_id} → user {user_id} in Redis (TTL: {ttl}s)")
+        except Exception as e:
+            logger.warning(f"Failed to track client in Redis: {e}")
+    else:
+        logger.debug(f"Tracked client {client_id} relationship to user {user_id} (in-memory only)")
+
+
 def track_client_user_relationship(client_id: str, user_id: str):
     """
-    Track that a client belongs to a user (persists after disconnection for database queries).
+    Track that a client belongs to a user (sync version for backward compatibility).
+
+    WARNING: This is synchronous and cannot use Redis. Use track_client_user_relationship_async()
+    instead in async contexts for cross-container support.
 
     Args:
         client_id: The client ID
@@ -444,9 +472,45 @@ def get_user_clients_active(user_id: str) -> list[str]:
     return user_clients
 
 
+def initialize_redis_for_client_manager(redis_url: str):
+    """
+    Initialize Redis client for cross-container client→user mapping.
+
+    Args:
+        redis_url: Redis connection URL
+    """
+    global _redis_client
+    _redis_client = redis.from_url(redis_url, decode_responses=True)
+    logger.info(f"✅ ClientManager Redis initialized: {redis_url}")
+
+
+async def get_client_owner_async(client_id: str) -> Optional[str]:
+    """
+    Get the user ID that owns a specific client (async Redis lookup).
+
+    Args:
+        client_id: The client ID to look up
+
+    Returns:
+        User ID if found, None otherwise
+    """
+    if _redis_client:
+        try:
+            user_id = await _redis_client.get(f"client:owner:{client_id}")
+            return user_id
+        except Exception as e:
+            logger.warning(f"Redis lookup failed for client {client_id}: {e}")
+
+    # Fallback to in-memory mapping
+    return _all_client_user_mappings.get(client_id)
+
+
 def get_client_owner(client_id: str) -> Optional[str]:
     """
-    Get the user ID that owns a specific client.
+    Get the user ID that owns a specific client (sync version for backward compatibility).
+
+    WARNING: This is synchronous and cannot use Redis. Use get_client_owner_async() instead
+    in async contexts for cross-container support.
 
     Args:
         client_id: The client ID to look up

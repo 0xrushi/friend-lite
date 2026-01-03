@@ -5,11 +5,78 @@ Routes pipeline events to appropriate plugins based on access level and triggers
 """
 
 import logging
+import re
+import string
 from typing import Dict, List, Optional
 
 from .base import BasePlugin, PluginContext, PluginResult
 
 logger = logging.getLogger(__name__)
+
+
+def normalize_text_for_wake_word(text: str) -> str:
+    """
+    Normalize text for wake word matching.
+    - Lowercase
+    - Remove punctuation
+    - Collapse multiple spaces to single space
+    - Strip leading/trailing whitespace
+
+    Example:
+        "Hey, Vivi!" -> "hey vivi"
+        "HEY  VIVI" -> "hey vivi"
+    """
+    # Lowercase
+    text = text.lower()
+    # Remove punctuation
+    text = text.translate(str.maketrans('', '', string.punctuation))
+    # Normalize whitespace (collapse multiple spaces to single space)
+    text = re.sub(r'\s+', ' ', text)
+    # Strip leading/trailing whitespace
+    return text.strip()
+
+
+def extract_command_after_wake_word(transcript: str, wake_word: str) -> str:
+    """
+    Intelligently extract command after wake word in original transcript.
+
+    Handles punctuation and spacing variations by creating a flexible regex pattern.
+
+    Example:
+        transcript: "Hey, Vivi, turn off lights"
+        wake_word: "hey vivi"
+        -> extracts: "turn off lights"
+
+    Args:
+        transcript: Original transcript text with punctuation
+        wake_word: Configured wake word (will be normalized)
+
+    Returns:
+        Command text after wake word, or full transcript if wake word boundary not found
+    """
+    # Split wake word into parts (normalized)
+    wake_word_parts = normalize_text_for_wake_word(wake_word).split()
+
+    if not wake_word_parts:
+        return transcript.strip()
+
+    # Create regex pattern that allows punctuation/whitespace between parts
+    # Example: "hey" + "vivi" -> r"hey[\s,.\-!?]*vivi"
+    pattern_parts = [re.escape(part) for part in wake_word_parts]
+    pattern = r'\s*[\W_]*\s*'.join(pattern_parts)
+    pattern = '^' + pattern  # Must be at start of transcript
+
+    # Try to match wake word at start of transcript (case-insensitive)
+    match = re.match(pattern, transcript, re.IGNORECASE)
+
+    if match:
+        # Extract everything after the matched wake word
+        command = transcript[match.end():].strip()
+        return command
+    else:
+        # Fallback: couldn't find wake word boundary, return full transcript
+        logger.warning(f"Could not find wake word boundary for '{wake_word}' in '{transcript}', using full transcript")
+        return transcript.strip()
 
 
 class PluginRouter:
@@ -113,9 +180,9 @@ class PluginRouter:
             return True
 
         elif trigger_type == 'wake_word':
-            # Check if transcript starts with wake word(s)
+            # Normalize transcript for matching (handles punctuation and spacing)
             transcript = data.get('transcript', '')
-            transcript_lower = transcript.lower().strip()
+            normalized_transcript = normalize_text_for_wake_word(transcript)
 
             # Support both singular 'wake_word' and plural 'wake_words' (list)
             wake_words = plugin.trigger.get('wake_words', [])
@@ -125,14 +192,15 @@ class PluginRouter:
                 if wake_word:
                     wake_words = [wake_word]
 
-            # Check if transcript starts with any wake word
+            # Check if transcript starts with any wake word (after normalization)
             for wake_word in wake_words:
-                wake_word_lower = wake_word.lower()
-                if wake_word_lower and transcript_lower.startswith(wake_word_lower):
-                    # Extract command (remove wake word)
-                    command = transcript[len(wake_word):].strip()
+                normalized_wake_word = normalize_text_for_wake_word(wake_word)
+                if normalized_wake_word and normalized_transcript.startswith(normalized_wake_word):
+                    # Smart extraction: find where wake word actually ends in original text
+                    command = extract_command_after_wake_word(transcript, wake_word)
                     data['command'] = command
                     data['original_transcript'] = transcript
+                    logger.debug(f"Wake word '{wake_word}' detected. Original: '{transcript}', Command: '{command}'")
                     return True
 
             return False

@@ -19,7 +19,7 @@ from redis import exceptions as redis_exceptions
 
 from advanced_omi_backend.plugins.router import PluginRouter
 from advanced_omi_backend.services.transcription import get_transcription_provider
-from advanced_omi_backend.client_manager import get_client_owner
+from advanced_omi_backend.client_manager import get_client_owner_async
 
 logger = logging.getLogger(__name__)
 
@@ -257,7 +257,7 @@ class DeepgramStreamingConsumer:
 
     async def _get_user_id_from_client_id(self, client_id: str) -> Optional[str]:
         """
-        Look up user_id from client_id using ClientManager.
+        Look up user_id from client_id using ClientManager (async Redis lookup).
 
         Args:
             client_id: Client ID to search for
@@ -265,12 +265,12 @@ class DeepgramStreamingConsumer:
         Returns:
             user_id if found, None otherwise
         """
-        user_id = get_client_owner(client_id)
+        user_id = await get_client_owner_async(client_id)
 
         if user_id:
-            logger.debug(f"Found user_id {user_id} for client_id {client_id}")
+            logger.debug(f"Found user_id {user_id} for client_id {client_id} via Redis")
         else:
-            logger.warning(f"No user_id found for client_id {client_id}")
+            logger.warning(f"No user_id found for client_id {client_id} in Redis")
 
         return user_id
 
