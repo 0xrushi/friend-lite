@@ -45,7 +45,7 @@ class ChronicleSetup:
 
         # Verify config.yml exists - fail fast if missing
         if not self.config_manager.config_yml_path.exists():
-            self.console.print("[red][ERROR][/red] config.yml not found at {self.config_manager.config_yml_path}")
+            self.console.print(f"[red][ERROR][/red] config.yml not found at {self.config_manager.config_yml_path}")
             self.console.print("[red][ERROR][/red] Run wizard.py from project root to create config.yml")
             sys.exit(1)
 
