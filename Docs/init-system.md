@@ -225,6 +225,59 @@ cd extras/asr-services && docker compose up --build -d
 cd extras/openmemory-mcp && docker compose up --build -d
 ```
 
+## Startup Flow (Mermaid) diagram
+
+Chronicle has two layers:
+- **Setup** (`wizard.sh` / `wizard.py`) writes config (`.env`, `config/config.yml`, optional SSL/nginx config).
+- **Run** (`start.sh` / `services.py`) starts the configured services via `docker compose`.
+
+```mermaid
+flowchart TD
+  A[wizard.sh] --> B[uv run --with-requirements setup-requirements.txt wizard.py]
+  B --> C{Select services}
+  C --> D[backends/advanced/init.py\nwrites backends/advanced/.env + config/config.yml]
+  C --> E[extras/speaker-recognition/init.py\nwrites extras/speaker-recognition/.env\noptionally ssl/* + nginx.conf]
+  C --> F[extras/asr-services/init.py\nwrites extras/asr-services/.env]
+  C --> G[extras/openmemory-mcp/setup.sh]
+
+  A2[start.sh] --> B2[uv run --with-requirements setup-requirements.txt python services.py start ...]
+  B2 --> H{For each service:\n.env exists?}
+  H -->|yes| I[services.py runs docker compose\nin each service directory]
+  H -->|no| J[Skip (not configured)]
+```
+
+### How `services.py` picks Speaker Recognition variants
+
+`services.py` reads `extras/speaker-recognition/.env` and decides:
+- `COMPUTE_MODE=cpu|gpu|strixhalo` → choose compose profile
+- `REACT_UI_HTTPS=true|false` → include `nginx` (HTTPS) vs run only API+UI (HTTP)
+
+```mermaid
+flowchart TD
+  S[start.sh] --> P[services.py]
+  P --> R[Read extras/speaker-recognition/.env]
+  R --> M{COMPUTE_MODE}
+  M -->|cpu| C1[docker compose --profile cpu up ...]
+  M -->|gpu| C2[docker compose --profile gpu up ...]
+  M -->|strixhalo| C3[docker compose --profile strixhalo up ...]
+  R --> H{REACT_UI_HTTPS}
+  H -->|true| N1[Start profile default set:\nAPI + web-ui + nginx]
+  H -->|false| N2[Start only:\nAPI + web-ui (no nginx)]
+```
+
+### CPU + NVIDIA share the same `Dockerfile` + `pyproject.toml`
+
+Speaker recognition uses a single dependency definition with per-accelerator “extras”:
+- `extras/speaker-recognition/pyproject.toml` defines extras like `cpu`, `cu121`, `cu126`, `cu128`, `strixhalo`.
+- `extras/speaker-recognition/Dockerfile` takes `ARG PYTORCH_CUDA_VERSION` and runs:
+  - `uv sync --extra ${PYTORCH_CUDA_VERSION}`
+  - `uv run --extra ${PYTORCH_CUDA_VERSION} ...`
+- `extras/speaker-recognition/docker-compose.yml` sets that build arg per profile:
+  - CPU profile defaults to `PYTORCH_CUDA_VERSION=cpu`
+  - GPU profile defaults to `PYTORCH_CUDA_VERSION=cu126` and reserves NVIDIA GPUs
+
+AMD/ROCm (Strix Halo) uses the same `pyproject.toml` interface (the `strixhalo` extra), but a different build recipe (`extras/speaker-recognition/Dockerfile.strixhalo`) and ROCm device mappings, because the base image provides the torch stack.
+
 ## Configuration Files
 
 ### Generated Files
