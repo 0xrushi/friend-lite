@@ -31,6 +31,31 @@ services:
       - ./model_cache:/models
       - ./debug:/app/debug
       - ./results:/app/results
+    environment:
+      - HF_HOME=/models
+      - PARAKEET_MODEL=$PARAKEET_MODEL
+      - CHUNKING_ENABLED=${CHUNKING_ENABLED:-true}
+      - CHUNK_DURATION_SECONDS=${CHUNK_DURATION_SECONDS:-30.0}
+      - OVERLAP_DURATION_SECONDS=${OVERLAP_DURATION_SECONDS:-5.0}
+      - MIN_AUDIO_FOR_CHUNKING=${MIN_AUDIO_FOR_CHUNKING:-60.0}
+      - CONFIDENCE_THRESHOLD=${CONFIDENCE_THRESHOLD:-0.8}
+    restart: unless-stopped
+
+  # NVIDIA GPU variant (requires NVIDIA container runtime)
+  parakeet-asr-nvidia:
+    profiles: ["nvidia"]
+    build:
+      context: .
+      dockerfile: Dockerfile_Parakeet
+      args:
+        PYTORCH_CUDA_VERSION: ${PYTORCH_CUDA_VERSION:-cu126}
+    image: parakeet-asr:latest
+    ports:
+      - "${PARAKEET_HOST_PORT:-8767}:${PARAKEET_CONTAINER_PORT:-8765}"
+    volumes:
+      - ./model_cache:/models
+      - ./debug:/app/debug
+      - ./results:/app/results
     deploy:
       resources:
         reservations:
@@ -44,6 +69,38 @@ services:
       # Legacy support
       - PARAKEET_MODEL=${PARAKEET_MODEL:-${ASR_MODEL:-nvidia/parakeet-tdt-0.6b-v3}}
       # Enhanced chunking configuration
+      - CHUNKING_ENABLED=${CHUNKING_ENABLED:-true}
+      - CHUNK_DURATION_SECONDS=${CHUNK_DURATION_SECONDS:-30.0}
+      - OVERLAP_DURATION_SECONDS=${OVERLAP_DURATION_SECONDS:-5.0}
+      - MIN_AUDIO_FOR_CHUNKING=${MIN_AUDIO_FOR_CHUNKING:-60.0}
+      - CONFIDENCE_THRESHOLD=${CONFIDENCE_THRESHOLD:-0.8}
+    restart: unless-stopped
+
+  # AMD ROCm / Strix Halo variant (requires /dev/kfd + /dev/dri passthrough)
+  parakeet-asr-strixhalo:
+    profiles: ["strixhalo", "amd"]
+    build:
+      context: .
+      dockerfile: Dockerfile_Parakeet
+      args:
+        PYTORCH_CUDA_VERSION: ${PYTORCH_CUDA_VERSION:-strixhalo}
+    image: parakeet-asr:latest
+    ports:
+      - "${PARAKEET_HOST_PORT:-8767}:${PARAKEET_CONTAINER_PORT:-8765}"
+    volumes:
+      - ./model_cache:/models
+      - ./debug:/app/debug
+      - ./results:/app/results
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    group_add:
+      - video
+    security_opt:
+      - seccomp:unconfined
+    environment:
+      - HF_HOME=/models
+      - PARAKEET_MODEL=$PARAKEET_MODEL
       - CHUNKING_ENABLED=${CHUNKING_ENABLED:-true}
       - CHUNK_DURATION_SECONDS=${CHUNK_DURATION_SECONDS:-30.0}
       - OVERLAP_DURATION_SECONDS=${OVERLAP_DURATION_SECONDS:-5.0}

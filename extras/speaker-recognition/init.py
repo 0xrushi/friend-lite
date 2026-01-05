@@ -166,14 +166,23 @@ class SpeakerRecognitionSetup:
 
             choices = {
                 "1": "CPU-only (works everywhere)",
-                "2": "GPU acceleration (requires NVIDIA+CUDA)"
+                "2": "GPU acceleration (requires NVIDIA+CUDA)",
+                "3": "AMD Strix Halo (NPU acceleration)"
             }
             choice = self.prompt_choice("Choose compute mode:", choices, default_choice)
-            compute_mode = "gpu" if choice == "2" else "cpu"
+
+            if choice == "2":
+                compute_mode = "gpu"
+            elif choice == "3":
+                compute_mode = "strixhalo"
+            else:
+                compute_mode = "cpu"
 
         # Set PYTORCH_CUDA_VERSION for Docker build (profile determined from this)
         if compute_mode == "cpu":
             self.config["PYTORCH_CUDA_VERSION"] = "cpu"
+        elif compute_mode == "strixhalo":
+            self.config["PYTORCH_CUDA_VERSION"] = "strixhalo"
         else:
             # Detect system CUDA version and suggest as default
             detected_cuda = self.detect_cuda_version()
@@ -420,8 +429,8 @@ def main():
     parser.add_argument("--hf-token",
                        help="Hugging Face token (default: prompt user)")
     parser.add_argument("--compute-mode",
-                       choices=["cpu", "gpu"],
-                       help="Compute mode: cpu or gpu (default: prompt user)")
+                       choices=["cpu", "gpu", "strixhalo"],
+                       help="Compute mode: cpu, gpu, or strixhalo (default: prompt user)")
     parser.add_argument("--deepgram-api-key",
                        help="Deepgram API key (optional)")
     parser.add_argument("--enable-https", action="store_true",

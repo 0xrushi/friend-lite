@@ -26,7 +26,6 @@ from simple_speaker_recognition.core.unified_speaker_db import UnifiedSpeakerDB
 from simple_speaker_recognition.database import get_db_session
 from simple_speaker_recognition.database.models import Speaker
 from simple_speaker_recognition.utils.audio_processing import get_audio_info
-from simple_speaker_recognition.utils.analysis import create_speaker_analysis
 
 # These will be imported from the main service.py when we integrate
 # from ..service import get_db, audio_backend
@@ -721,6 +720,9 @@ async def analyze_annotation_segments(
     and performs clustering analysis to help visualize speaker separation.
     """
     import json
+    # Local import to avoid OpenMP/BLAS runtime conflicts between PyTorch (ROCm) and Sklearn/UMAP
+    # that cause a segmentation fault if imported at the top level alongside torch.
+    from simple_speaker_recognition.utils.analysis import create_speaker_analysis
     
     # Parse segments JSON
     try:
@@ -853,6 +855,9 @@ async def analyze_segments_with_enrolled_speakers(
     4. Suggests optimal threshold based on separation
     """
     import json
+    # Local import to avoid OpenMP/BLAS runtime conflicts between PyTorch (ROCm) and Sklearn/UMAP
+    # that cause a segmentation fault if imported at the top level alongside torch.
+    from simple_speaker_recognition.utils.analysis import create_speaker_analysis
     
     # Parse segments JSON
     try:

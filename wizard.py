@@ -321,7 +321,7 @@ def run_service_setup(
 
             # Pass compute mode from existing .env if available
             compute_mode = read_env_value(speaker_env_path, "COMPUTE_MODE")
-            if compute_mode in ["cpu", "gpu"]:
+            if compute_mode in ["cpu", "gpu", "strixhalo"]:
                 cmd.extend(["--compute-mode", compute_mode])
                 console.print(
                     f"[blue][INFO][/blue] Found existing COMPUTE_MODE ({compute_mode}), reusing"
@@ -344,7 +344,7 @@ def run_service_setup(
 
             speaker_env_path = "extras/speaker-recognition/.env"
             cuda_version = read_env_value(speaker_env_path, "PYTORCH_CUDA_VERSION")
-            if cuda_version and cuda_version in ["cu121", "cu126", "cu128"]:
+            if cuda_version and cuda_version in ["cu121", "cu126", "cu128", "strixhalo"]:
                 cmd.extend(["--pytorch-cuda-version", cuda_version])
                 console.print(
                     f"[blue][INFO][/blue] Found existing PYTORCH_CUDA_VERSION ({cuda_version}) from speaker-recognition, reusing"

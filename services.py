@@ -179,9 +179,14 @@ def run_compose_command(service_name, command, build=False, force_recreate=False
             env_file = service_path / '.env'
             if env_file.exists():
                 env_values = dotenv_values(env_file)
-                # Derive profile from PYTORCH_CUDA_VERSION (cu126/cu121/etc = gpu, cpu = cpu)
+                # Derive profile from PYTORCH_CUDA_VERSION
                 pytorch_version = env_values.get('PYTORCH_CUDA_VERSION', 'cpu')
-                profile = 'gpu' if pytorch_version.startswith('cu') else 'cpu'
+                if pytorch_version == 'strixhalo':
+                    profile = 'strixhalo'
+                elif pytorch_version.startswith('cu'):
+                    profile = 'gpu'
+                else:
+                    profile = 'cpu'
                 build_cmd.extend(['--profile', profile])
 
         # For asr-services, only build the selected provider
@@ -277,9 +282,14 @@ def run_compose_command(service_name, command, build=False, force_recreate=False
         env_file = service_path / '.env'
         if env_file.exists():
             env_values = dotenv_values(env_file)
-            # Derive profile from PYTORCH_CUDA_VERSION (cu126/cu121/etc = gpu, cpu = cpu)
+            # Derive profile from PYTORCH_CUDA_VERSION
             pytorch_version = env_values.get('PYTORCH_CUDA_VERSION', 'cpu')
-            profile = 'gpu' if pytorch_version.startswith('cu') else 'cpu'
+            if pytorch_version == 'strixhalo':
+                profile = 'strixhalo'
+            elif pytorch_version.startswith('cu'):
+                profile = 'gpu'
+            else:
+                profile = 'cpu'
 
             cmd.extend(['--profile', profile])
 
@@ -288,7 +298,13 @@ def run_compose_command(service_name, command, build=False, force_recreate=False
                 if https_enabled.lower() == 'true':
                     cmd.extend(up_flags)
                 else:
-                    cmd.extend(up_flags + ['speaker-service-gpu' if profile == 'gpu' else 'speaker-service-cpu', 'web-ui'])
+                    if profile == 'gpu':
+                        service_to_start = 'speaker-service-gpu'
+                    elif profile == 'strixhalo':
+                        service_to_start = 'speaker-service-strixhalo'
+                    else:
+                        service_to_start = 'speaker-service-cpu'
+                    cmd.extend(up_flags + [service_to_start, 'web-ui'])
             elif command == 'down':
                 cmd.extend(['down'])
         else:

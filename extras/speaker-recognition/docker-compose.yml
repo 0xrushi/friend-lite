@@ -60,13 +60,34 @@ services:
         aliases:
           - speaker-service
   
+  # Strix Halo / AMD ROCm Profile Configuration
+  speaker-service-strixhalo:
+    <<: *base-speaker-service
+    profiles: ["strixhalo"]
+    networks:
+      default:
+        aliases:
+          - speaker-service
+    build:
+      context: .
+      dockerfile: Dockerfile.strixhalo
+      args:
+        PYTORCH_CUDA_VERSION: ${PYTORCH_CUDA_VERSION:-strixhalo}
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    group_add:
+      - video
+    security_opt:
+      - seccomp:unconfined
+
   # React Web UI
   web-ui:
     platform: linux/amd64
     build:
       context: webui
       dockerfile: Dockerfile
-    profiles: ["cpu", "gpu"]
+    profiles: ["cpu", "gpu", "strixhalo"]
     ports:
       - "${REACT_UI_PORT:-5173}:${REACT_UI_PORT:-5173}"
     volumes:
@@ -93,7 +114,7 @@ services:
   # Nginx reverse proxy for unified HTTPS endpoint
   nginx:
     image: nginx:alpine
-    profiles: ["cpu", "gpu"]
+    profiles: ["cpu", "gpu", "strixhalo"]
     ports:
       - "8444:443"
       - "8081:80"
