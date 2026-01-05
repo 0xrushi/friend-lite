@@ -57,7 +57,7 @@ SERVICES = {
     'backend': {
         'advanced': {
             'path': 'backends/advanced',
-            'cmd': ['uv', 'run', '--with-requirements', '../../setup-requirements.txt', 'python', 'init.py'],
+            'cmd': ['uv', 'run', '--prerelease=allow', '--with-requirements', '../../setup-requirements.txt', 'python', 'init.py'],
             'description': 'Advanced AI backend with full feature set',
             'required': True
         }
@@ -65,12 +65,12 @@ SERVICES = {
     'extras': {
         'speaker-recognition': {
             'path': 'extras/speaker-recognition',
-            'cmd': ['uv', 'run', '--with-requirements', '../../setup-requirements.txt', 'python', 'init.py'],
+            'cmd': ['uv', 'run', '--prerelease=allow', '--with-requirements', '../../setup-requirements.txt', 'python', 'init.py'],
             'description': 'Speaker identification and enrollment'
         },
         'asr-services': {
             'path': 'extras/asr-services',
-            'cmd': ['uv', 'run', '--with-requirements', '../../setup-requirements.txt', 'python', 'init.py'],
+            'cmd': ['uv', 'run', '--prerelease=allow', '--with-requirements', '../../setup-requirements.txt', 'python', 'init.py'],
             'description': 'Offline speech-to-text (Parakeet)'
         },
         'openmemory-mcp': {
@@ -218,7 +218,7 @@ def run_service_setup(service_name, selected_services, https_enabled=False, serv
 
             # Pass compute mode from existing .env if available
             compute_mode = read_env_value(speaker_env_path, 'COMPUTE_MODE')
-            if compute_mode in ['cpu', 'gpu']:
+            if compute_mode in ['cpu', 'gpu', 'strixhalo']:
                 cmd.extend(['--compute-mode', compute_mode])
                 console.print(f"[blue][INFO][/blue] Found existing COMPUTE_MODE ({compute_mode}), reusing")
         
@@ -226,7 +226,7 @@ def run_service_setup(service_name, selected_services, https_enabled=False, serv
         if service_name == 'asr-services':
             speaker_env_path = 'extras/speaker-recognition/.env'
             cuda_version = read_env_value(speaker_env_path, 'PYTORCH_CUDA_VERSION')
-            if cuda_version and cuda_version in ['cu121', 'cu126', 'cu128']:
+            if cuda_version and cuda_version in ['cu121', 'cu126', 'cu128', 'strixhalo']:
                 cmd.extend(['--pytorch-cuda-version', cuda_version])
                 console.print(f"[blue][INFO][/blue] Found existing PYTORCH_CUDA_VERSION ({cuda_version}) from speaker-recognition, reusing")
 

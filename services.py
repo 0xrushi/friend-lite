@@ -123,6 +123,8 @@ def run_compose_command(service_name, command, build=False):
             # Add profile flag for both up and down commands
             if compute_mode == 'gpu':
                 cmd.extend(['--profile', 'gpu'])
+            elif compute_mode == 'strixhalo':
+                cmd.extend(['--profile', 'strixhalo'])
             else:
                 cmd.extend(['--profile', 'cpu'])
 
@@ -133,7 +135,14 @@ def run_compose_command(service_name, command, build=False):
                     cmd.extend(['up', '-d'])
                 else:
                     # HTTP mode: start specific services with profile (no nginx)
-                    cmd.extend(['up', '-d', 'speaker-service-gpu' if compute_mode == 'gpu' else 'speaker-service-cpu', 'web-ui'])
+                    if compute_mode == 'gpu':
+                        service_name_to_start = 'speaker-service-gpu'
+                    elif compute_mode == 'strixhalo':
+                        service_name_to_start = 'speaker-service-strixhalo'
+                    else:
+                        service_name_to_start = 'speaker-service-cpu'
+                    
+                    cmd.extend(['up', '-d', service_name_to_start, 'web-ui'])
             elif command == 'down':
                 cmd.extend(['down'])
         else:
@@ -142,6 +151,27 @@ def run_compose_command(service_name, command, build=False):
                 cmd.extend(['up', '-d'])
             elif command == 'down':
                 cmd.extend(['down'])
+    # Handle asr-services service specially (NVIDIA vs AMD/ROCm vs CPU)
+    elif service_name == 'asr-services' and command in ['up', 'down']:
+        env_file = service_path / '.env'
+        env_values = dotenv_values(env_file) if env_file.exists() else {}
+        pytorch_variant = (env_values.get('PYTORCH_CUDA_VERSION') or 'cpu').strip().strip("'\"")
+
+        if command == 'up':
+            if pytorch_variant == 'strixhalo':
+                cmd.extend(['--profile', 'strixhalo', 'up', '-d', 'parakeet-asr-strixhalo'])
+            elif pytorch_variant.startswith('cu'):
+                # If host doesn't have NVIDIA device nodes, fall back to CPU service.
+                if Path("/dev/nvidiactl").exists() or Path("/dev/nvidia0").exists():
+                    cmd.extend(['--profile', 'nvidia', 'up', '-d', 'parakeet-asr-nvidia'])
+                else:
+                    console.print("[yellow]⚠️  asr-services configured for CUDA (NVIDIA), but no NVIDIA devices found; starting CPU variant instead.[/yellow]")
+                    cmd.extend(['up', '-d', 'parakeet-asr'])
+            else:
+                # CPU fallback (no GPU requirements)
+                cmd.extend(['up', '-d', 'parakeet-asr'])
+        else:
+            cmd.extend(['down'])
     else:
         # Standard compose commands for other services
         if command == 'up':

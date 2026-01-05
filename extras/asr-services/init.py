@@ -155,7 +155,8 @@ class ASRServicesSetup:
             cuda_choices = {
                 "1": "CUDA 12.1 (cu121)",
                 "2": "CUDA 12.6 (cu126) - Recommended",
-                "3": "CUDA 12.8 (cu128)"
+                "3": "CUDA 12.8 (cu128)",
+                "4": "AMD Strix Halo (NPU)"
             }
             cuda_choice = self.prompt_choice(
                 "Choose CUDA version for PyTorch:",
@@ -166,7 +167,8 @@ class ASRServicesSetup:
             choice_to_cuda = {
                 "1": "cu121",
                 "2": "cu126",
-                "3": "cu128"
+                "3": "cu128",
+                "4": "strixhalo"
             }
             cuda_version = choice_to_cuda[cuda_choice]
 
@@ -255,7 +257,7 @@ def main():
     """Main entry point"""
     parser = argparse.ArgumentParser(description="ASR Services (Parakeet) Setup")
     parser.add_argument("--pytorch-cuda-version",
-                       choices=["cu121", "cu126", "cu128"],
+                       choices=["cu121", "cu126", "cu128", "strixhalo"],
                        help="PyTorch CUDA version (default: auto-detect)")
 
     args = parser.parse_args()

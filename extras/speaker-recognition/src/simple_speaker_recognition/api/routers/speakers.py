@@ -76,6 +76,8 @@ async def get_speakers_analysis(
     db: UnifiedSpeakerDB = Depends(get_db),
 ):
     """Get comprehensive analysis of speaker embeddings including clustering and visualization data."""
+    # Local import to avoid OpenMP/BLAS runtime conflicts between PyTorch (ROCm) and Sklearn/UMAP
+    # that cause a segmentation fault if imported at the top level alongside torch.
     from simple_speaker_recognition.utils.analysis import create_speaker_analysis
     
     log.info(f"Generating speaker analysis for user_id={user_id}, method={method}, cluster_method={cluster_method}")
