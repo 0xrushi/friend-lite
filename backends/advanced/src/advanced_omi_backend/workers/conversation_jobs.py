@@ -13,6 +13,7 @@ from rq.job import Job
 
 from advanced_omi_backend.models.job import async_job
 from advanced_omi_backend.controllers.queue_controller import redis_conn
+from advanced_omi_backend.controllers.session_controller import mark_session_complete
 from advanced_omi_backend.services.plugin_service import get_plugin_router
 
 from advanced_omi_backend.utils.conversation_utils import (
@@ -296,9 +297,9 @@ async def open_conversation_job(
             if status_str in ["finalizing", "complete"]:
                 finalize_received = True
 
-                # Check if this was a WebSocket disconnect
+                # Get completion reason (guaranteed to exist with unified API)
                 completion_reason = await redis_client.hget(session_key, "completion_reason")
-                completion_reason_str = completion_reason.decode() if completion_reason else None
+                completion_reason_str = completion_reason.decode() if completion_reason else "unknown"
 
                 if completion_reason_str == "websocket_disconnect":
                     logger.warning(
@@ -308,7 +309,7 @@ async def open_conversation_job(
                     timeout_triggered = False  # This is a disconnect, not a timeout
                 else:
                     logger.info(
-                        f"🛑 Session finalizing (reason: {completion_reason_str or 'user_stopped'}), "
+                        f"🛑 Session finalizing (reason: {completion_reason_str}), "
                         f"waiting for audio persistence job to complete..."
                     )
                 break  # Exit immediately when finalize signal received

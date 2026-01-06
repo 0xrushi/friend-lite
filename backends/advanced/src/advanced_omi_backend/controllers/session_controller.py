@@ -9,11 +9,59 @@ This module manages Redis-based audio streaming sessions, including:
 
 import logging
 import time
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Literal
 
 from fastapi.responses import JSONResponse
 
 logger = logging.getLogger(__name__)
+
+
+async def mark_session_complete(
+    redis_client,
+    session_id: str,
+    reason: Literal[
+        "websocket_disconnect",
+        "user_stopped",
+        "inactivity_timeout",
+        "max_duration",
+        "all_jobs_complete"
+    ],
+) -> None:
+    """
+    Single source of truth for marking sessions as complete.
+
+    This function ensures that both 'status' and 'completion_reason' are ALWAYS
+    set together atomically, preventing race conditions where workers check status
+    before completion_reason is set.
+
+    Args:
+        redis_client: Redis async client
+        session_id: Session UUID
+        reason: Why the session is completing (enforced by type system)
+
+    Usage:
+        # WebSocket disconnect
+        await mark_session_complete(redis, session_id, "websocket_disconnect")
+
+        # User manually stopped
+        await mark_session_complete(redis, session_id, "user_stopped")
+
+        # Inactivity timeout
+        await mark_session_complete(redis, session_id, "inactivity_timeout")
+
+        # Max duration reached
+        await mark_session_complete(redis, session_id, "max_duration")
+
+        # All jobs finished
+        await mark_session_complete(redis, session_id, "all_jobs_complete")
+    """
+    session_key = f"audio:session:{session_id}"
+    await redis_client.hset(session_key, mapping={
+        "status": "complete",
+        "completed_at": str(time.time()),
+        "completion_reason": reason
+    })
+    logger.info(f"✅ Session {session_id[:12]} marked complete: {reason}")
 
 
 async def get_session_info(redis_client, session_id: str) -> Optional[Dict]:
@@ -192,8 +240,7 @@ async def get_streaming_status(request):
                     # All jobs complete - this is truly a completed session
                     # Update Redis status if it wasn't already marked complete
                     if status not in ["complete", "completed", "finalized"]:
-                        await redis_client.hset(key, "status", "complete")
-                        logger.info(f"✅ Marked session {session_id} as complete (all jobs terminal)")
+                        await mark_session_complete(redis_client, session_id, "all_jobs_complete")
 
                     # Get additional session data for completed sessions
                     session_key = f"audio:session:{session_id}"

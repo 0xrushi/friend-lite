@@ -211,14 +211,24 @@ print_info "Using environment variables from .env file for test configuration"
 
 # Clean test environment
 print_info "Cleaning test environment..."
-sudo rm -rf ./test_audio_chunks/ ./test_data/ ./test_debug_dir/ ./mongo_data_test/ ./qdrant_data_test/ ./test_neo4j/ || true
+rm -rf ./test_audio_chunks/ ./test_data/ ./test_debug_dir/ ./mongo_data_test/ ./qdrant_data_test/ ./test_neo4j/ 2>/dev/null || true
+
+# If cleanup fails due to permissions, try with docker
+if [ -d "./data/test_audio_chunks/" ] || [ -d "./data/test_data/" ] || [ -d "./data/test_debug_dir/" ]; then
+    print_warning "Permission denied, using docker to clean test directories..."
+    docker run --rm -v "$(pwd)/data:/data" alpine sh -c 'rm -rf /data/test_*' 2>/dev/null || true
+fi
 
 # Use unique project name to avoid conflicts with development environment
 export COMPOSE_PROJECT_NAME="advanced-backend-test"
 
 # Stop any existing test containers
 print_info "Stopping existing test containers..."
+# Try cleanup with current project name
 docker compose -f docker-compose-test.yml down -v || true
+
+# Also try cleanup with default project name (in case containers were started without COMPOSE_PROJECT_NAME)
+COMPOSE_PROJECT_NAME=advanced docker compose -f docker-compose-test.yml down -v 2>/dev/null || true
 
 # Run integration tests
 print_info "Running integration tests..."
@@ -257,6 +267,8 @@ else
     if [ "${CLEANUP_CONTAINERS:-true}" != "false" ]; then
         print_info "Cleaning up test containers after failure..."
         docker compose -f docker-compose-test.yml down -v || true
+        # Also cleanup with default project name
+        COMPOSE_PROJECT_NAME=advanced docker compose -f docker-compose-test.yml down -v 2>/dev/null || true
         docker system prune -f || true
     else
         print_warning "Skipping cleanup (CLEANUP_CONTAINERS=false) - containers left running for debugging"
@@ -269,6 +281,8 @@ fi
 if [ "${CLEANUP_CONTAINERS:-true}" != "false" ]; then
     print_info "Cleaning up test containers..."
     docker compose -f docker-compose-test.yml down -v || true
+    # Also cleanup with default project name
+    COMPOSE_PROJECT_NAME=advanced docker compose -f docker-compose-test.yml down -v 2>/dev/null || true
     docker system prune -f || true
 else
     print_warning "Skipping cleanup (CLEANUP_CONTAINERS=false) - containers left running"

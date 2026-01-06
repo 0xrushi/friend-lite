@@ -1,5 +1,6 @@
 chat:
-  system_prompt: You are a specialized AI assistant for technical support and troubleshooting.
+  system_prompt: You are a helpful AI assistant with access to the user's personal
+    memories and conversation history.
 defaults:
   embedding: openai-embed
   llm: openai-llm

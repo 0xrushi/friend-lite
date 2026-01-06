@@ -153,6 +153,15 @@ Get Chat Configuration Test
     [Documentation]    Test getting chat system prompt (admin only)
     [Tags]    infra	permissions
 
+    # First ensure default prompt is set (cleanup from previous test runs)
+    ${default_prompt}=    Set Variable    You are a helpful AI assistant with access to the user's personal memories and conversation history.
+    &{headers}=        Create Dictionary    Content-Type=text/plain
+    ${response}=       POST On Session    api    /api/admin/chat/config
+    ...                data=${default_prompt}
+    ...                headers=${headers}
+    Should Be Equal As Integers    ${response.status_code}    200
+
+    # Now test getting the default prompt
     ${response}=       GET On Session    api    /api/admin/chat/config
     Should Be Equal As Integers    ${response.status_code}    200
 

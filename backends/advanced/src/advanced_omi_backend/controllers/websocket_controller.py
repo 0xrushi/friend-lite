@@ -22,6 +22,7 @@ import redis.asyncio as redis
 from advanced_omi_backend.auth import websocket_auth
 from advanced_omi_backend.client_manager import generate_client_id, get_client_manager
 from advanced_omi_backend.constants import OMI_CHANNELS, OMI_SAMPLE_RATE, OMI_SAMPLE_WIDTH
+from advanced_omi_backend.controllers.session_controller import mark_session_complete
 from advanced_omi_backend.utils.audio_utils import process_audio_chunk
 from advanced_omi_backend.services.audio_stream import AudioStreamProducer
 from advanced_omi_backend.services.audio_stream.producer import get_audio_stream_producer
@@ -250,13 +251,8 @@ async def cleanup_client_state(client_id: str):
                 client_id_bytes = await async_redis.hget(key, "client_id")
                 if client_id_bytes and client_id_bytes.decode() == client_id:
                     # Mark session as complete (WebSocket disconnected)
-                    await async_redis.hset(key, mapping={
-                        "status": "complete",
-                        "completed_at": str(time.time()),
-                        "completion_reason": "websocket_disconnect"
-                    })
                     session_id = key.decode().replace("audio:session:", "")
-                    logger.info(f"📊 Marked session {session_id[:12]} as complete (WebSocket disconnect)")
+                    await mark_session_complete(async_redis, session_id, "websocket_disconnect")
                     sessions_closed += 1
 
             if cursor == 0:
