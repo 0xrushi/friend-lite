@@ -8,6 +8,7 @@ services:
       context: .
       dockerfile: Dockerfile
       target: dev  # Use dev stage with test dependencies
+    command: ["./start.sh", "--test"]
     ports:
       - "8001:8000"  # Avoid conflict with dev on 8000
     volumes:
@@ -157,7 +158,7 @@ services:
       context: .
       dockerfile: Dockerfile
       target: dev  # Use dev stage with test dependencies
-    command: ["uv", "run", "python", "worker_orchestrator.py"]
+    command: ["uv", "run", "--group", "test", "python", "worker_orchestrator.py"]
     volumes:
       - ./src:/app/src
       - ./worker_orchestrator.py:/app/worker_orchestrator.py
@@ -211,7 +212,7 @@ services:
       dockerfile: Dockerfile
       target: dev  # Use dev stage with test dependencies
     command: >
-      uv run python -m advanced_omi_backend.workers.audio_stream_deepgram_streaming_worker
+      uv run --group test python -m advanced_omi_backend.workers.audio_stream_deepgram_streaming_worker
     volumes:
       - ./src:/app/src
       - ./data/test_data:/app/data
