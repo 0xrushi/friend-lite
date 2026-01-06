@@ -42,6 +42,8 @@ class HealthMonitor:
         self.running = False
         self.monitor_task: Optional[asyncio.Task] = None
         self.start_time = time.time()
+        self.last_registration_recovery: Optional[float] = None
+        self.registration_recovery_cooldown = 60  # seconds
 
     async def start(self):
         """Start the health monitoring loop"""
@@ -111,6 +113,10 @@ class HealthMonitor:
 
             # Check RQ worker registration count
             rq_health = self._check_rq_worker_registration()
+
+            # If RQ workers lost registration, trigger bulk restart (matches old bash script behavior)
+            if not rq_health:
+                self._handle_registration_loss()
 
             # Restart failed workers
             self._restart_failed_workers()
@@ -200,6 +206,83 @@ class HealthMonitor:
                     )
                 else:
                     logger.error(f"{worker.name}: Restart failed")
+
+    def _handle_registration_loss(self):
+        """
+        Handle RQ worker registration loss.
+
+        This replicates the old bash script's self-healing behavior:
+        - Check if cooldown period has passed
+        - Restart all RQ workers (bulk restart)
+        - Update recovery timestamp
+
+        Cooldown prevents too-frequent restarts during Redis/network issues.
+        """
+        current_time = time.time()
+
+        # Check if cooldown period has passed
+        if self.last_registration_recovery is not None:
+            elapsed = current_time - self.last_registration_recovery
+            if elapsed < self.registration_recovery_cooldown:
+                remaining = self.registration_recovery_cooldown - elapsed
+                logger.debug(
+                    f"Registration recovery cooldown active - "
+                    f"waiting {remaining:.0f}s before next recovery attempt"
+                )
+                return
+
+        logger.warning(
+            "⚠️  RQ worker registration loss detected - initiating bulk restart "
+            "(replicating old start-workers.sh behavior)"
+        )
+
+        # Restart all RQ workers
+        success = self._restart_all_rq_workers()
+
+        if success:
+            logger.info("✅ Bulk restart completed - workers should re-register soon")
+        else:
+            logger.error("❌ Bulk restart encountered errors - check individual worker logs")
+
+        # Update recovery timestamp to start cooldown
+        self.last_registration_recovery = current_time
+
+    def _restart_all_rq_workers(self) -> bool:
+        """
+        Restart all RQ workers (bulk restart).
+
+        This matches the old bash script's recovery mechanism:
+        - Kill all RQ workers
+        - Restart them
+        - Workers will automatically re-register with Redis on startup
+
+        Returns:
+            True if all RQ workers restarted successfully, False otherwise
+        """
+        rq_workers = [
+            worker
+            for worker in self.process_manager.get_all_workers()
+            if worker.definition.worker_type == WorkerType.RQ_WORKER
+        ]
+
+        if not rq_workers:
+            logger.warning("No RQ workers found to restart")
+            return False
+
+        logger.info(f"Restarting {len(rq_workers)} RQ workers...")
+
+        all_success = True
+        for worker in rq_workers:
+            logger.info(f"  ↻ Restarting {worker.name}...")
+            success = self.process_manager.restart_worker(worker.name)
+
+            if success:
+                logger.info(f"  ✓ {worker.name} restarted successfully")
+            else:
+                logger.error(f"  ✗ {worker.name} restart failed")
+                all_success = False
+
+        return all_success
 
     def get_health_status(self) -> dict:
         """
