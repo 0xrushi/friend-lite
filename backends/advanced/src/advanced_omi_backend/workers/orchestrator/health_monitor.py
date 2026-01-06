@@ -100,6 +100,8 @@ class HealthMonitor:
             raise
         except Exception as e:
             logger.error(f"Health monitor loop error: {e}", exc_info=True)
+            self.running = False  # Mark monitor as stopped so callers know it's not active
+            raise  # Re-raise to ensure the monitor task fails properly
 
     async def _check_health(self):
         """Perform all health checks and restart failed workers"""

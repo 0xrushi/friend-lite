@@ -81,12 +81,13 @@ class ManagedWorker:
             logger.info(f"{self.name}: Starting worker...")
             logger.debug(f"{self.name}: Command: {' '.join(self.definition.command)}")
 
+            # Don't capture stdout/stderr - let it flow to container logs (Docker captures it)
+            # This prevents buffer overflow and blocking when worker output exceeds 64KB
+            # Worker logs will be visible via 'docker logs' command
             self.process = subprocess.Popen(
                 self.definition.command,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,  # Line buffered
+                stdout=None,  # Inherit from parent (goes to container stdout)
+                stderr=None,  # Inherit from parent (goes to container stderr)
             )
 
             self.state = WorkerState.STARTING
@@ -254,7 +255,15 @@ class ProcessManager:
             return False
 
         logger.info(f"Restarting worker: {name}")
-        worker.stop(timeout=timeout)
+
+        # Ensure worker is fully stopped before attempting restart
+        stop_success = worker.stop(timeout=timeout)
+        if not stop_success:
+            logger.error(f"{name}: Failed to stop cleanly, restart aborted")
+            worker.state = WorkerState.FAILED
+            return False
+
+        # Attempt to start the worker
         success = worker.start()
 
         if success:
