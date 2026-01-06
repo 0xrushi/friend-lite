@@ -241,14 +241,14 @@ async def transcribe_full_audio_job(
                     'word_count': len(words),
                 }
 
-                logger.info(f"🔍 DEBUG: Calling trigger_plugins with user_id={user_id}, client_id={client_id}")
-                plugin_results = await plugin_router.trigger_plugins(
-                    access_level='transcript',  # Batch mode - only 'transcript' plugins, NOT 'streaming_transcript'
+                logger.info(f"🔍 DEBUG: Dispatching transcript.batch event with user_id={user_id}, client_id={client_id}")
+                plugin_results = await plugin_router.dispatch_event(
+                    event='transcript.batch',
                     user_id=user_id,
                     data=plugin_data,
                     metadata={'client_id': client_id}
                 )
-                logger.info(f"🔍 DEBUG: Plugin trigger returned {len(plugin_results) if plugin_results else 0} results")
+                logger.info(f"🔍 DEBUG: Event dispatch returned {len(plugin_results) if plugin_results else 0} results")
 
                 if plugin_results:
                     logger.info(f"✅ Triggered {len(plugin_results)} transcript plugins in batch mode")

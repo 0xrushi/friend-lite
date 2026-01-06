@@ -7,6 +7,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      target: dev  # Use dev stage with test dependencies
     ports:
       - "8001:8000"  # Avoid conflict with dev on 8000
     volumes:
@@ -15,6 +16,7 @@ services:
       - ./data/test_debug_dir:/app/debug_dir
       - ./data/test_data:/app/data
       - ${CONFIG_FILE:-../../config/config.yml}:/app/config.yml  # Mount config.yml for model registry and memory settings (writable for admin config updates)
+      - ${PLUGINS_CONFIG:-../../tests/config/plugins.test.yml}:/app/plugins.yml  # Mount test plugins config
     environment:
       # Override with test-specific settings
       - MONGODB_URI=mongodb://mongo-test:27017/test_db
@@ -154,6 +156,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      target: dev  # Use dev stage with test dependencies
     command: ["uv", "run", "python", "worker_orchestrator.py"]
     volumes:
       - ./src:/app/src
@@ -162,6 +165,7 @@ services:
       - ./data/test_debug_dir:/app/debug_dir
       - ./data/test_data:/app/data
       - ${CONFIG_FILE:-../../config/config.yml}:/app/config.yml  # Mount config.yml for model registry and memory settings (writable for admin config updates)
+      - ${PLUGINS_CONFIG:-../../tests/config/plugins.test.yml}:/app/plugins.yml  # Mount test plugins config
     environment:
       # Same environment as backend
       - MONGODB_URI=mongodb://mongo-test:27017/test_db
@@ -205,13 +209,14 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      target: dev  # Use dev stage with test dependencies
     command: >
       uv run python -m advanced_omi_backend.workers.audio_stream_deepgram_streaming_worker
     volumes:
       - ./src:/app/src
       - ./data/test_data:/app/data
       - ${CONFIG_FILE:-../../config/config.yml}:/app/config.yml
-      - ${PLUGINS_CONFIG:-../../config/plugins.yml}:/app/plugins.yml
+      - ${PLUGINS_CONFIG:-../../tests/config/plugins.test.yml}:/app/plugins.yml  # Mount test plugins config
     environment:
       - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY}
       - REDIS_URL=redis://redis-test:6379/0

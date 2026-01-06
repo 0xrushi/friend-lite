@@ -15,8 +15,8 @@ from dataclasses import dataclass, field
 class PluginContext:
     """Context passed to plugin execution"""
     user_id: str
-    access_level: str
-    data: Dict[str, Any]  # Access-level specific data
+    event: str  # Event name (e.g., "transcript.streaming", "conversation.complete")
+    data: Dict[str, Any]  # Event-specific data
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -54,11 +54,11 @@ class BasePlugin(ABC):
 
         Args:
             config: Plugin configuration from config/plugins.yml
-                   Contains: enabled, access_level, trigger, and plugin-specific config
+                   Contains: enabled, subscriptions, trigger, and plugin-specific config
         """
         self.config = config
         self.enabled = config.get('enabled', False)
-        self.access_level = config.get('access_level')
+        self.subscriptions = config.get('subscriptions', [])
         self.trigger = config.get('trigger', {'type': 'always'})
 
     @abstractmethod

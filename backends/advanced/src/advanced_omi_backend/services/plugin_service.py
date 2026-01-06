@@ -131,6 +131,12 @@ def init_plugin_router() -> Optional[PluginRouter]:
                         # Note: async initialization happens in app_factory lifespan
                         _plugin_router.register_plugin(plugin_id, plugin)
                         logger.info(f"✅ Plugin '{plugin_id}' registered")
+                    elif plugin_id == 'test_event':
+                        from advanced_omi_backend.plugins.test_event import TestEventPlugin
+                        plugin = TestEventPlugin(plugin_config)
+                        # Note: async initialization happens in app_factory lifespan
+                        _plugin_router.register_plugin(plugin_id, plugin)
+                        logger.info(f"✅ Plugin '{plugin_id}' registered")
                     else:
                         logger.warning(f"Unknown plugin: {plugin_id}")
 

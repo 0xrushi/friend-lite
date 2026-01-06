@@ -84,43 +84,39 @@ def extract_command_after_wake_word(transcript: str, wake_word: str) -> str:
 
 
 class PluginRouter:
-    """Routes pipeline events to appropriate plugins based on access level and triggers"""
+    """Routes pipeline events to appropriate plugins based on event subscriptions"""
 
     def __init__(self):
         self.plugins: Dict[str, BasePlugin] = {}
-        # Index plugins by access level for fast lookup
-        self._plugins_by_level: Dict[str, List[str]] = {
-            'transcript': [],
-            'streaming_transcript': [],
-            'conversation': [],
-            'memory': []
-        }
+        # Index plugins by event subscription for fast lookup
+        self._plugins_by_event: Dict[str, List[str]] = {}
 
     def register_plugin(self, plugin_id: str, plugin: BasePlugin):
         """Register a plugin with the router"""
         self.plugins[plugin_id] = plugin
 
-        # Index by access level
-        access_level = plugin.access_level
-        if access_level in self._plugins_by_level:
-            self._plugins_by_level[access_level].append(plugin_id)
+        # Index by each event subscription
+        for event in plugin.subscriptions:
+            if event not in self._plugins_by_event:
+                self._plugins_by_event[event] = []
+            self._plugins_by_event[event].append(plugin_id)
 
-        logger.info(f"Registered plugin '{plugin_id}' for access level '{access_level}'")
+        logger.info(f"Registered plugin '{plugin_id}' for events: {plugin.subscriptions}")
 
-    async def trigger_plugins(
+    async def dispatch_event(
         self,
-        access_level: str,
+        event: str,
         user_id: str,
         data: Dict,
         metadata: Optional[Dict] = None
     ) -> List[PluginResult]:
         """
-        Trigger all plugins registered for this access level.
+        Dispatch event to all subscribed plugins.
 
         Args:
-            access_level: 'transcript', 'streaming_transcript', 'conversation', or 'memory'
+            event: Event name (e.g., 'transcript.streaming', 'conversation.complete')
             user_id: User ID for context
-            data: Access-level specific data
+            data: Event-specific data
             metadata: Optional metadata
 
         Returns:
@@ -128,19 +124,8 @@ class PluginRouter:
         """
         results = []
 
-        # Hierarchical triggering logic:
-        # - 'streaming_transcript': trigger both 'streaming_transcript' AND 'transcript' plugins
-        # - 'transcript': trigger ONLY 'transcript' plugins (not 'streaming_transcript')
-        # - Other levels: exact match only
-        if access_level == 'streaming_transcript':
-            # Streaming mode: trigger both streaming_transcript AND transcript plugins
-            plugin_ids = (
-                self._plugins_by_level.get('streaming_transcript', []) +
-                self._plugins_by_level.get('transcript', [])
-            )
-        else:
-            # Batch mode or other modes: exact match only
-            plugin_ids = self._plugins_by_level.get(access_level, [])
+        # Get plugins subscribed to this event
+        plugin_ids = self._plugins_by_event.get(event, [])
 
         for plugin_id in plugin_ids:
             plugin = self.plugins[plugin_id]
@@ -148,20 +133,20 @@ class PluginRouter:
             if not plugin.enabled:
                 continue
 
-            # Check trigger condition
+            # Check trigger condition (wake_word, etc.)
             if not await self._should_trigger(plugin, data):
                 continue
 
-            # Execute plugin at appropriate access level
+            # Execute plugin
             try:
                 context = PluginContext(
                     user_id=user_id,
-                    access_level=access_level,
+                    event=event,
                     data=data,
                     metadata=metadata or {}
                 )
 
-                result = await self._execute_plugin(plugin, access_level, context)
+                result = await self._execute_plugin(plugin, event, context)
 
                 if result:
                     results.append(result)
@@ -218,16 +203,16 @@ class PluginRouter:
     async def _execute_plugin(
         self,
         plugin: BasePlugin,
-        access_level: str,
+        event: str,
         context: PluginContext
     ) -> Optional[PluginResult]:
-        """Execute plugin method for specified access level"""
-        # Both 'transcript' and 'streaming_transcript' call on_transcript()
-        if access_level in ('transcript', 'streaming_transcript'):
+        """Execute plugin method for specified event"""
+        # Map events to plugin callback methods
+        if event.startswith('transcript.'):
             return await plugin.on_transcript(context)
-        elif access_level == 'conversation':
+        elif event.startswith('conversation.'):
             return await plugin.on_conversation_complete(context)
-        elif access_level == 'memory':
+        elif event.startswith('memory.'):
             return await plugin.on_memory_processed(context)
 
         return None

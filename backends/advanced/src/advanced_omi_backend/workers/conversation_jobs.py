@@ -556,8 +556,8 @@ async def open_conversation_job(
                 'conversation_id': conversation_id,
             }
 
-            plugin_results = await plugin_router.trigger_plugins(
-                access_level='conversation',
+            plugin_results = await plugin_router.dispatch_event(
+                event='conversation.complete',
                 user_id=user_id,
                 data=plugin_data,
                 metadata={'end_reason': end_reason}

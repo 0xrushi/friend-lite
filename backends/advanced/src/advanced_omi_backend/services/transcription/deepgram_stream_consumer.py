@@ -303,11 +303,11 @@ class DeepgramStreamingConsumer:
                 'is_final': True
             }
 
-            # Trigger plugins with streaming_transcript access level
-            logger.info(f"🎯 Triggering plugins for user {user_id}, transcript: {plugin_data['transcript'][:50]}...")
+            # Dispatch transcript.streaming event
+            logger.info(f"🎯 Dispatching transcript.streaming event for user {user_id}, transcript: {plugin_data['transcript'][:50]}...")
 
-            plugin_results = await self.plugin_router.trigger_plugins(
-                access_level='streaming_transcript',
+            plugin_results = await self.plugin_router.dispatch_event(
+                event='transcript.streaming',
                 user_id=user_id,
                 data=plugin_data,
                 metadata={'client_id': session_id}

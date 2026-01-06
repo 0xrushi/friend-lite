@@ -257,8 +257,8 @@ async def process_memory_job(conversation_id: str, *, redis_client=None) -> Dict
                         'conversation_id': conversation_id,
                     }
 
-                    plugin_results = await plugin_router.trigger_plugins(
-                        access_level='memory',
+                    plugin_results = await plugin_router.dispatch_event(
+                        event='memory.processed',
                         user_id=user_id,
                         data=plugin_data,
                         metadata={

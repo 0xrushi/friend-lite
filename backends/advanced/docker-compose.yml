@@ -29,6 +29,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      target: prod  # Use prod stage without test dependencies
     ports:
       - "8000:8000"
     env_file:
@@ -84,6 +85,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      target: prod  # Use prod stage without test dependencies
     command: ["uv", "run", "python", "worker_orchestrator.py"]
     env_file:
       - .env
@@ -124,6 +126,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      target: prod  # Use prod stage without test dependencies
     command: >
       uv run python -m advanced_omi_backend.workers.audio_stream_deepgram_streaming_worker
     env_file:
