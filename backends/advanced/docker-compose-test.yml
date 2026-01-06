@@ -154,9 +154,10 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    command: ./start-workers.sh
+    command: ["uv", "run", "python", "worker_orchestrator.py"]
     volumes:
       - ./src:/app/src
+      - ./worker_orchestrator.py:/app/worker_orchestrator.py
       - ./data/test_audio_chunks:/app/audio_chunks
       - ./data/test_debug_dir:/app/debug_dir
       - ./data/test_data:/app/data
