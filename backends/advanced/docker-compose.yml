@@ -76,22 +76,24 @@ services:
   # Unified Worker Container
   # No CUDA needed for chronicle-backend and workers, workers only orchestrate jobs and call external services
   # Runs all workers in a single container for efficiency:
-  # - 3 RQ workers (transcription, memory, default queues)
-  # - 1 Audio stream worker (Redis Streams consumer - must be single to maintain sequential chunks)
+  # - 6 RQ workers (transcription, memory, default queues)
+  # - 1 Audio persistence worker (audio queue)
+  # - 1+ Stream workers (conditional based on config.yml - Deepgram/Parakeet)
+  # Uses Python orchestrator for process management, health monitoring, and self-healing
   workers:
     build:
       context: .
       dockerfile: Dockerfile
-    command: ["./start-workers.sh"]
+    command: ["uv", "run", "python", "worker_orchestrator.py"]
     env_file:
       - .env
     volumes:
       - ./src:/app/src
-      - ./start-workers.sh:/app/start-workers.sh
+      - ./worker_orchestrator.py:/app/worker_orchestrator.py
       - ./data/audio_chunks:/app/audio_chunks
       - ./data:/app/data
-      - ../../config/config.yml:/app/config.yml  # Removed :ro for consistency
-      - ../../config/plugins.yml:/app/plugins.yml  # Plugin configuration
+      - ../../config/config.yml:/app/config.yml
+      - ../../config/plugins.yml:/app/plugins.yml
     environment:
       - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY}
       - PARAKEET_ASR_URL=${PARAKEET_ASR_URL}
@@ -99,6 +101,11 @@ services:
       - GROQ_API_KEY=${GROQ_API_KEY}
       - HA_TOKEN=${HA_TOKEN}
       - REDIS_URL=redis://redis:6379/0
+      # Worker orchestrator configuration (optional - defaults shown)
+      - WORKER_CHECK_INTERVAL=${WORKER_CHECK_INTERVAL:-10}
+      - MIN_RQ_WORKERS=${MIN_RQ_WORKERS:-6}
+      - WORKER_STARTUP_GRACE_PERIOD=${WORKER_STARTUP_GRACE_PERIOD:-30}
+      - WORKER_SHUTDOWN_TIMEOUT=${WORKER_SHUTDOWN_TIMEOUT:-30}
     depends_on:
       redis:
         condition: service_healthy

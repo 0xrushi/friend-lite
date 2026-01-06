@@ -39,10 +39,9 @@ COPY . .
 COPY diarization_config.json* ./
 
 
-# Copy and make startup scripts executable
+# Copy and make startup script executable
 COPY start.sh ./
-COPY start-workers.sh ./
-RUN chmod +x start.sh start-workers.sh
+RUN chmod +x start.sh
 
 # Run the application with workers
 CMD ["./start.sh"]
