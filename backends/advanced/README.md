@@ -31,7 +31,7 @@ Modern React-based web dashboard located in `./webui/` with:
 
 **The setup wizard guides you through:**
 - **Authentication**: Admin email/password setup with secure keys
-- **Transcription Provider**: Choose between Deepgram, Mistral, or Offline (Parakeet)
+- **Transcription Provider**: Choose between Deepgram or Offline (Parakeet)
 - **LLM Provider**: Choose between OpenAI (recommended) or Ollama for memory extraction
 - **Memory Provider**: Choose between Friend-Lite Native or OpenMemory MCP
 - **Optional Services**: Speaker Recognition, network configuration

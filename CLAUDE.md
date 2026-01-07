@@ -18,7 +18,7 @@ This supports a comprehensive web dashboard for management.
 Chronicle includes an **interactive setup wizard** for easy configuration. The wizard guides you through:
 - Service selection (backend + optional services)
 - Authentication setup (admin account, JWT secrets)
-- Transcription provider configuration (Deepgram, Mistral, or offline ASR)
+- Transcription provider configuration (Deepgram or offline ASR)
 - LLM provider setup (OpenAI or Ollama)
 - Memory provider selection (Chronicle Native with Qdrant or OpenMemory MCP)
 - Network configuration and HTTPS setup
@@ -184,12 +184,12 @@ docker compose up --build
 ## Architecture Overview
 
 ### Key Components
-- **Audio Pipeline**: Real-time Opus/PCM → Application-level processing → Deepgram/Mistral transcription → memory extraction
+- **Audio Pipeline**: Real-time Opus/PCM → Application-level processing → Deepgram transcription → memory extraction
 - **Wyoming Protocol**: WebSocket communication uses Wyoming protocol (JSONL + binary) for structured audio sessions
 - **Unified Pipeline**: Job-based tracking system for all audio processing (WebSocket and file uploads)
 - **Job Tracker**: Tracks pipeline jobs with stage events (audio → transcription → memory) and completion status
 - **Task Management**: BackgroundTaskManager tracks all async tasks to prevent orphaned processes
-- **Unified Transcription**: Deepgram/Mistral transcription with fallback to offline ASR services
+- **Unified Transcription**: Deepgram transcription with fallback to offline ASR services
 - **Memory System**: Pluggable providers (Chronicle native or OpenMemory MCP)
 - **Authentication**: Email-based login with MongoDB ObjectId user system
 - **Client Management**: Auto-generated client IDs as `{user_id_suffix}-{device_name}`, centralized ClientManager
@@ -205,7 +205,7 @@ Required:
 
 Recommended:
   - Vector Storage: Qdrant (Chronicle provider) or OpenMemory MCP server
-  - Transcription: Deepgram, Mistral, or offline ASR services
+  - Transcription: Deepgram or offline ASR services
 
 Optional:
   - Parakeet ASR: Offline transcription service
@@ -329,12 +329,7 @@ Chronicle supports multiple transcription services:
 TRANSCRIPTION_PROVIDER=deepgram
 DEEPGRAM_API_KEY=your-deepgram-key-here
 
-# Option 2: Mistral (Voxtral models)
-TRANSCRIPTION_PROVIDER=mistral
-MISTRAL_API_KEY=your-mistral-key-here
-MISTRAL_MODEL=voxtral-mini-2507
-
-# Option 3: Local ASR (Parakeet)
+# Option 2: Local ASR (Parakeet)
 PARAKEET_ASR_URL=http://host.docker.internal:8767
 ```
 

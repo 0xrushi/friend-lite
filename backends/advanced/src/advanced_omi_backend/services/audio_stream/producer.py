@@ -52,7 +52,7 @@ class AudioStreamProducer:
             user_id: User identifier
             client_id: Client identifier
             mode: Processing mode (streaming/batch)
-            provider: Transcription provider ("deepgram", "mistral", etc.)
+            provider: Transcription provider ("deepgram", "parakeet", etc.)
         """
         # Client-specific stream naming (one stream per client for isolation)
         stream_name = f"audio:stream:{client_id}"

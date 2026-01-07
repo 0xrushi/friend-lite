@@ -15,7 +15,7 @@ This document explains the different setup scripts available in Friend-Lite and 
 
 ### What it does:
 - ✅ **Authentication Setup**: Admin email/password with secure key generation
-- ✅ **Transcription Provider Selection**: Choose between Deepgram, Mistral, or Offline (Parakeet)
+- ✅ **Transcription Provider Selection**: Choose between Deepgram or Offline (Parakeet)
 - ✅ **LLM Provider Configuration**: Choose between OpenAI (recommended) or Ollama
 - ✅ **Memory Provider Setup**: Choose between Friend-Lite Native or OpenMemory MCP
 - ✅ **API Key Collection**: Prompts for required keys with helpful links to obtain them
@@ -43,10 +43,9 @@ Admin password (min 8 chars): ********
 -------------------------------
 Choose your transcription provider:
   1) Deepgram (recommended - high quality, requires API key)
-  2) Mistral (Voxtral models - requires API key)
-  3) Offline (Parakeet ASR - requires GPU, runs locally)
-  4) None (skip transcription setup)
-Enter choice (1-4) [1]: 1
+  2) Offline (Parakeet ASR - requires GPU, runs locally)
+  3) None (skip transcription setup)
+Enter choice (1-3) [1]: 1
 
 Get your API key from: https://console.deepgram.com/
 Deepgram API key: dg_xxxxxxxxxxxxx

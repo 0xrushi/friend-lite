@@ -21,7 +21,6 @@ class Conversation(Document):
     class TranscriptProvider(str, Enum):
         """Supported transcription providers."""
         DEEPGRAM = "deepgram"
-        MISTRAL = "mistral"
         PARAKEET = "parakeet"
         SPEECH_DETECTION = "speech_detection"  # Legacy value
         UNKNOWN = "unknown"  # Fallback value
@@ -63,7 +62,7 @@ class Conversation(Document):
         transcript: Optional[str] = Field(None, description="Full transcript text")
         segments: List["Conversation.SpeakerSegment"] = Field(default_factory=list, description="Speaker segments")
         provider: Optional["Conversation.TranscriptProvider"] = Field(None, description="Transcription provider used")
-        model: Optional[str] = Field(None, description="Model used (e.g., nova-3, voxtral-mini-2507)")
+        model: Optional[str] = Field(None, description="Model used (e.g., nova-3, parakeet)")
         created_at: datetime = Field(description="When this version was created")
         processing_time_seconds: Optional[float] = Field(None, description="Time taken to process")
         metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional provider-specific metadata")

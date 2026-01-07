@@ -34,7 +34,7 @@ cd backends/advanced
 
 **The setup wizard will guide you through:**
 - **Authentication**: Admin email/password setup
-- **Transcription Provider**: Choose Deepgram, Mistral, or Offline (Parakeet)
+- **Transcription Provider**: Choose Deepgram or Offline (Parakeet)
 - **LLM Provider**: Choose OpenAI or Ollama for memory extraction
 - **Memory Provider**: Choose Chronicle Native or OpenMemory MCP
 - **Optional Services**: Speaker Recognition and other extras
@@ -50,14 +50,13 @@ cd backends/advanced
 Admin email [admin@example.com]: john@company.com
 Admin password (min 8 chars): ********
 
-► Speech-to-Text Configuration  
+► Speech-to-Text Configuration
 -------------------------------
 Choose your transcription provider:
   1) Deepgram (recommended - high quality, requires API key)
-  2) Mistral (Voxtral models - requires API key) 
-  3) Offline (Parakeet ASR - requires GPU, runs locally)
-  4) None (skip transcription setup)
-Enter choice (1-4) [1]: 1
+  2) Offline (Parakeet ASR - requires GPU, runs locally)
+  3) None (skip transcription setup)
+Enter choice (1-3) [1]: 1
 
 Get your API key from: https://console.deepgram.com/
 Deepgram API key: dg_xxxxxxxxxxxxx
@@ -152,12 +151,7 @@ OLLAMA_BASE_URL=http://ollama:11434
 TRANSCRIPTION_PROVIDER=deepgram
 DEEPGRAM_API_KEY=your-deepgram-api-key-here
 
-# Option 2: Mistral (Voxtral models for transcription)
-TRANSCRIPTION_PROVIDER=mistral
-MISTRAL_API_KEY=your-mistral-api-key-here
-MISTRAL_MODEL=voxtral-mini-2507
-
-# Option 3: Local ASR service  
+# Option 2: Local ASR service
 PARAKEET_ASR_URL=http://host.docker.internal:8080
 ```
 
@@ -165,7 +159,6 @@ PARAKEET_ASR_URL=http://host.docker.internal:8080
 - **OpenAI is strongly recommended** for LLM processing as it provides much better memory extraction and eliminates JSON parsing errors
 - **TRANSCRIPTION_PROVIDER** determines which service to use:
   - `deepgram`: Uses Deepgram's Nova-3 model for high-quality transcription
-  - `mistral`: Uses Mistral's Voxtral models for transcription
   - If not set, system falls back to offline ASR service
 - The system requires either online API keys or offline ASR service configuration
 
@@ -310,7 +303,6 @@ curl -X POST "http://localhost:8000/api/audio/upload" \
 
 ### Transcription Options
 - **Deepgram API**: Cloud-based batch processing, high accuracy (recommended)
-- **Mistral API**: Voxtral models for transcription with REST API processing
 - **Self-hosted ASR**: Local Wyoming protocol services with real-time processing
 - **Collection timeout**: 1.5 minute collection for optimal online processing quality
 
@@ -405,7 +397,6 @@ uv sync --group (whatever group you want to sync)
 
 **Transcription Issues:**
 - **Deepgram**: Verify API key is valid and `TRANSCRIPTION_PROVIDER=deepgram`
-- **Mistral**: Verify API key is valid and `TRANSCRIPTION_PROVIDER=mistral`
 - **Self-hosted**: Ensure ASR service is running on port 8765
 - Check transcription service connection in health endpoint
 
