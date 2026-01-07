@@ -4,6 +4,7 @@ Chronicle Root Setup Orchestrator
 Handles service selection and delegation only - no configuration duplication
 """
 
+import getpass
 import shutil
 import subprocess
 import sys
@@ -81,6 +82,62 @@ SERVICES = {
     }
 }
 
+# Plugin configuration registry
+# Plugins are lightweight integrations that extend Chronicle functionality
+# They are configured during wizard setup and stored in config/plugins.yml
+#
+# Access Levels (when plugins execute):
+#   - transcript: Fires when new transcript segment arrives
+#   - conversation: Fires when conversation completes
+#   - memory: Fires after memory extraction
+#
+# Trigger Types (how plugins decide to execute):
+#   - wake_word: Only if transcript starts with specified wake word
+#   - always: Execute on every invocation at this access level
+#   - conditional: Custom condition checking (future)
+PLUGINS = {
+    'homeassistant': {
+        'name': 'Home Assistant',
+        'description': 'Control Home Assistant devices via natural language with wake word',
+        'enabled_by_default': False,
+        'requires_tailscale': True,  # Requires Tailscale for remote HA access
+        'access_level': 'streaming_transcript',  # When to trigger
+        'trigger_type': 'wake_word',   # How to trigger
+        'config': {
+            'ha_url': {
+                'prompt': 'Home Assistant URL',
+                'default': 'http://localhost:8123',
+                'type': 'url',
+                'help': 'The URL of your Home Assistant instance (e.g., http://100.99.62.5:8123)'
+            },
+            'ha_token': {
+                'prompt': 'Long-Lived Access Token',
+                'type': 'password',
+                'help': 'Create at: Home Assistant > Profile > Long-Lived Access Tokens'
+            },
+            'wake_words': {
+                'prompt': 'Wake words for HA commands (comma-separated)',
+                'default': 'hey vivi, hey jarvis',
+                'type': 'text',
+                'help': 'Say these words before commands. Use comma-separated list for multiple (e.g., "hey vivi, hey jarvis")'
+            }
+        }
+    }
+    # Future plugin examples:
+    # 'sentiment_analyzer': {
+    #     'name': 'Sentiment Analyzer',
+    #     'access_level': 'conversation',
+    #     'trigger_type': 'always',
+    #     ...
+    # },
+    # 'memory_enricher': {
+    #     'name': 'Memory Enricher',
+    #     'access_level': 'memory',
+    #     'trigger_type': 'always',
+    #     ...
+    # }
+}
+
 def check_service_exists(service_name, service_config):
     """Check if service directory and script exist"""
     service_path = Path(service_config['path'])
@@ -153,18 +210,18 @@ def cleanup_unselected_services(selected_services):
                 console.print(f"🧹 [dim]Backed up {service_name} configuration to {backup_file.name} (service not selected)[/dim]")
 
 def run_service_setup(service_name, selected_services, https_enabled=False, server_ip=None,
-                     obsidian_enabled=False, neo4j_password=None):
+                     obsidian_enabled=False, neo4j_password=None, ts_authkey=None, hf_token=None):
     """Execute individual service setup script"""
     if service_name == 'advanced':
         service = SERVICES['backend'][service_name]
-        
+
         # For advanced backend, pass URLs of other selected services and HTTPS config
         cmd = service['cmd'].copy()
         if 'speaker-recognition' in selected_services:
             cmd.extend(['--speaker-service-url', 'http://speaker-service:8085'])
         if 'asr-services' in selected_services:
             cmd.extend(['--parakeet-asr-url', 'http://host.docker.internal:8767'])
-        
+
         # Add HTTPS configuration
         if https_enabled and server_ip:
             cmd.extend(['--enable-https', '--server-ip', server_ip])
@@ -173,6 +230,10 @@ def run_service_setup(service_name, selected_services, https_enabled=False, serv
         if obsidian_enabled and neo4j_password:
             cmd.extend(['--enable-obsidian', '--neo4j-password', neo4j_password])
 
+        # Add Tailscale configuration
+        if ts_authkey:
+            cmd.extend(['--ts-authkey', ts_authkey])
+
     else:
         service = SERVICES['extras'][service_name]
         cmd = service['cmd'].copy()
@@ -180,35 +241,15 @@ def run_service_setup(service_name, selected_services, https_enabled=False, serv
         # Add HTTPS configuration for services that support it
         if service_name == 'speaker-recognition' and https_enabled and server_ip:
             cmd.extend(['--enable-https', '--server-ip', server_ip])
-        
-        # For speaker-recognition, validate HF_TOKEN is required
+
+        # For speaker-recognition, pass HF_TOKEN from centralized configuration
         if service_name == 'speaker-recognition':
-            # HF_TOKEN is required for speaker-recognition
-            speaker_env_path = 'extras/speaker-recognition/.env'
-            hf_token = read_env_value(speaker_env_path, 'HF_TOKEN')
-            
-            # Check if HF_TOKEN is missing or is a placeholder
-            if not hf_token or is_placeholder(hf_token, 'your_huggingface_token_here', 'your-huggingface-token-here', 'hf_xxxxx'):
-                console.print("\n[red][ERROR][/red] HF_TOKEN is required for speaker-recognition service")
-                console.print("[yellow]Speaker recognition requires a Hugging Face token to download models[/yellow]")
-                console.print("Get your token from: https://huggingface.co/settings/tokens")
-                console.print()
-                
-                # Prompt for HF_TOKEN
-                try:
-                    hf_token_input = console.input("[cyan]Enter your HF_TOKEN[/cyan]: ").strip()
-                    if not hf_token_input or is_placeholder(hf_token_input, 'your_huggingface_token_here', 'your-huggingface-token-here', 'hf_xxxxx'):
-                        console.print("[red][ERROR][/red] Invalid HF_TOKEN provided. Speaker-recognition setup cancelled.")
-                        return False
-                    hf_token = hf_token_input
-                except EOFError:
-                    console.print("[red][ERROR][/red] HF_TOKEN is required. Speaker-recognition setup cancelled.")
-                    return False
-            
-            # Pass HF Token to init script
-            cmd.extend(['--hf-token', hf_token])
-            console.print("[green][SUCCESS][/green] HF_TOKEN configured")
-            
+            # HF Token should have been provided via setup_hf_token_if_needed()
+            if hf_token:
+                cmd.extend(['--hf-token', hf_token])
+            else:
+                console.print("[yellow][WARNING][/yellow] No HF_TOKEN provided - speaker recognition may fail to download models")
+
             # Pass Deepgram API key from backend if available
             backend_env_path = 'backends/advanced/.env'
             deepgram_key = read_env_value(backend_env_path, 'DEEPGRAM_API_KEY')
@@ -285,6 +326,233 @@ def show_service_status():
         status = "✅" if exists else "⏸️"
         console.print(f"  {status} {service_config['description']} - {msg}")
 
+def prompt_value(prompt_text, default=""):
+    """Prompt user for a value with a default"""
+    if default:
+        display_prompt = f"{prompt_text} [{default}]"
+    else:
+        display_prompt = prompt_text
+
+    try:
+        value = console.input(f"[cyan]{display_prompt}:[/cyan] ").strip()
+        return value if value else default
+    except EOFError:
+        return default
+
+def prompt_password(prompt_text):
+    """Prompt user for a password (hidden input)"""
+    try:
+        return getpass.getpass(f"{prompt_text}: ")
+    except (EOFError, KeyboardInterrupt):
+        return ""
+
+def mask_value(value, show_chars=5):
+    """Mask a value showing only first and last few characters"""
+    if not value or len(value) <= show_chars * 2:
+        return value
+
+    # Remove quotes if present
+    value_clean = value.strip("'\"")
+
+    return f"{value_clean[:show_chars]}{'*' * min(15, len(value_clean) - show_chars * 2)}{value_clean[-show_chars:]}"
+
+def read_plugin_config_value(plugin_id, config_key):
+    """Read a value from existing plugins.yml file"""
+    plugins_yml_path = Path('config/plugins.yml')
+    if not plugins_yml_path.exists():
+        return None
+
+    try:
+        with open(plugins_yml_path, 'r') as f:
+            plugins_data = yaml.safe_load(f)
+
+        if not plugins_data or 'plugins' not in plugins_data:
+            return None
+
+        plugin_config = plugins_data['plugins'].get(plugin_id, {})
+        return plugin_config.get(config_key)
+    except Exception:
+        return None
+
+def prompt_with_existing_masked(prompt_text, existing_value, placeholders=None, is_password=False, default=""):
+    """
+    Prompt for a value, showing masked existing value if present.
+
+    Args:
+        prompt_text: The prompt to display
+        existing_value: Existing value from config (or None)
+        placeholders: List of placeholder values to treat as "not set"
+        is_password: Whether to use password input (hidden)
+        default: Default value if no existing value
+
+    Returns:
+        User input value, existing value if reused, or default
+    """
+    placeholders = placeholders or []
+
+    # Check if existing value is valid (not empty and not a placeholder)
+    has_valid_existing = existing_value and existing_value not in placeholders
+
+    if has_valid_existing:
+        # Show masked value with option to reuse
+        if is_password:
+            masked = mask_value(existing_value)
+            display_prompt = f"{prompt_text} ({masked}) [press Enter to reuse, or enter new]"
+        else:
+            display_prompt = f"{prompt_text} ({existing_value}) [press Enter to reuse, or enter new]"
+
+        if is_password:
+            user_input = prompt_password(display_prompt)
+        else:
+            user_input = prompt_value(display_prompt, "")
+
+        # If user pressed Enter (empty input), reuse existing value
+        return user_input if user_input else existing_value
+    else:
+        # No existing value, prompt normally
+        if is_password:
+            return prompt_password(prompt_text)
+        else:
+            return prompt_value(prompt_text, default)
+
+def select_plugins():
+    """Interactive plugin selection and configuration"""
+    console.print("\n🔌 [bold cyan]Plugin Configuration[/bold cyan]")
+    console.print("Chronicle supports plugins for extended functionality.\n")
+
+    selected_plugins = {}
+
+    for plugin_id, plugin_meta in PLUGINS.items():
+        # Show plugin description with access level and trigger type
+        console.print(f"[bold]{plugin_meta['name']}[/bold]")
+        console.print(f"  {plugin_meta['description']}")
+        console.print(f"  Access Level: [cyan]{plugin_meta['access_level']}[/cyan]")
+        console.print(f"  Trigger Type: [cyan]{plugin_meta['trigger_type']}[/cyan]\n")
+
+        try:
+            enable = Confirm.ask(
+                f"  Enable {plugin_meta['name']}?",
+                default=plugin_meta['enabled_by_default']
+            )
+        except EOFError:
+            console.print(f"  Using default: {'Yes' if plugin_meta['enabled_by_default'] else 'No'}")
+            enable = plugin_meta['enabled_by_default']
+
+        if enable:
+            plugin_config = {
+                'enabled': True,
+                'access_level': plugin_meta['access_level'],
+                'trigger': {
+                    'type': plugin_meta['trigger_type']
+                }
+            }
+
+            for config_key, config_spec in plugin_meta['config'].items():
+                # Show help text if available
+                if 'help' in config_spec:
+                    console.print(f"  [dim]{config_spec['help']}[/dim]")
+
+                # Read existing value from plugins.yml if it exists
+                existing_value = read_plugin_config_value(plugin_id, config_key)
+
+                # Use the masked prompt function
+                is_password = config_spec['type'] == 'password'
+                value = prompt_with_existing_masked(
+                    prompt_text=f"  {config_spec['prompt']}",
+                    existing_value=existing_value,
+                    placeholders=[],  # No placeholders for plugin config
+                    is_password=is_password,
+                    default=config_spec.get('default', '')
+                )
+
+                # For wake_words, convert comma-separated string to list and store in trigger
+                if config_key == 'wake_words':
+                    # Split by comma and strip whitespace
+                    wake_words_list = [w.strip() for w in value.split(',') if w.strip()]
+                    plugin_config['trigger']['wake_words'] = wake_words_list
+                    # Don't store at root level - only in trigger section
+                else:
+                    plugin_config[config_key] = value
+
+            selected_plugins[plugin_id] = plugin_config
+            console.print(f"  [green]✅ {plugin_meta['name']} configured[/green]\n")
+
+    return selected_plugins
+
+def save_plugin_config(plugins_config):
+    """Save plugin configuration to config/plugins.yml"""
+    if not plugins_config:
+        console.print("[dim]No plugins configured, skipping plugins.yml creation[/dim]")
+        return
+
+    config_dir = Path('config')
+    config_dir.mkdir(parents=True, exist_ok=True)
+
+    plugins_yml_path = config_dir / 'plugins.yml'
+
+    # Build YAML structure
+    yaml_data = {
+        'plugins': {}
+    }
+
+    for plugin_id, plugin_config in plugins_config.items():
+        # Plugin config already includes 'enabled', 'access_level', and 'trigger'
+        yaml_data['plugins'][plugin_id] = plugin_config
+
+    # Write to file
+    with open(plugins_yml_path, 'w') as f:
+        yaml.dump(yaml_data, f, default_flow_style=False, sort_keys=False)
+
+    console.print(f"[green]✅ Plugin configuration saved to {plugins_yml_path}[/green]")
+
+def setup_tailscale_if_needed(selected_plugins):
+    """Check if any selected plugins require Tailscale and prompt for auth key.
+
+    Args:
+        selected_plugins: List of plugin IDs selected by user
+
+    Returns:
+        Tailscale auth key string if provided, None otherwise
+    """
+    # Check if any selected plugins require Tailscale
+    needs_tailscale = any(
+        PLUGINS[p].get('requires_tailscale', False)
+        for p in selected_plugins
+    )
+
+    if not needs_tailscale:
+        return None
+
+    console.print("\n🌐 [bold cyan]Tailscale Configuration[/bold cyan]")
+    console.print("Home Assistant plugin requires Tailscale for remote access.")
+    console.print("\n[blue][INFO][/blue] The Tailscale Docker container enables Chronicle to access")
+    console.print("           services on your Tailscale network (like Home Assistant).")
+    console.print()
+    console.print("Get your auth key from: [link]https://login.tailscale.com/admin/settings/keys[/link]")
+    console.print()
+
+    # Check for existing TS_AUTHKEY in backend .env
+    backend_env_path = 'backends/advanced/.env'
+    existing_key = read_env_value(backend_env_path, 'TS_AUTHKEY')
+
+    # Use the masked prompt helper
+    ts_authkey = prompt_with_existing_masked(
+        prompt_text="Tailscale auth key (or press Enter to skip)",
+        existing_value=existing_key,
+        placeholders=['your-tailscale-auth-key-here'],
+        is_password=True,
+        default=""
+    )
+
+    if not ts_authkey or ts_authkey.strip() == "":
+        console.print("[yellow]⚠️  Skipping Tailscale - HA plugin will only work for local instances[/yellow]")
+        console.print("[yellow]    You can configure this later in backends/advanced/.env[/yellow]")
+        return None
+
+    console.print("[green]✅[/green] Tailscale auth key configured")
+    console.print("[blue][INFO][/blue] Start Tailscale with: docker compose --profile tailscale up -d")
+    return ts_authkey
+
 def setup_git_hooks():
     """Setup pre-commit hooks for development"""
     console.print("\n🔧 [bold]Setting up development environment...[/bold]")
@@ -314,6 +582,46 @@ def setup_git_hooks():
 
     except Exception as e:
         console.print(f"⚠️  [yellow]Could not setup git hooks: {e} (optional)[/yellow]")
+
+def setup_hf_token_if_needed(selected_services):
+    """Prompt for Hugging Face token if needed by selected services.
+
+    Args:
+        selected_services: List of service names selected by user
+
+    Returns:
+        HF_TOKEN string if provided, None otherwise
+    """
+    # Check if any selected services need HF_TOKEN
+    needs_hf_token = 'speaker-recognition' in selected_services or 'advanced' in selected_services
+
+    if not needs_hf_token:
+        return None
+
+    console.print("\n🤗 [bold cyan]Hugging Face Token Configuration[/bold cyan]")
+    console.print("Required for speaker recognition (PyAnnote models)")
+    console.print("\n[blue][INFO][/blue] Get yours from: https://huggingface.co/settings/tokens\n")
+
+    # Check for existing token from speaker-recognition service
+    speaker_env_path = 'extras/speaker-recognition/.env'
+    existing_token = read_env_value(speaker_env_path, 'HF_TOKEN')
+
+    # Use the masked prompt function
+    hf_token = prompt_with_existing_masked(
+        prompt_text="Hugging Face Token",
+        existing_value=existing_token,
+        placeholders=['your_huggingface_token_here', 'your-huggingface-token-here', 'hf_xxxxx'],
+        is_password=True,
+        default=""
+    )
+
+    if hf_token:
+        masked = mask_value(hf_token)
+        console.print(f"[green]✅ HF_TOKEN configured: {masked}[/green]\n")
+        return hf_token
+    else:
+        console.print("[yellow]⚠️  No HF_TOKEN provided - speaker recognition may fail[/yellow]\n")
+        return None
 
 def setup_config_file():
     """Setup config/config.yml from template if it doesn't exist"""
@@ -346,11 +654,24 @@ def main():
 
     # Service Selection
     selected_services = select_services()
-    
+
     if not selected_services:
         console.print("\n[yellow]No services selected. Exiting.[/yellow]")
         return
-    
+
+    # Plugin Configuration
+    selected_plugins = select_plugins()
+    if selected_plugins:
+        save_plugin_config(selected_plugins)
+
+    # Tailscale Configuration (if plugins require it)
+    ts_authkey = None
+    if selected_plugins:
+        ts_authkey = setup_tailscale_if_needed(selected_plugins)
+
+    # HF Token Configuration (if services require it)
+    hf_token = setup_hf_token_if_needed(selected_services)
+
     # HTTPS Configuration (for services that need it)
     https_enabled = False
     server_ip = None
@@ -374,27 +695,18 @@ def main():
             console.print("[blue][INFO][/blue] For local-only access, use 'localhost'")
             console.print("Examples: localhost, 100.64.1.2, your-domain.com")
 
-            # Check for existing SERVER_IP
+            # Check for existing SERVER_IP from backend .env
             backend_env_path = 'backends/advanced/.env'
             existing_ip = read_env_value(backend_env_path, 'SERVER_IP')
 
-            if existing_ip and existing_ip not in ['localhost', 'your-server-ip-here']:
-                # Show existing IP with option to reuse
-                prompt_text = f"Server IP/Domain for SSL certificates ({existing_ip}) [press Enter to reuse, or enter new]"
-                default_value = existing_ip
-            else:
-                prompt_text = "Server IP/Domain for SSL certificates [localhost]"
-                default_value = "localhost"
-
-            while True:
-                try:
-                    server_ip = console.input(f"{prompt_text}: ").strip()
-                    if not server_ip:
-                        server_ip = default_value
-                    break
-                except EOFError:
-                    server_ip = default_value
-                    break
+            # Use the new masked prompt function
+            server_ip = prompt_with_existing_masked(
+                prompt_text="Server IP/Domain for SSL certificates",
+                existing_value=existing_ip,
+                placeholders=['localhost', 'your-server-ip-here'],
+                is_password=False,
+                default="localhost"
+            )
 
             console.print(f"[green]✅[/green] HTTPS configured for: {server_ip}")
 
@@ -445,7 +757,7 @@ def main():
     
     for service in selected_services:
         if run_service_setup(service, selected_services, https_enabled, server_ip,
-                            obsidian_enabled, neo4j_password):
+                            obsidian_enabled, neo4j_password, ts_authkey, hf_token):
             success_count += 1
         else:
             failed_services.append(service)

@@ -13,6 +13,7 @@ import System from './pages/System'
 import Upload from './pages/Upload'
 import Queue from './pages/Queue'
 import LiveRecord from './pages/LiveRecord'
+import Plugins from './pages/Plugins'
 import ProtectedRoute from './components/auth/ProtectedRoute'
 import { ErrorBoundary, PageErrorBoundary } from './components/ErrorBoundary'
 
@@ -87,6 +88,11 @@ function App() {
                 <Route path="queue" element={
                   <PageErrorBoundary>
                     <Queue />
+                  </PageErrorBoundary>
+                } />
+                <Route path="plugins" element={
+                  <PageErrorBoundary>
+                    <Plugins />
                   </PageErrorBoundary>
                 } />
               </Route>

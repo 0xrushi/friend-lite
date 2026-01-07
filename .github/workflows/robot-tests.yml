@@ -85,6 +85,18 @@ jobs:
         echo "✓ Test config.yml created from tests/configs/deepgram-openai.yml"
         ls -lh config/config.yml
 
+    - name: Create plugins.yml from template
+      run: |
+        echo "Creating plugins.yml from template..."
+        if [ -f "config/plugins.yml.template" ]; then
+          cp config/plugins.yml.template config/plugins.yml
+          echo "✓ plugins.yml created from template"
+          ls -lh config/plugins.yml
+        else
+          echo "❌ ERROR: config/plugins.yml.template not found"
+          exit 1
+        fi
+
     - name: Run Robot Framework tests
       working-directory: tests
       env:

@@ -114,16 +114,8 @@ cp .env.template .env  # Configure API keys
 # Run full integration test suite
 ./run-test.sh
 
-# Manual test execution (for debugging)
-source .env && export DEEPGRAM_API_KEY && export OPENAI_API_KEY
-uv run robot --outputdir test-results --loglevel INFO ../../tests/integration/integration_test.robot
-
 # Leave test containers running for debugging (don't auto-cleanup)
-CLEANUP_CONTAINERS=false source .env && export DEEPGRAM_API_KEY && export OPENAI_API_KEY
-uv run robot --outputdir test-results --loglevel INFO ../../tests/integration/integration_test.robot
-
-# Manual cleanup when needed
-docker compose -f docker-compose-test.yml down -v
+CLEANUP_CONTAINERS=false ./run-test.sh
 ```
 
 #### Test Configuration Flags

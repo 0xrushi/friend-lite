@@ -1,8 +1,35 @@
 services:
+  tailscale:
+    image: tailscale/tailscale:latest
+    container_name: advanced-tailscale
+    hostname: chronicle-tailscale
+    environment:
+      - TS_AUTHKEY=${TS_AUTHKEY}
+      - TS_STATE_DIR=/var/lib/tailscale
+      - TS_USERSPACE=false
+      - TS_ACCEPT_DNS=true
+    volumes:
+      - tailscale-state:/var/lib/tailscale
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    cap_add:
+      - NET_ADMIN
+    restart: unless-stopped
+    profiles:
+      - tailscale  # Optional profile
+    ports:
+      - "18123:18123"  # HA proxy port
+    command: >
+      sh -c "tailscaled &
+             tailscale up --authkey=$${TS_AUTHKEY} --accept-dns=true &&
+             apk add --no-cache socat 2>/dev/null || true &&
+             socat TCP-LISTEN:18123,fork,reuseaddr TCP:100.99.62.5:8123"
+
   chronicle-backend:
     build:
       context: .
       dockerfile: Dockerfile
+      target: prod  # Use prod stage without test dependencies
     ports:
       - "8000:8000"
     env_file:
@@ -12,7 +39,8 @@ services:
       - ./data/audio_chunks:/app/audio_chunks
       - ./data/debug_dir:/app/debug_dir
       - ./data:/app/data
-      - ../../config/config.yml:/app/config.yml  # Removed :ro to allow UI config saving
+      - ../../config/config.yml:/app/config.yml  # Main config file
+      - ../../config/plugins.yml:/app/plugins.yml  # Plugin configuration
     environment:
       - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY}
       - PARAKEET_ASR_URL=${PARAKEET_ASR_URL}
@@ -26,6 +54,7 @@ services:
       - NEO4J_HOST=${NEO4J_HOST}
       - NEO4J_USER=${NEO4J_USER}
       - NEO4J_PASSWORD=${NEO4J_PASSWORD}
+      - HA_TOKEN=${HA_TOKEN}
       - CORS_ORIGINS=http://localhost:3010,http://localhost:8000,http://192.168.1.153:3010,http://192.168.1.153:8000,https://localhost:3010,https://localhost:8000,https://100.105.225.45,https://localhost
       - REDIS_URL=redis://redis:6379/0
     depends_on:
@@ -35,6 +64,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  # Access host's Tailscale network
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/readiness"]
       interval: 30s
@@ -46,27 +77,37 @@ services:
   # Unified Worker Container
   # No CUDA needed for chronicle-backend and workers, workers only orchestrate jobs and call external services
   # Runs all workers in a single container for efficiency:
-  # - 3 RQ workers (transcription, memory, default queues)
-  # - 1 Audio stream worker (Redis Streams consumer - must be single to maintain sequential chunks)
+  # - 6 RQ workers (transcription, memory, default queues)
+  # - 1 Audio persistence worker (audio queue)
+  # - 1+ Stream workers (conditional based on config.yml - Deepgram/Parakeet)
+  # Uses Python orchestrator for process management, health monitoring, and self-healing
   workers:
     build:
       context: .
       dockerfile: Dockerfile
-    command: ["./start-workers.sh"]
+      target: prod  # Use prod stage without test dependencies
+    command: ["uv", "run", "python", "worker_orchestrator.py"]
     env_file:
       - .env
     volumes:
       - ./src:/app/src
-      - ./start-workers.sh:/app/start-workers.sh
+      - ./worker_orchestrator.py:/app/worker_orchestrator.py
       - ./data/audio_chunks:/app/audio_chunks
       - ./data:/app/data
-      - ../../config/config.yml:/app/config.yml  # Removed :ro for consistency
+      - ../../config/config.yml:/app/config.yml
+      - ../../config/plugins.yml:/app/plugins.yml
     environment:
       - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY}
       - PARAKEET_ASR_URL=${PARAKEET_ASR_URL}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - GROQ_API_KEY=${GROQ_API_KEY}
+      - HA_TOKEN=${HA_TOKEN}
       - REDIS_URL=redis://redis:6379/0
+      # Worker orchestrator configuration (optional - defaults shown)
+      - WORKER_CHECK_INTERVAL=${WORKER_CHECK_INTERVAL:-10}
+      - MIN_RQ_WORKERS=${MIN_RQ_WORKERS:-6}
+      - WORKER_STARTUP_GRACE_PERIOD=${WORKER_STARTUP_GRACE_PERIOD:-30}
+      - WORKER_SHUTDOWN_TIMEOUT=${WORKER_SHUTDOWN_TIMEOUT:-30}
     depends_on:
       redis:
         condition: service_healthy
@@ -74,6 +115,36 @@ services:
         condition: service_healthy
       qdrant:
         condition: service_started
+    restart: unless-stopped
+
+  # Deepgram WebSocket streaming worker
+  # Real-time transcription worker that processes audio via Deepgram's WebSocket API
+  # Publishes interim results to Redis Pub/Sub for client display
+  # Publishes final results to Redis Streams for storage
+  # Triggers plugins on final results only
+  deepgram-streaming-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: prod  # Use prod stage without test dependencies
+    command: >
+      uv run python -m advanced_omi_backend.workers.audio_stream_deepgram_streaming_worker
+    env_file:
+      - .env
+    volumes:
+      - ./src:/app/src
+      - ./data:/app/data
+      - ../../config/config.yml:/app/config.yml
+      - ../../config/plugins.yml:/app/plugins.yml
+    environment:
+      - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY}
+      - REDIS_URL=redis://redis:6379/0
+      - HA_TOKEN=${HA_TOKEN}
+    depends_on:
+      redis:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped
 
   webui:
@@ -225,4 +296,6 @@ volumes:
   neo4j_data:
     driver: local
   neo4j_logs:
+    driver: local
+  tailscale-state:
     driver: local

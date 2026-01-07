@@ -7,6 +7,7 @@ import os
 import shutil
 import time
 from datetime import UTC, datetime
+from pathlib import Path
 
 import yaml
 from fastapi import HTTPException
@@ -554,4 +555,140 @@ async def validate_chat_config_yaml(prompt_text: str) -> dict:
 
     except Exception as e:
         logger.error(f"Error validating chat config: {e}")
+        return {"valid": False, "error": f"Validation error: {str(e)}"}
+
+
+# Plugin Configuration Management Functions
+
+async def get_plugins_config_yaml() -> str:
+    """Get plugins configuration as YAML text."""
+    try:
+        plugins_yml_path = Path("/app/plugins.yml")
+
+        # Default empty plugins config
+        default_config = """plugins:
+  # No plugins configured yet
+  # Example plugin configuration:
+  # homeassistant:
+  #   enabled: true
+  #   access_level: transcript
+  #   trigger:
+  #     type: wake_word
+  #     wake_word: vivi
+  #   ha_url: http://localhost:8123
+  #   ha_token: YOUR_TOKEN_HERE
+"""
+
+        if not plugins_yml_path.exists():
+            return default_config
+
+        with open(plugins_yml_path, 'r') as f:
+            yaml_content = f.read()
+
+        return yaml_content
+
+    except Exception as e:
+        logger.error(f"Error loading plugins config: {e}")
+        raise
+
+
+async def save_plugins_config_yaml(yaml_content: str) -> dict:
+    """Save plugins configuration from YAML text."""
+    try:
+        plugins_yml_path = Path("/app/plugins.yml")
+
+        # Validate YAML can be parsed
+        try:
+            parsed_config = yaml.safe_load(yaml_content)
+            if not isinstance(parsed_config, dict):
+                raise ValueError("Configuration must be a YAML dictionary")
+
+            # Validate has 'plugins' key
+            if 'plugins' not in parsed_config:
+                raise ValueError("Configuration must contain 'plugins' key")
+
+        except yaml.YAMLError as e:
+            raise ValueError(f"Invalid YAML syntax: {e}")
+
+        # Create config directory if it doesn't exist
+        plugins_yml_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Backup existing config
+        if plugins_yml_path.exists():
+            backup_path = str(plugins_yml_path) + '.backup'
+            shutil.copy2(plugins_yml_path, backup_path)
+            logger.info(f"Created plugins config backup at {backup_path}")
+
+        # Save new config
+        with open(plugins_yml_path, 'w') as f:
+            f.write(yaml_content)
+
+        # Hot-reload plugins (optional - may require restart)
+        try:
+            from advanced_omi_backend.services.plugin_service import get_plugin_router
+            plugin_router = get_plugin_router()
+            if plugin_router:
+                logger.info("Plugin configuration updated - restart backend for changes to take effect")
+        except Exception as reload_err:
+            logger.warning(f"Could not reload plugins: {reload_err}")
+
+        logger.info("Plugins configuration updated successfully")
+
+        return {
+            "success": True,
+            "message": "Plugins configuration updated successfully. Restart backend for changes to take effect."
+        }
+
+    except Exception as e:
+        logger.error(f"Error saving plugins config: {e}")
+        raise
+
+
+async def validate_plugins_config_yaml(yaml_content: str) -> dict:
+    """Validate plugins configuration YAML."""
+    try:
+        # Parse YAML
+        try:
+            parsed_config = yaml.safe_load(yaml_content)
+        except yaml.YAMLError as e:
+            return {"valid": False, "error": f"Invalid YAML syntax: {e}"}
+
+        # Check structure
+        if not isinstance(parsed_config, dict):
+            return {"valid": False, "error": "Configuration must be a YAML dictionary"}
+
+        if 'plugins' not in parsed_config:
+            return {"valid": False, "error": "Configuration must contain 'plugins' key"}
+
+        plugins = parsed_config['plugins']
+        if not isinstance(plugins, dict):
+            return {"valid": False, "error": "'plugins' must be a dictionary"}
+
+        # Validate each plugin
+        valid_access_levels = ['transcript', 'conversation', 'memory']
+        valid_trigger_types = ['wake_word', 'always', 'conditional']
+
+        for plugin_id, plugin_config in plugins.items():
+            if not isinstance(plugin_config, dict):
+                return {"valid": False, "error": f"Plugin '{plugin_id}' config must be a dictionary"}
+
+            # Check required fields
+            if 'enabled' in plugin_config and not isinstance(plugin_config['enabled'], bool):
+                return {"valid": False, "error": f"Plugin '{plugin_id}': 'enabled' must be boolean"}
+
+            if 'access_level' in plugin_config and plugin_config['access_level'] not in valid_access_levels:
+                return {"valid": False, "error": f"Plugin '{plugin_id}': invalid access_level (must be one of {valid_access_levels})"}
+
+            if 'trigger' in plugin_config:
+                trigger = plugin_config['trigger']
+                if not isinstance(trigger, dict):
+                    return {"valid": False, "error": f"Plugin '{plugin_id}': 'trigger' must be a dictionary"}
+
+                if 'type' in trigger and trigger['type'] not in valid_trigger_types:
+                    return {"valid": False, "error": f"Plugin '{plugin_id}': invalid trigger type (must be one of {valid_trigger_types})"}
+
+        return {"valid": True, "message": "Configuration is valid"}
+
+    except Exception as e:
+        logger.error(f"Error validating plugins config: {e}")
         return {"valid": False, "error": f"Validation error: {str(e)}"}

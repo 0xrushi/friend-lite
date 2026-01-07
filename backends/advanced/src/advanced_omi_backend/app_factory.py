@@ -111,6 +111,11 @@ async def lifespan(app: FastAPI):
         from advanced_omi_backend.services.audio_stream import AudioStreamProducer
         app.state.audio_stream_producer = AudioStreamProducer(app.state.redis_audio_stream)
         application_logger.info("✅ Redis client for audio streaming producer initialized")
+
+        # Initialize ClientManager Redis for cross-container client→user mapping
+        from advanced_omi_backend.client_manager import initialize_redis_for_client_manager
+        initialize_redis_for_client_manager(config.redis_url)
+
     except Exception as e:
         application_logger.error(f"Failed to initialize Redis client for audio streaming: {e}", exc_info=True)
         application_logger.warning("Audio streaming producer will not be available")
@@ -121,6 +126,36 @@ async def lifespan(app: FastAPI):
 
     # SystemTracker is used for monitoring and debugging
     application_logger.info("Using SystemTracker for monitoring and debugging")
+
+    # Initialize plugins using plugin service
+    try:
+        from advanced_omi_backend.services.plugin_service import init_plugin_router, set_plugin_router
+
+        plugin_router = init_plugin_router()
+
+        if plugin_router:
+            # Initialize async resources for each enabled plugin
+            for plugin_id, plugin in plugin_router.plugins.items():
+                if plugin.enabled:
+                    try:
+                        await plugin.initialize()
+                        application_logger.info(f"✅ Plugin '{plugin_id}' initialized")
+                    except Exception as e:
+                        application_logger.error(f"Failed to initialize plugin '{plugin_id}': {e}", exc_info=True)
+
+            application_logger.info(f"Plugins initialized: {len(plugin_router.plugins)} active")
+
+            # Store in app state for API access
+            app.state.plugin_router = plugin_router
+            # Register with plugin service for worker access
+            set_plugin_router(plugin_router)
+        else:
+            application_logger.info("No plugins configured")
+            app.state.plugin_router = None
+
+    except Exception as e:
+        application_logger.error(f"Failed to initialize plugin system: {e}", exc_info=True)
+        app.state.plugin_router = None
 
     application_logger.info("Application ready - using application-level processing architecture.")
 
@@ -161,6 +196,14 @@ async def lifespan(app: FastAPI):
 
         # Stop metrics collection and save final report
         application_logger.info("Metrics collection stopped")
+
+        # Shutdown plugins
+        try:
+            from advanced_omi_backend.services.plugin_service import cleanup_plugin_router
+            await cleanup_plugin_router()
+            application_logger.info("Plugins shut down")
+        except Exception as e:
+            application_logger.error(f"Error shutting down plugins: {e}")
 
         # Shutdown memory service and speaker service
         shutdown_memory_service()

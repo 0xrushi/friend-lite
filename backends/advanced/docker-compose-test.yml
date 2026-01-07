@@ -7,6 +7,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      target: dev  # Use dev stage with test dependencies
+    command: ["./start.sh", "--test"]
     ports:
       - "8001:8000"  # Avoid conflict with dev on 8000
     volumes:
@@ -15,6 +17,7 @@ services:
       - ./data/test_debug_dir:/app/debug_dir
       - ./data/test_data:/app/data
       - ${CONFIG_FILE:-../../config/config.yml}:/app/config.yml  # Mount config.yml for model registry and memory settings (writable for admin config updates)
+      - ${PLUGINS_CONFIG:-../../tests/config/plugins.test.yml}:/app/plugins.yml  # Mount test plugins config
     environment:
       # Override with test-specific settings
       - MONGODB_URI=mongodb://mongo-test:27017/test_db
@@ -154,13 +157,16 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    command: ./start-workers.sh
+      target: dev  # Use dev stage with test dependencies
+    command: ["uv", "run", "--group", "test", "python", "worker_orchestrator.py"]
     volumes:
       - ./src:/app/src
+      - ./worker_orchestrator.py:/app/worker_orchestrator.py
       - ./data/test_audio_chunks:/app/audio_chunks
       - ./data/test_debug_dir:/app/debug_dir
       - ./data/test_data:/app/data
       - ${CONFIG_FILE:-../../config/config.yml}:/app/config.yml  # Mount config.yml for model registry and memory settings (writable for admin config updates)
+      - ${PLUGINS_CONFIG:-../../tests/config/plugins.test.yml}:/app/plugins.yml  # Mount test plugins config
     environment:
       # Same environment as backend
       - MONGODB_URI=mongodb://mongo-test:27017/test_db
@@ -197,6 +203,40 @@ services:
       qdrant-test:
         condition: service_started
       speaker-service-test:
+        condition: service_healthy
+    restart: unless-stopped
+
+  deepgram-streaming-worker-test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: dev  # Use dev stage with test dependencies
+    command: >
+      uv run --group test python -m advanced_omi_backend.workers.audio_stream_deepgram_streaming_worker
+    volumes:
+      - ./src:/app/src
+      - ./data/test_data:/app/data
+      - ${CONFIG_FILE:-../../config/config.yml}:/app/config.yml
+      - ${PLUGINS_CONFIG:-../../tests/config/plugins.test.yml}:/app/plugins.yml  # Mount test plugins config
+    environment:
+      - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY}
+      - REDIS_URL=redis://redis-test:6379/0
+      - HA_TOKEN=${HA_TOKEN}
+      - MONGODB_URI=mongodb://mongo-test:27017/test_db
+      - QDRANT_BASE_URL=qdrant-test
+      - QDRANT_PORT=6333
+      - DEBUG_DIR=/app/debug_dir
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - AUTH_SECRET_KEY=test-jwt-signing-key-for-integration-tests
+      - ADMIN_PASSWORD=test-admin-password-123
+      - ADMIN_EMAIL=test-admin@example.com
+      - TRANSCRIPTION_PROVIDER=${TRANSCRIPTION_PROVIDER:-deepgram}
+      - MEMORY_PROVIDER=${MEMORY_PROVIDER:-chronicle}
+    depends_on:
+      redis-test:
+        condition: service_started
+      mongo-test:
         condition: service_healthy
     restart: unless-stopped
 

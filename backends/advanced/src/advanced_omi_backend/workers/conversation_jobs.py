@@ -10,8 +10,11 @@ import time, os
 from datetime import datetime
 from typing import Dict, Any
 from rq.job import Job
+
 from advanced_omi_backend.models.job import async_job
 from advanced_omi_backend.controllers.queue_controller import redis_conn
+from advanced_omi_backend.controllers.session_controller import mark_session_complete
+from advanced_omi_backend.services.plugin_service import get_plugin_router
 
 from advanced_omi_backend.utils.conversation_utils import (
     analyze_speech,
@@ -294,9 +297,9 @@ async def open_conversation_job(
             if status_str in ["finalizing", "complete"]:
                 finalize_received = True
 
-                # Check if this was a WebSocket disconnect
+                # Get completion reason (guaranteed to exist with unified API)
                 completion_reason = await redis_client.hget(session_key, "completion_reason")
-                completion_reason_str = completion_reason.decode() if completion_reason else None
+                completion_reason_str = completion_reason.decode() if completion_reason else "unknown"
 
                 if completion_reason_str == "websocket_disconnect":
                     logger.warning(
@@ -306,7 +309,7 @@ async def open_conversation_job(
                     timeout_triggered = False  # This is a disconnect, not a timeout
                 else:
                     logger.info(
-                        f"🛑 Session finalizing (reason: {completion_reason_str or 'user_stopped'}), "
+                        f"🛑 Session finalizing (reason: {completion_reason_str}), "
                         f"waiting for audio persistence job to complete..."
                     )
                 break  # Exit immediately when finalize signal received
@@ -397,6 +400,42 @@ async def open_conversation_job(
                 f"{current_count} results, {len(combined['text'])} chars, {len(combined['segments'])} segments"
             )
             last_result_count = current_count
+
+            # Trigger transcript-level plugins on new transcript segments
+            try:
+                plugin_router = get_plugin_router()
+                if plugin_router:
+                    # Get the latest transcript text for plugin processing
+                    transcript_text = combined.get('text', '')
+
+                    if transcript_text:
+                        plugin_data = {
+                            'transcript': transcript_text,
+                            'segment_id': f"{session_id}_{current_count}",
+                            'conversation_id': conversation_id,
+                            'segments': combined.get('segments', []),
+                            'word_count': speech_analysis.get('word_count', 0),
+                        }
+
+                        plugin_results = await plugin_router.trigger_plugins(
+                            access_level='streaming_transcript',
+                            user_id=user_id,
+                            data=plugin_data,
+                            metadata={'client_id': client_id}
+                        )
+
+                        if plugin_results:
+                            logger.info(f"📌 Triggered {len(plugin_results)} streaming transcript plugins")
+                            for result in plugin_results:
+                                if result.message:
+                                    logger.info(f"  Plugin: {result.message}")
+
+                                # If plugin stopped processing, log it
+                                if not result.should_continue:
+                                    logger.info(f"  Plugin stopped normal processing")
+
+            except Exception as e:
+                logger.warning(f"⚠️ Error triggering transcript-level plugins: {e}")
 
         await asyncio.sleep(1)  # Check every second for responsiveness
 
@@ -495,6 +534,43 @@ async def open_conversation_job(
 
     # Wait a moment to ensure jobs are registered in RQ
     await asyncio.sleep(0.5)
+
+    # Trigger conversation-level plugins
+    try:
+        plugin_router = get_plugin_router()
+        if plugin_router:
+            # Get conversation data for plugin context
+            conversation_model = await Conversation.find_one(
+                Conversation.conversation_id == conversation_id
+            )
+
+            plugin_data = {
+                'conversation': {
+                    'conversation_id': conversation_id,
+                    'audio_uuid': session_id,
+                    'client_id': client_id,
+                    'user_id': user_id,
+                },
+                'transcript': conversation_model.transcript if conversation_model else "",
+                'duration': time.time() - start_time,
+                'conversation_id': conversation_id,
+            }
+
+            plugin_results = await plugin_router.dispatch_event(
+                event='conversation.complete',
+                user_id=user_id,
+                data=plugin_data,
+                metadata={'end_reason': end_reason}
+            )
+
+            if plugin_results:
+                logger.info(f"📌 Triggered {len(plugin_results)} conversation-level plugins")
+                for result in plugin_results:
+                    if result.message:
+                        logger.info(f"  Plugin result: {result.message}")
+
+    except Exception as e:
+        logger.warning(f"⚠️ Error triggering conversation-level plugins: {e}")
 
     # Call shared cleanup/restart logic
     return await handle_end_of_conversation(

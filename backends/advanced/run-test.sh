@@ -91,6 +91,29 @@ if [ -n "$_CONFIG_FILE_OVERRIDE" ]; then
     print_info "Using command-line override: CONFIG_FILE=$CONFIG_FILE"
 fi
 
+# Load HF_TOKEN from speaker-recognition/.env (proper location for this credential)
+SPEAKER_ENV="../../extras/speaker-recognition/.env"
+if [ -f "$SPEAKER_ENV" ] && [ -z "$HF_TOKEN" ]; then
+    print_info "Loading HF_TOKEN from speaker-recognition service..."
+    set -a
+    source "$SPEAKER_ENV"
+    set +a
+fi
+
+# Display HF_TOKEN status with masking
+if [ -n "$HF_TOKEN" ]; then
+    if [ ${#HF_TOKEN} -gt 15 ]; then
+        MASKED_TOKEN="${HF_TOKEN:0:5}***************${HF_TOKEN: -5}"
+    else
+        MASKED_TOKEN="***************"
+    fi
+    print_info "HF_TOKEN configured: $MASKED_TOKEN"
+    export HF_TOKEN
+else
+    print_warning "HF_TOKEN not found - speaker recognition tests may fail"
+    print_info "Configure via wizard: uv run --with-requirements ../../setup-requirements.txt python ../../wizard.py"
+fi
+
 # Set default CONFIG_FILE if not provided
 # This allows testing with different provider combinations
 # Usage: CONFIG_FILE=../../tests/configs/parakeet-ollama.yml ./run-test.sh
@@ -166,6 +189,18 @@ if [ ! -f "diarization_config.json" ] && [ -f "diarization_config.json.template"
     print_success "diarization_config.json created"
 fi
 
+# Ensure plugins.yml exists (required for Docker volume mount)
+if [ ! -f "../../config/plugins.yml" ]; then
+    if [ -f "../../config/plugins.yml.template" ]; then
+        print_info "Creating config/plugins.yml from template..."
+        cp ../../config/plugins.yml.template ../../config/plugins.yml
+        print_success "config/plugins.yml created"
+    else
+        print_error "config/plugins.yml.template not found - repository structure incomplete"
+        exit 1
+    fi
+fi
+
 # Note: Robot Framework dependencies are managed via tests/test-requirements.txt
 # The integration tests use Docker containers for service dependencies
 
@@ -176,14 +211,24 @@ print_info "Using environment variables from .env file for test configuration"
 
 # Clean test environment
 print_info "Cleaning test environment..."
-sudo rm -rf ./test_audio_chunks/ ./test_data/ ./test_debug_dir/ ./mongo_data_test/ ./qdrant_data_test/ ./test_neo4j/ || true
+rm -rf ./test_audio_chunks/ ./test_data/ ./test_debug_dir/ ./mongo_data_test/ ./qdrant_data_test/ ./test_neo4j/ 2>/dev/null || true
+
+# If cleanup fails due to permissions, try with docker
+if [ -d "./data/test_audio_chunks/" ] || [ -d "./data/test_data/" ] || [ -d "./data/test_debug_dir/" ]; then
+    print_warning "Permission denied, using docker to clean test directories..."
+    docker run --rm -v "$(pwd)/data:/data" alpine sh -c 'rm -rf /data/test_*' 2>/dev/null || true
+fi
 
 # Use unique project name to avoid conflicts with development environment
 export COMPOSE_PROJECT_NAME="advanced-backend-test"
 
 # Stop any existing test containers
 print_info "Stopping existing test containers..."
+# Try cleanup with current project name
 docker compose -f docker-compose-test.yml down -v || true
+
+# Also try cleanup with default project name (in case containers were started without COMPOSE_PROJECT_NAME)
+COMPOSE_PROJECT_NAME=advanced docker compose -f docker-compose-test.yml down -v 2>/dev/null || true
 
 # Run integration tests
 print_info "Running integration tests..."
@@ -222,6 +267,8 @@ else
     if [ "${CLEANUP_CONTAINERS:-true}" != "false" ]; then
         print_info "Cleaning up test containers after failure..."
         docker compose -f docker-compose-test.yml down -v || true
+        # Also cleanup with default project name
+        COMPOSE_PROJECT_NAME=advanced docker compose -f docker-compose-test.yml down -v 2>/dev/null || true
         docker system prune -f || true
     else
         print_warning "Skipping cleanup (CLEANUP_CONTAINERS=false) - containers left running for debugging"
@@ -234,6 +281,8 @@ fi
 if [ "${CLEANUP_CONTAINERS:-true}" != "false" ]; then
     print_info "Cleaning up test containers..."
     docker compose -f docker-compose-test.yml down -v || true
+    # Also cleanup with default project name
+    COMPOSE_PROJECT_NAME=advanced docker compose -f docker-compose-test.yml down -v 2>/dev/null || true
     docker system prune -f || true
 else
     print_warning "Skipping cleanup (CLEANUP_CONTAINERS=false) - containers left running"

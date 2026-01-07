@@ -85,6 +85,38 @@ print_info "DEEPGRAM_API_KEY length: ${#DEEPGRAM_API_KEY}"
 print_info "OPENAI_API_KEY length: ${#OPENAI_API_KEY}"
 print_info "Using config file: $CONFIG_FILE"
 
+# Load HF_TOKEN from speaker-recognition/.env for test environment
+SPEAKER_ENV="../extras/speaker-recognition/.env"
+if [ -f "$SPEAKER_ENV" ] && [ -z "$HF_TOKEN" ]; then
+    print_info "Loading HF_TOKEN from speaker-recognition service..."
+    set -a
+    source "$SPEAKER_ENV"
+    set +a
+
+    if [ -n "$HF_TOKEN" ]; then
+        # Mask token for display
+        if [ ${#HF_TOKEN} -gt 15 ]; then
+            MASKED_TOKEN="${HF_TOKEN:0:5}***************${HF_TOKEN: -5}"
+        else
+            MASKED_TOKEN="***************"
+        fi
+        print_info "HF_TOKEN configured: $MASKED_TOKEN"
+    fi
+elif [ -n "$HF_TOKEN" ]; then
+    # Already set (e.g., from CI)
+    if [ ${#HF_TOKEN} -gt 15 ]; then
+        MASKED_TOKEN="${HF_TOKEN:0:5}***************${HF_TOKEN: -5}"
+    else
+        MASKED_TOKEN="***************"
+    fi
+    print_info "HF_TOKEN configured: $MASKED_TOKEN"
+else
+    print_warning "HF_TOKEN not found - speaker recognition tests may fail"
+    print_info "Configure via wizard: uv run --with-requirements ../setup-requirements.txt python ../wizard.py"
+fi
+
+export HF_TOKEN
+
 # Create test environment file if it doesn't exist
 if [ ! -f "setup/.env.test" ]; then
     print_info "Creating test environment file..."
@@ -123,14 +155,25 @@ export COMPOSE_PROJECT_NAME="advanced-backend-test"
 
 # Clean up any existing test containers and volumes for fresh start
 print_info "Cleaning up any existing test environment..."
+
+# Try cleanup with current project name
 docker compose -f docker-compose-test.yml down -v 2>/dev/null || true
 
-# Force remove any stuck containers with test names (uses COMPOSE_PROJECT_NAME)
+# Also try cleanup with default project name (in case containers were started without COMPOSE_PROJECT_NAME)
+COMPOSE_PROJECT_NAME=advanced docker compose -f docker-compose-test.yml down -v 2>/dev/null || true
+
+# Force remove any stuck containers with both naming patterns
 print_info "Removing any stuck test containers..."
-# Dynamically construct container names from docker-compose services
 TEST_SERVICES=(mongo-test redis-test qdrant-test chronicle-backend-test workers-test webui-test speaker-service-test)
+
+# Remove containers with new project name (advanced-backend-test)
 for service in "${TEST_SERVICES[@]}"; do
-    docker rm -f "${COMPOSE_PROJECT_NAME}-${service}-1" 2>/dev/null || true
+    docker rm -f "advanced-backend-test-${service}-1" 2>/dev/null || true
+done
+
+# Remove containers with old/default project name (advanced)
+for service in "${TEST_SERVICES[@]}"; do
+    docker rm -f "advanced-${service}-1" 2>/dev/null || true
 done
 
 # Start infrastructure services (MongoDB, Redis, Qdrant)
@@ -189,9 +232,12 @@ for i in {1..40}; do
     sleep 3
 done
 
-# Start workers
-print_info "Starting RQ workers..."
-docker compose -f docker-compose-test.yml up -d workers-test
+# Build and start workers
+print_info "Building workers..."
+docker compose -f docker-compose-test.yml build workers-test
+
+print_info "Starting RQ workers and Deepgram streaming worker..."
+docker compose -f docker-compose-test.yml up -d workers-test deepgram-streaming-worker-test
 
 # Wait for workers container
 print_info "Waiting for workers container (up to 30s)..."
@@ -214,7 +260,7 @@ for i in {1..30}; do
     WORKER_COUNT=$(docker compose -f docker-compose-test.yml exec -T workers-test uv run python -c 'from rq import Worker; from redis import Redis; import os; r = Redis.from_url(os.getenv("REDIS_URL", "redis://redis-test:6379/0")); print(len(Worker.all(connection=r)))' 2>/dev/null || echo "0")
 
     if [ "$WORKER_COUNT" -ge 6 ]; then
-        print_success "Found $WORKER_COUNT workers registered"
+        print_success "Found $WORKER_COUNT RQ workers registered"
         break
     fi
 
@@ -224,6 +270,35 @@ for i in {1..30}; do
         exit 1
     fi
 
+    sleep 2
+done
+
+# Verify batch Deepgram worker is running
+print_info "Verifying Deepgram batch worker process..."
+BATCH_WORKER_CHECK=$(docker compose -f docker-compose-test.yml exec -T workers-test ps aux | grep -c "audio_stream_deepgram_worker" || echo "0" | tr -d '\n\r')
+BATCH_WORKER_CHECK=${BATCH_WORKER_CHECK//[^0-9]/}  # Remove non-numeric characters
+if [ -n "$BATCH_WORKER_CHECK" ] && [ "$BATCH_WORKER_CHECK" -gt 0 ]; then
+    print_success "Deepgram batch worker process is running"
+else
+    print_warning "Deepgram batch worker process not found - checking logs..."
+    docker compose -f docker-compose-test.yml logs --tail=30 workers-test | grep -i "deepgram" || true
+fi
+
+# Check Redis consumer groups registration
+print_info "Checking Redis Streams consumer groups..."
+docker compose -f docker-compose-test.yml exec -T redis-test redis-cli KEYS "audio:stream:*" 2>/dev/null || true
+
+# Wait for streaming worker to start
+print_info "Waiting for Deepgram streaming worker (up to 30s)..."
+for i in {1..15}; do
+    if docker compose -f docker-compose-test.yml ps deepgram-streaming-worker-test | grep -q "Up"; then
+        print_success "Deepgram streaming worker is running"
+        break
+    fi
+    if [ $i -eq 15 ]; then
+        print_warning "Deepgram streaming worker not detected (may still start async)"
+        break
+    fi
     sleep 2
 done
 
@@ -347,6 +422,8 @@ if [ "$CLEANUP_CONTAINERS" = "true" ]; then
     print_info "Cleaning up test containers..."
     cd "$BACKEND_DIR"
     docker compose -f docker-compose-test.yml down -v
+    # Also cleanup with default project name
+    COMPOSE_PROJECT_NAME=advanced docker compose -f docker-compose-test.yml down -v 2>/dev/null || true
     cd "$TESTS_DIR"
     print_success "Cleanup complete"
 else

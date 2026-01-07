@@ -168,11 +168,16 @@ PARAKEET_ASR_URL=http://host.docker.internal:8080
 
 After configuration, verify everything works with the integration test suite:
 ```bash
+# From backends/advanced directory
 ./run-test.sh
 
-# Alternative: Manual test with detailed logging
-source .env && export DEEPGRAM_API_KEY OPENAI_API_KEY && \
-  uv run robot --outputdir ../../test-results --loglevel INFO ../../tests/integration/integration_test.robot
+# Or run all tests from project root
+cd ../..
+./run-test.sh advanced-backend
+
+# Or run complete Robot Framework test suite
+cd tests
+./run-robot-tests.sh
 ```
 This end-to-end test validates the complete audio processing pipeline using Robot Framework.
 
