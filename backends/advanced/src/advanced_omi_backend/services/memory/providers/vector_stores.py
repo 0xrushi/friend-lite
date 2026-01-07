@@ -171,19 +171,19 @@ class QdrantVectorStore(VectorStoreBase):
             # For cosine similarity, scores range from -1 to 1, where 1 is most similar
             search_params = {
                 "collection_name": self.collection_name,
-                "query_vector": query_embedding,
+                "query": query_embedding,
                 "query_filter": search_filter,
                 "limit": limit
             }
-            
+
             if score_threshold > 0.0:
                 search_params["score_threshold"] = score_threshold
                 memory_logger.debug(f"Using similarity threshold: {score_threshold}")
-            
-            results = await self.client.search(**search_params)
-            
+
+            response = await self.client.query_points(**search_params)
+
             memories = []
-            for result in results:
+            for result in response.points:
                 memory = MemoryEntry(
                     id=str(result.id),
                     content=result.payload.get("content", ""),

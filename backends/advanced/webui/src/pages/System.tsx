@@ -3,6 +3,7 @@ import { Settings, RefreshCw, CheckCircle, XCircle, AlertCircle, Activity, Users
 import { systemApi, speakerApi } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
 import MemorySettings from '../components/MemorySettings'
+import ChatSettings from '../components/ChatSettings'
 
 interface HealthData {
   status: 'healthy' | 'partial' | 'unhealthy'
@@ -745,6 +746,11 @@ export default function System() {
             </div>
           </div>
         )}
+      </div>
+
+      {/* Chat Configuration - Full Width Section */}
+      <div className="mt-6">
+        <ChatSettings />
       </div>
 
       {/* Memory Configuration - Full Width Section */}

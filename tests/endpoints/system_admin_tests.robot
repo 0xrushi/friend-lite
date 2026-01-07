@@ -149,6 +149,64 @@ Delete All User Memories Test
     Dictionary Should Contain Key    ${result}    message
 
 
+Get Chat Configuration Test
+    [Documentation]    Test getting chat system prompt (admin only)
+    [Tags]    infra	permissions
+
+    ${response}=       GET On Session    api    /api/admin/chat/config
+    Should Be Equal As Integers    ${response.status_code}    200
+
+    # Response should be plain text
+    ${prompt}=         Set Variable    ${response.text}
+    Should Not Be Empty    ${prompt}
+    Should Not Contain     ${prompt}    system_prompt:    msg=Should not contain YAML key
+    Should Contain         ${prompt}    helpful AI assistant    msg=Should contain default prompt content
+
+Validate Chat Configuration Test
+    [Documentation]    Test chat configuration validation
+    [Tags]    infra	permissions
+
+    # Valid prompt should pass
+    ${valid_prompt}=   Set Variable    You are a friendly AI assistant that helps users with their daily tasks.
+    &{headers}=        Create Dictionary    Content-Type=text/plain
+    ${response}=       POST On Session    api    /api/admin/chat/config/validate
+    ...                data=${valid_prompt}
+    ...                headers=${headers}
+    Should Be Equal As Integers    ${response.status_code}    200
+    ${result}=         Set Variable    ${response.json()}
+    Should Be True     ${result}[valid] == $True
+
+    # Too short should fail
+    ${short_prompt}=   Set Variable    Hi
+    ${response}=       POST On Session    api    /api/admin/chat/config/validate
+    ...                data=${short_prompt}
+    ...                headers=${headers}
+    Should Be Equal As Integers    ${response.status_code}    200
+    ${result}=         Set Variable    ${response.json()}
+    Should Be True     ${result}[valid] == $False
+    Should Contain     ${result}[error]    too short    msg=Error should mention prompt is too short
+
+Save And Retrieve Chat Configuration Test
+    [Documentation]    Test saving and retrieving chat configuration
+    [Tags]    infra	permissions
+
+    # Save custom prompt
+    ${custom_prompt}=  Set Variable    You are a specialized AI assistant for technical support and troubleshooting.
+    &{headers}=        Create Dictionary    Content-Type=text/plain
+    ${response}=       POST On Session    api    /api/admin/chat/config
+    ...                data=${custom_prompt}
+    ...                headers=${headers}
+    Should Be Equal As Integers    ${response.status_code}    200
+    ${result}=         Set Variable    ${response.json()}
+    Should Be True     ${result}[success] == $True
+
+    # Retrieve and verify
+    ${response}=       GET On Session    api    /api/admin/chat/config
+    Should Be Equal As Integers    ${response.status_code}    200
+    ${retrieved}=      Set Variable    ${response.text}
+    Should Be Equal    ${retrieved}    ${custom_prompt}    msg=Retrieved prompt should match saved prompt
+
+
 Non-Admin Cannot Access Admin Endpoints Test
     [Documentation]    Test that non-admin users cannot access admin endpoints
     [Tags]    infra	permissions
@@ -163,6 +221,7 @@ Non-Admin Cannot Access Admin Endpoints Test
     ...                /api/speaker-service-status
     ...                /api/admin/memory/config/raw
     ...                /api/admin/memory/config/reload
+    ...                /api/admin/chat/config
     ...                /api/process-audio-files/jobs
 
     FOR    ${endpoint}    IN    @{endpoints}

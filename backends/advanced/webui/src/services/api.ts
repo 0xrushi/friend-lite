@@ -169,6 +169,17 @@ export const systemApi = {
     }),
   reloadMemoryConfig: () => api.post('/api/admin/memory/config/reload'),
 
+  // Chat Configuration Management
+  getChatConfigRaw: () => api.get('/api/admin/chat/config'),
+  updateChatConfigRaw: (configYaml: string) =>
+    api.post('/api/admin/chat/config', configYaml, {
+      headers: { 'Content-Type': 'text/plain' }
+    }),
+  validateChatConfig: (configYaml: string) =>
+    api.post('/api/admin/chat/config/validate', configYaml, {
+      headers: { 'Content-Type': 'text/plain' }
+    }),
+
   // Memory Provider Management
   getMemoryProvider: () => api.get('/api/admin/memory/provider'),
   setMemoryProvider: (provider: string) => api.post('/api/admin/memory/provider', { provider }),
