@@ -275,12 +275,13 @@ done
 
 # Verify batch Deepgram worker is running
 print_info "Verifying Deepgram batch worker process..."
-BATCH_WORKER_CHECK=$(docker compose -f docker-compose-test.yml exec -T workers-test ps aux | grep -c "audio_stream_deepgram_worker" || echo "0")
-if [ "$BATCH_WORKER_CHECK" -gt 0 ]; then
+BATCH_WORKER_CHECK=$(docker compose -f docker-compose-test.yml exec -T workers-test ps aux | grep -c "audio_stream_deepgram_worker" || echo "0" | tr -d '\n\r')
+BATCH_WORKER_CHECK=${BATCH_WORKER_CHECK//[^0-9]/}  # Remove non-numeric characters
+if [ -n "$BATCH_WORKER_CHECK" ] && [ "$BATCH_WORKER_CHECK" -gt 0 ]; then
     print_success "Deepgram batch worker process is running"
 else
     print_warning "Deepgram batch worker process not found - checking logs..."
-    docker compose -f docker-compose-test.yml logs --tail=30 workers-test | grep -i "deepgram"
+    docker compose -f docker-compose-test.yml logs --tail=30 workers-test | grep -i "deepgram" || true
 fi
 
 # Check Redis consumer groups registration

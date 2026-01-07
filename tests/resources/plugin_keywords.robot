@@ -23,7 +23,7 @@ Create Mock Plugin Config
     ...    subscriptions=${subscriptions}
 
     ${trigger}=    Create Dictionary    type=${trigger_type}
-    IF    '${wake_words}' != 'None'
+    IF    $wake_words is not None
         Set To Dictionary    ${trigger}    wake_words=${wake_words}
     END
     Set To Dictionary    ${config}    trigger=${trigger}
@@ -41,7 +41,8 @@ Verify Plugin Config Format
     Should Be True    isinstance(${subscriptions}, list)
     ...    msg=Subscriptions should be a list
 
-    Length Should Be Greater Than    ${subscriptions}    0
+    ${length}=    Get Length    ${subscriptions}
+    Should Be True    ${length} > 0
     ...    msg=Plugin should subscribe to at least one event
 
 Verify Event Name Format
@@ -52,7 +53,8 @@ Verify Event Name Format
     ...    msg=Event name should contain dot separator (e.g., 'transcript.streaming')
 
     ${parts}=    Split String    ${event}    .
-    Length Should Be Greater Than    ${parts}    1
+    ${length}=    Get Length    ${parts}
+    Should Be True    ${length} > 1
     ...    msg=Event should have domain and type (e.g., 'transcript.streaming')
 
 Verify Event Matches Subscription

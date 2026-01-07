@@ -17,12 +17,13 @@ Resource         ../resources/conversation_keywords.robot
 Resource         ../resources/audio_keywords.robot
 Resource         ../resources/plugin_keywords.robot
 Resource         ../resources/websocket_keywords.robot
+Variables        ../setup/test_data.py
 Suite Setup      Test Suite Setup
 Suite Teardown   Suite Teardown
 Test Setup       Test Cleanup
 
 *** Variables ***
-${TEST_AUDIO_FILE}    ${CURDIR}/../../extras/test-audios/DIY Muffin Enamel Short Mono 16khz.wav
+# TEST_AUDIO_FILE is loaded from test_data.py
 
 *** Test Cases ***
 
