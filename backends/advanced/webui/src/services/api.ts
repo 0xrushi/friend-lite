@@ -222,6 +222,17 @@ export const usersApi = {
   delete: (id: string) => api.delete(`/api/users/${id}`),
 }
 
+export const annotationsApi = {
+  create: (data: {
+    conversation_id: string
+    segment_index: number
+    original_text: string
+    corrected_text: string
+    status?: 'accepted' | 'rejected' | 'pending'
+  }) => api.post('/api/annotations/', data),
+  getByConversationId: (conversationId: string) => api.get(`/api/annotations/${conversationId}`),
+}
+
 export const systemApi = {
   getHealth: () => api.get('/health'),
   getReadiness: () => api.get('/readiness'),
