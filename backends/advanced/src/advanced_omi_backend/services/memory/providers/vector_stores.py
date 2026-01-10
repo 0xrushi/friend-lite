@@ -177,7 +177,7 @@ class QdrantVectorStore(VectorStoreBase):
                 "query_filter": search_filter,
                 "limit": limit
             }
-
+            
             if score_threshold > 0.0:
                 search_params["score_threshold"] = score_threshold
                 memory_logger.debug(f"Using similarity threshold: {score_threshold}")
@@ -185,7 +185,7 @@ class QdrantVectorStore(VectorStoreBase):
             response = await self.client.query_points(**search_params)
 
             memories = []
-            for result in response.points:
+            for result in results:
                 memory = MemoryEntry(
                     id=str(result.id),
                     content=result.payload.get("content", ""),
