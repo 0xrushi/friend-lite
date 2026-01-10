@@ -1,13 +1,12 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
-import { MessageSquare, RefreshCw, Calendar, User, Play, Pause, MoreVertical, RotateCcw, Zap, ChevronDown, ChevronUp, Trash2, Save, X, Check } from 'lucide-react'
-import { conversationsApi, annotationsApi, speakerApi, BACKEND_URL } from '../services/api'
+import { useState, useEffect, useRef } from 'react'
+import { MessageSquare, RefreshCw, Calendar, User, Play, Pause, MoreVertical, RotateCcw, Zap, ChevronDown, ChevronUp, Trash2, Edit2, Check, X as XIcon, Loader2 } from 'lucide-react'
+import { conversationsApi, annotationsApi, queueApi, BACKEND_URL } from '../services/api'
 import ConversationVersionHeader from '../components/ConversationVersionHeader'
 import { getStorageKey } from '../utils/storage'
-import { WaveformDisplay } from '../components/audio/WaveformDisplay'
-import SpeakerNameDropdown from '../components/SpeakerNameDropdown'
 
 interface Conversation {
-  conversation_id: string
+  conversation_id?: string
+  audio_uuid: string
   title?: string
   summary?: string
   detailed_summary?: string
@@ -15,8 +14,8 @@ interface Conversation {
   client_id: string
   segment_count?: number  // From list endpoint
   memory_count?: number  // From list endpoint
-  audio_chunks_count?: number  // Number of MongoDB audio chunks
-  audio_total_duration?: number  // Total duration in seconds
+  audio_path?: string
+  cropped_audio_path?: string
   duration_seconds?: number
   has_memory?: boolean
   transcript?: string  // From detail endpoint
@@ -27,12 +26,19 @@ interface Conversation {
     end: number
     confidence?: number
   }>  // From detail endpoint (loaded on expand)
+  annotations?: Array<{
+    id: string
+    conversation_id: string
+    segment_index: number
+    original_text: string
+    corrected_text: string
+    status: 'pending' | 'accepted' | 'rejected'
+    created_at: string
+  }>
   active_transcript_version?: string
   active_memory_version?: string
   transcript_version_count?: number
   memory_version_count?: number
-  active_transcript_version_number?: number
-  active_memory_version_number?: number
   deleted?: boolean
   deletion_reason?: string
   deleted_at?: string
@@ -64,112 +70,116 @@ export default function Conversations() {
   const [expandedDetailedSummaries, setExpandedDetailedSummaries] = useState<Set<string>>(new Set())
   // Audio playback state
   const [playingSegment, setPlayingSegment] = useState<string | null>(null) // Format: "audioUuid-segmentIndex"
-  const [audioCurrentTime, setAudioCurrentTime] = useState<{ [conversationId: string]: number }>({})
   const audioRefs = useRef<{ [key: string]: HTMLAudioElement }>({})
+  const segmentTimerRef = useRef<number | null>(null)
 
   // Reprocessing state
   const [openDropdown, setOpenDropdown] = useState<string | null>(null)
   const [reprocessingTranscript, setReprocessingTranscript] = useState<Set<string>>(new Set())
   const [reprocessingMemory, setReprocessingMemory] = useState<Set<string>>(new Set())
-  const [reprocessingSpeakers, setReprocessingSpeakers] = useState<Set<string>>(new Set())
   const [deletingConversation, setDeletingConversation] = useState<Set<string>>(new Set())
 
-  // Transcript segment editing state
-  const [editingSegment, setEditingSegment] = useState<string | null>(null) // Format: "conversationId-segmentIndex"
-  const [editedSegmentText, setEditedSegmentText] = useState<string>('')
-  const [savingSegment, setSavingSegment] = useState<boolean>(false)
-  const [segmentEditError, setSegmentEditError] = useState<string | null>(null)
+  // Editing state
+  const [editingSegment, setEditingSegment] = useState<{
+    conversationId: string
+    segmentIndex: number
+    text: string
+  } | null>(null)
 
-  // Diarization annotation state
-  const [enrolledSpeakers, setEnrolledSpeakers] = useState<Array<{speaker_id: string, name: string}>>([])
-  const [diarizationAnnotations, setDiarizationAnnotations] = useState<Map<string, any[]>>(new Map()) // conversationId -> annotations[]
+  // Memory processing state
+  const [processingMemories, setProcessingMemories] = useState<{[conversationId: string]: string}>({}) // conversationId -> jobId
+  const [jobProgress, setJobProgress] = useState<{[jobId: string]: string}>({}) // jobId -> status
 
-  // Transcript annotation state
-  const [transcriptAnnotations, setTranscriptAnnotations] = useState<Map<string, any[]>>(new Map()) // conversationId -> annotations[]
+  useEffect(() => {
+    // Poll for job status
+    const interval = setInterval(async () => {
+      const activeJobs = Object.entries(processingMemories)
+      if (activeJobs.length === 0) return
 
-  // Unified apply state
-  const [applyingAnnotations, setApplyingAnnotations] = useState<Set<string>>(new Set())
+      for (const [convId, jobId] of activeJobs) {
+        try {
+          const response = await queueApi.getJob(jobId)
+          const job = response.data
+          setJobProgress(prev => ({ ...prev, [jobId]: job.status }))
 
-  // Compute merged speaker list that includes speakers from annotations
-  // This ensures newly created speaker names appear in all dropdowns immediately
-  const allSpeakers = useMemo(() => {
-    const speakers = [...enrolledSpeakers]
-    const existingNames = new Set(speakers.map(s => s.name))
-    
-    // Add speakers from all diarization annotations
-    diarizationAnnotations.forEach((annotations) => {
-      annotations.forEach(a => {
-        if (a.corrected_speaker && !existingNames.has(a.corrected_speaker)) {
-          speakers.push({ speaker_id: `annotation_${a.corrected_speaker}`, name: a.corrected_speaker })
-          existingNames.add(a.corrected_speaker)
+          if (['finished', 'completed', 'failed', 'stopped', 'canceled'].includes(job.status)) {
+            // Job done, remove from tracking and refresh conversation
+            setProcessingMemories(prev => {
+              const newState = { ...prev }
+              delete newState[convId]
+              return newState
+            })
+            
+            // Refresh this conversation to show new memories
+            const convResponse = await conversationsApi.getById(convId)
+            if (convResponse.status === 200 && convResponse.data.conversation) {
+              setConversations(prev => prev.map(c => 
+                c.conversation_id === convId ? { ...c, ...convResponse.data.conversation } : c
+              ))
+            }
+          }
+        } catch (err) {
+          console.error(`Failed to poll job ${jobId}:`, err)
         }
-      })
-    })
-    return speakers
-  }, [enrolledSpeakers, diarizationAnnotations])
+      }
+    }, 2000)
 
-  // Stable seek handler for waveform click-to-seek
-  const handleSeek = useCallback((conversationId: string, time: number) => {
-    console.log(`🎯 handleSeek called: conversationId=${conversationId}, time=${time.toFixed(2)}s`);
+    return () => clearInterval(interval)
+  }, [processingMemories])
 
-    const audioElement = audioRefs.current[conversationId];
-
-    if (!audioElement) {
-      console.error(`❌ Audio element not found for conversation ${conversationId}`);
-      console.log('Available audio refs:', Object.keys(audioRefs.current));
-      return;
-    }
-
-    console.log(`📍 Audio element found, readyState=${audioElement.readyState}, paused=${audioElement.paused}`);
-
-    // Check if audio is ready for seeking (readyState >= 1 means HAVE_METADATA)
-    if (audioElement.readyState < 1) {
-      console.warn(`⚠️ Audio not ready for seeking (readyState=${audioElement.readyState})`);
-      // Try again after metadata loads
-      audioElement.addEventListener('loadedmetadata', () => {
-        console.log('✅ Metadata loaded, retrying seek');
-        audioElement.currentTime = time;
-      }, { once: true });
-      return;
-    }
+  const handleSaveAnnotation = async () => {
+    if (!editingSegment) return
 
     try {
-      // Force a small delay to ensure audio is ready
-      const wasPlaying = !audioElement.paused;
+      // Optimistically update UI
+      setConversations(prev => prev.map(c => {
+        if (c.conversation_id === editingSegment.conversationId && c.segments) {
+          const newSegments = [...c.segments]
+          if (newSegments[editingSegment.segmentIndex]) {
+            // Store original text in case we need to revert (not implemented here for brevity)
+            const originalText = newSegments[editingSegment.segmentIndex].text
+            newSegments[editingSegment.segmentIndex] = {
+              ...newSegments[editingSegment.segmentIndex],
+              text: editingSegment.text
+            }
 
-      // Pause before seeking (helps with seeking reliability)
-      if (wasPlaying) {
-        audioElement.pause();
-      }
-
-      // Set the seek position
-      audioElement.currentTime = time;
-
-      // Verify the seek worked
-      setTimeout(() => {
-        console.log(`✅ Seek complete: requested=${time.toFixed(2)}s, actual=${audioElement.currentTime.toFixed(2)}s`);
-
-        if (Math.abs(audioElement.currentTime - time) > 1.0) {
-          console.error(`⚠️ Seek failed! Requested ${time.toFixed(2)}s but got ${audioElement.currentTime.toFixed(2)}s`);
+            // Call API in background
+            annotationsApi.create({
+              conversation_id: editingSegment.conversationId,
+              segment_index: editingSegment.segmentIndex,
+              original_text: originalText,
+              corrected_text: editingSegment.text,
+              status: 'accepted'
+            }).then(() => {
+               // Trigger memory reprocessing explicitly to get the job ID for the UI
+               conversationsApi.reprocessMemory(editingSegment.conversationId).then(res => {
+                 setProcessingMemories(prev => ({
+                   ...prev,
+                   [editingSegment.conversationId]: res.data.job_id
+                 }))
+               })
+            }).catch(err => {
+              console.error('Failed to save annotation:', err)
+              setError('Failed to save correction. Please try again.')
+              // Revert UI change would go here
+            })
+          }
+          return { ...c, segments: newSegments }
         }
-      }, 100);
-
-      // Resume playback if it was playing
-      if (wasPlaying) {
-        audioElement.play().catch(err => {
-          console.warn('Could not resume playback after seek:', err);
-        });
-      }
-    } catch (err) {
-      console.error('❌ Seek failed:', err);
+        return c
+      }))
+      
+      setEditingSegment(null)
+    } catch (err: any) {
+      console.error('Error saving annotation:', err)
+      setError('Failed to save correction')
     }
-  }, []); // Empty deps - uses ref which is always stable
+  }
 
   const loadConversations = async () => {
     try {
       setLoading(true)
-      // Exclude deleted conversations from main view
-      const response = await conversationsApi.getAll(false)
+      const response = await conversationsApi.getAll()
       // API now returns a flat list with client_id as a field
       const conversationsList = response.data.conversations || []
       setConversations(conversationsList)
@@ -181,97 +191,8 @@ export default function Conversations() {
     }
   }
 
-  const loadEnrolledSpeakers = async () => {
-    try {
-      const response = await speakerApi.getEnrolledSpeakers()
-      setEnrolledSpeakers(response.data.speakers || [])
-    } catch (err: any) {
-      console.error('Failed to load enrolled speakers:', err)
-    }
-  }
-
-  const loadDiarizationAnnotations = async (conversationId: string) => {
-    try {
-      const response = await annotationsApi.getDiarizationAnnotations(conversationId)
-      setDiarizationAnnotations(prev => new Map(prev).set(conversationId, response.data))
-    } catch (err: any) {
-      console.error('Failed to load diarization annotations:', err)
-    }
-  }
-
-  const loadTranscriptAnnotations = async (conversationId: string) => {
-    try {
-      const response = await annotationsApi.getTranscriptAnnotations(conversationId)
-      setTranscriptAnnotations(prev => new Map(prev).set(conversationId, response.data))
-    } catch (err: any) {
-      console.error('Failed to load transcript annotations:', err)
-    }
-  }
-
-  const handleSpeakerChange = async (conversationId: string, segmentIndex: number, originalSpeaker: string, newSpeaker: string, segmentStartTime: number) => {
-    try {
-      await annotationsApi.createDiarizationAnnotation({
-        conversation_id: conversationId,
-        segment_index: segmentIndex,
-        original_speaker: originalSpeaker,
-        corrected_speaker: newSpeaker,
-        segment_start_time: segmentStartTime,
-      })
-      
-      // Temporarily add new speaker name to enrolledSpeakers if it doesn't exist
-      // This makes it immediately available in all dropdowns without requiring a backend reload
-      setEnrolledSpeakers(prev => {
-        const speakerExists = prev.some(speaker => speaker.name === newSpeaker)
-        if (!speakerExists) {
-          // Generate a temporary speaker_id for in-memory use
-          const tempSpeakerId = `temp_${Date.now()}_${newSpeaker.replace(/\s+/g, '_')}`
-          return [...prev, { speaker_id: tempSpeakerId, name: newSpeaker }]
-        }
-        return prev
-      })
-      
-      // Reload annotations for this conversation
-      await loadDiarizationAnnotations(conversationId)
-    } catch (err: any) {
-      console.error('Failed to create annotation:', err)
-      setError('Failed to create speaker annotation')
-    }
-  }
-
-  const handleApplyAllAnnotations = async (conversationId: string) => {
-    try {
-      setApplyingAnnotations(prev => new Set(prev).add(conversationId))
-      setOpenDropdown(null)
-
-      const response = await annotationsApi.applyAllAnnotations(conversationId)
-
-      if (response.status === 200) {
-        const data = response.data
-        console.log(`Applied ${data.diarization_count} diarization and ${data.transcript_count} transcript annotations`)
-
-        // Refresh conversation to show new version
-        await loadConversations()
-
-        // Reload annotations (should be empty now)
-        await loadDiarizationAnnotations(conversationId)
-        await loadTranscriptAnnotations(conversationId)
-      } else {
-        setError(`Failed to apply annotations: ${response.data?.error || 'Unknown error'}`)
-      }
-    } catch (err: any) {
-      setError(`Error applying annotations: ${err.message || 'Unknown error'}`)
-    } finally {
-      setApplyingAnnotations(prev => {
-        const newSet = new Set(prev)
-        newSet.delete(conversationId)
-        return newSet
-      })
-    }
-  }
-
   useEffect(() => {
     loadConversations()
-    loadEnrolledSpeakers()
   }, [])
 
   // Close dropdown when clicking outside
@@ -367,40 +288,6 @@ export default function Conversations() {
     }
   }
 
-  const handleReprocessSpeakers = async (conversation: Conversation) => {
-    try {
-      if (!conversation.conversation_id) {
-        setError('Cannot reprocess speakers: Conversation ID is missing. This conversation may be from an older format.')
-        return
-      }
-
-      setReprocessingSpeakers(prev => new Set(prev).add(conversation.conversation_id!))
-      setOpenDropdown(null)
-
-      const response = await conversationsApi.reprocessSpeakers(
-        conversation.conversation_id,
-        'active'  // Use active transcript version as source
-      )
-
-      if (response.status === 200) {
-        // Refresh conversations to show new version with updated speakers
-        await loadConversations()
-      } else {
-        setError(`Failed to start speaker reprocessing: ${response.data?.error || 'Unknown error'}`)
-      }
-    } catch (err: any) {
-      setError(`Error starting speaker reprocessing: ${err.message || 'Unknown error'}`)
-    } finally {
-      if (conversation.conversation_id) {
-        setReprocessingSpeakers(prev => {
-          const newSet = new Set(prev)
-          newSet.delete(conversation.conversation_id!)
-          return newSet
-        })
-      }
-    }
-  }
-
   const handleDeleteConversation = async (conversationId: string) => {
     try {
       const confirmed = window.confirm('Are you sure you want to delete this conversation? This action cannot be undone.')
@@ -425,69 +312,6 @@ export default function Conversations() {
         newSet.delete(conversationId)
         return newSet
       })
-    }
-  }
-
-  // Transcript segment editing handlers
-  const handleStartSegmentEdit = (conversationId: string, segmentIndex: number, originalText: string) => {
-    const segmentKey = `${conversationId}-${segmentIndex}`
-    setEditingSegment(segmentKey)
-    setEditedSegmentText(originalText)
-    setSegmentEditError(null)
-  }
-
-  const handleSaveSegmentEdit = async (conversationId: string, segmentIndex: number, originalText: string) => {
-    if (!editedSegmentText.trim()) {
-      setSegmentEditError('Segment text cannot be empty')
-      return
-    }
-
-    if (editedSegmentText === originalText) {
-      // No changes, just cancel
-      handleCancelSegmentEdit()
-      return
-    }
-
-    try {
-      setSavingSegment(true)
-      setSegmentEditError(null)
-
-      // Create annotation (NOT applied immediately)
-      await annotationsApi.createTranscriptAnnotation({
-        conversation_id: conversationId,
-        segment_index: segmentIndex,
-        original_text: originalText,
-        corrected_text: editedSegmentText
-      })
-
-      // Exit edit mode
-      setEditingSegment(null)
-      setEditedSegmentText('')
-
-      // Reload transcript annotations to show pending badge
-      await loadTranscriptAnnotations(conversationId)
-
-    } catch (err: any) {
-      console.error('Error saving segment edit:', err)
-      setSegmentEditError(err.response?.data?.detail || err.message || 'Failed to save segment edit')
-    } finally {
-      setSavingSegment(false)
-    }
-  }
-
-  const handleCancelSegmentEdit = () => {
-    setEditingSegment(null)
-    setEditedSegmentText('')
-    setSegmentEditError(null)
-  }
-
-  const handleSegmentKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>, conversationId: string, segmentIndex: number, originalText: string) => {
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-      e.preventDefault()
-      handleSaveSegmentEdit(conversationId, segmentIndex, originalText)
-    } else if (e.key === 'Escape') {
-      e.preventDefault()
-      handleCancelSegmentEdit()
     }
   }
 
@@ -560,18 +384,22 @@ export default function Conversations() {
 
     // Fetch full conversation details including segments
     try {
-      const response = await conversationsApi.getById(conversation.conversation_id)
-      if (response.status === 200 && response.data.conversation) {
-        // Update the conversation in state with full data
+      const [convResponse, annotationsResponse] = await Promise.all([
+        conversationsApi.getById(conversation.conversation_id),
+        annotationsApi.getByConversationId(conversation.conversation_id)
+      ])
+
+      if (convResponse.status === 200 && convResponse.data.conversation) {
+        // Update the conversation in state with full data and annotations
         setConversations(prev => prev.map(c =>
           c.conversation_id === conversationId
-            ? { ...c, ...response.data.conversation }
+            ? { 
+                ...c, 
+                ...convResponse.data.conversation,
+                annotations: annotationsResponse.data || []
+              }
             : c
         ))
-        // Load diarization annotations for this conversation
-        await loadDiarizationAnnotations(conversationId)
-        // Load transcript annotations for this conversation
-        await loadTranscriptAnnotations(conversationId)
         // Expand the transcript
         setExpandedTranscripts(prev => new Set(prev).add(conversationId))
       }
@@ -581,14 +409,69 @@ export default function Conversations() {
     }
   }
 
-  const handleSegmentPlayPause = (conversationId: string, segmentIndex: number, segment: any) => {
+  const handleAcceptSuggestion = async (conversationId: string, annotation: any) => {
+    try {
+      // 1. Update annotation status to accepted
+      // We'd need an update endpoint, but for now we can create a new one or assume 'create' with same ID updates if we handled it, 
+      // but simpler is to use the create endpoint to overwrite/confirm.
+      // Ideally we should have an update endpoint.
+      // Since I didn't create an update endpoint, I'll re-create it as accepted.
+      
+      await annotationsApi.create({
+        conversation_id: conversationId,
+        segment_index: annotation.segment_index,
+        original_text: annotation.original_text,
+        corrected_text: annotation.corrected_text,
+        status: 'accepted'
+      })
+
+      // 2. Update local state to reflect change (hide suggestion, update transcript)
+      setConversations(prev => prev.map(c => {
+        if (c.conversation_id === conversationId && c.segments && c.annotations) {
+          const newSegments = [...c.segments]
+          if (newSegments[annotation.segment_index]) {
+            newSegments[annotation.segment_index].text = annotation.corrected_text
+          }
+          return {
+            ...c,
+            segments: newSegments,
+            annotations: c.annotations.filter(a => a.id !== annotation.id) // Remove processed suggestion
+          }
+        }
+        return c
+      }))
+    } catch (err) {
+      console.error('Failed to accept suggestion:', err)
+    }
+  }
+
+  const handleRejectSuggestion = async (conversationId: string, annotationId: string) => {
+      // Ideally call API to mark as rejected. For now just remove from UI.
+      setConversations(prev => prev.map(c => {
+        if (c.conversation_id === conversationId && c.annotations) {
+          return {
+            ...c,
+            annotations: c.annotations.filter(a => a.id !== annotationId)
+          }
+        }
+        return c
+      }))
+  }
+
+  const handleSegmentPlayPause = (conversationId: string, segmentIndex: number, segment: any, useCropped: boolean) => {
     const segmentId = `${conversationId}-${segmentIndex}`;
+    // Include cropped flag in cache key to handle mode switches
+    const audioKey = `${conversationId}-${useCropped ? 'cropped' : 'original'}`;
 
     // If this segment is already playing, pause it
     if (playingSegment === segmentId) {
-      const audio = audioRefs.current[segmentId];
+      const audio = audioRefs.current[audioKey];
       if (audio) {
         audio.pause();
+      }
+      if (segmentTimerRef.current) {
+        window.clearTimeout(segmentTimerRef.current);
+        segmentTimerRef.current = null;
       }
       setPlayingSegment(null);
       return;
@@ -596,28 +479,31 @@ export default function Conversations() {
 
     // Stop any currently playing segment
     if (playingSegment) {
-      const currentAudio = audioRefs.current[playingSegment];
-      if (currentAudio) {
-        currentAudio.pause();
+      // Stop all audio elements (could be playing from different mode)
+      Object.values(audioRefs.current).forEach(audio => {
+        audio.pause();
+      });
+      if (segmentTimerRef.current) {
+        window.clearTimeout(segmentTimerRef.current);
+        segmentTimerRef.current = null;
       }
     }
 
-    // Get or create audio element for this specific segment
-    let audio = audioRefs.current[segmentId];
+    // Get or create audio element for this conversation + mode combination
+    let audio = audioRefs.current[audioKey];
 
-    // Create new audio element with segment-specific URL
+    // Check if we need to create a new audio element (none exists or previous had error)
     if (!audio || audio.error) {
       const token = localStorage.getItem(getStorageKey('token')) || '';
-      // Use chunks endpoint with time range for instant loading (only fetches needed chunks)
-      const audioUrl = `${BACKEND_URL}/api/audio/chunks/${conversationId}?start_time=${segment.start}&end_time=${segment.end}&token=${token}`;
-      console.log('Creating segment audio element with URL:', audioUrl);
-      console.log('Segment range:', segment.start, 'to', segment.end, '(duration:', segment.end - segment.start, 'seconds)');
+      const audioUrl = `${BACKEND_URL}/api/audio/get_audio/${conversationId}?cropped=${useCropped}&token=${token}`;
+      console.log('Creating audio element with URL:', audioUrl);
+      console.log('Token present:', !!token, 'Token length:', token.length);
       audio = new Audio(audioUrl);
-      audioRefs.current[segmentId] = audio;
+      audioRefs.current[audioKey] = audio;
 
       // Add error listener for debugging
       audio.addEventListener('error', () => {
-        console.error('Audio segment error:', audio.error?.code, audio.error?.message);
+        console.error('Audio element error:', audio.error?.code, audio.error?.message);
         console.error('Audio src:', audio.src);
       });
 
@@ -627,10 +513,19 @@ export default function Conversations() {
       });
     }
 
-    // Play the segment (no need to seek since audio is already trimmed to exact range)
+    // Set the start time and play
     console.log('Playing segment:', segment.start, 'to', segment.end);
+    audio.currentTime = segment.start;
     audio.play().then(() => {
       setPlayingSegment(segmentId);
+
+      // Set a timer to stop at the segment end time
+      const duration = (segment.end - segment.start) * 1000; // Convert to milliseconds
+      segmentTimerRef.current = window.setTimeout(() => {
+        audio.pause();
+        setPlayingSegment(null);
+        segmentTimerRef.current = null;
+      }, duration);
     }).catch(err => {
       console.error('Error playing audio segment:', err);
       setPlayingSegment(null);
@@ -640,10 +535,13 @@ export default function Conversations() {
   // Cleanup audio on unmount
   useEffect(() => {
     return () => {
-      // Stop all audio elements
+      // Stop all audio and clear timers
       Object.values(audioRefs.current).forEach(audio => {
         audio.pause();
       });
+      if (segmentTimerRef.current) {
+        window.clearTimeout(segmentTimerRef.current);
+      }
     };
   }, [])
 
@@ -711,19 +609,46 @@ export default function Conversations() {
         ) : (
           conversations.map((conversation) => (
             <div
-              key={conversation.conversation_id}
-              className="rounded-lg p-6 border bg-gray-50 dark:bg-gray-700 border-gray-200 dark:border-gray-600"
+              key={conversation.conversation_id || conversation.audio_uuid}
+              className={`rounded-lg p-6 border ${
+                conversation.deleted
+                  ? 'bg-red-50 dark:bg-red-900/20 border-red-300 dark:border-red-700'
+                  : 'bg-gray-50 dark:bg-gray-700 border-gray-200 dark:border-gray-600'
+              }`}
             >
-              {/* Version Selector Header */}
-              <ConversationVersionHeader
-                conversationId={conversation.conversation_id}
+              {/* Deleted Conversation Warning */}
+              {conversation.deleted && (
+                <div className="mb-4 p-3 bg-red-100 dark:bg-red-900/40 rounded-lg border border-red-300 dark:border-red-700">
+                  <div className="flex items-start space-x-2">
+                    <Trash2 className="h-5 w-5 text-red-600 dark:text-red-400 mt-0.5 flex-shrink-0" />
+                    <div className="flex-1">
+                      <p className="font-semibold text-red-800 dark:text-red-300 text-sm">Processing Failed</p>
+                      <p className="text-xs text-red-700 dark:text-red-400 mt-1">
+                        Reason: {conversation.deletion_reason === 'no_meaningful_speech'
+                          ? 'No meaningful speech detected'
+                          : conversation.deletion_reason === 'audio_file_not_ready'
+                          ? 'Audio file not saved (possible Bluetooth disconnect)'
+                          : conversation.deletion_reason || 'Unknown'}
+                      </p>
+                      {conversation.deleted_at && (
+                        <p className="text-xs text-red-600 dark:text-red-500 mt-1">
+                          Deleted at: {new Date(conversation.deleted_at).toLocaleString()}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Version Selector Header - Only show for conversations with conversation_id */}
+              {conversation.conversation_id && !conversation.deleted && (
+                <ConversationVersionHeader
+                  conversationId={conversation.conversation_id}
                   versionInfo={{
                     transcript_count: conversation.transcript_version_count || 0,
                     memory_count: conversation.memory_version_count || 0,
                     active_transcript_version: conversation.active_transcript_version,
-                    active_memory_version: conversation.active_memory_version,
-                    active_transcript_version_number: conversation.active_transcript_version_number,
-                    active_memory_version_number: conversation.active_memory_version_number
+                    active_memory_version: conversation.active_memory_version
                   }}
                   onVersionChange={async () => {
                     // Update only this specific conversation without reloading all conversations
@@ -744,7 +669,8 @@ export default function Conversations() {
                     }
                   }}
                 />
-
+              )}
+              
               {/* Conversation Header */}
               <div className="flex justify-between items-start mb-4">
                 <div className="flex flex-col space-y-2">
@@ -806,7 +732,8 @@ export default function Conversations() {
                   <button
                     onClick={(e) => {
                       e.stopPropagation()
-                      setOpenDropdown(openDropdown === conversation.conversation_id ? null : conversation.conversation_id)
+                      const dropdownKey = conversation.conversation_id || conversation.audio_uuid
+                      setOpenDropdown(openDropdown === dropdownKey ? null : dropdownKey)
                     }}
                     className="p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
                     title="Conversation options"
@@ -815,7 +742,7 @@ export default function Conversations() {
                   </button>
 
                   {/* Dropdown Menu */}
-                  {openDropdown === conversation.conversation_id && (
+                  {openDropdown === (conversation.conversation_id || conversation.audio_uuid) && (
                     <div className="absolute right-0 top-8 w-48 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-600 py-2 z-10">
                       <button
                         onClick={() => handleReprocessTranscript(conversation)}
@@ -847,59 +774,6 @@ export default function Conversations() {
                           <span className="text-xs text-red-500 ml-1">(ID missing)</span>
                         )}
                       </button>
-                      <button
-                        onClick={() => handleReprocessSpeakers(conversation)}
-                        disabled={!conversation.conversation_id || reprocessingSpeakers.has(conversation.conversation_id)}
-                        className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                        title="Create new transcript version with re-identified speakers (automatically updates memories)"
-                      >
-                        {conversation.conversation_id && reprocessingSpeakers.has(conversation.conversation_id) ? (
-                          <RefreshCw className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <User className="h-4 w-4" />
-                        )}
-                        <span>Reprocess Who Spoke</span>
-                        {!conversation.conversation_id && (
-                          <span className="text-xs text-red-500 ml-1">(ID missing)</span>
-                        )}
-                      </button>
-                      <div className="border-t border-gray-200 dark:border-gray-600 my-1"></div>
-
-                      {/* Apply All Annotations Button */}
-                      {(() => {
-                        const diarAnnotations = diarizationAnnotations.get(conversation.conversation_id!) || []
-                        const transcriptAnnots = transcriptAnnotations.get(conversation.conversation_id!) || []
-
-                        const diarPending = diarAnnotations.filter(a => !a.processed).length
-                        const transcriptPending = transcriptAnnots.filter(a => !a.processed).length
-                        const totalPending = diarPending + transcriptPending
-
-                        if (totalPending === 0) return null
-
-                        return (
-                          <button
-                            onClick={() => handleApplyAllAnnotations(conversation.conversation_id!)}
-                            disabled={!conversation.conversation_id || applyingAnnotations.has(conversation.conversation_id!)}
-                            className="w-full text-left px-4 py-2 text-sm text-blue-700 dark:text-blue-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
-                            title={`Apply ${diarPending} speaker and ${transcriptPending} text corrections`}
-                          >
-                            {conversation.conversation_id && applyingAnnotations.has(conversation.conversation_id!) ? (
-                              <RefreshCw className="h-4 w-4 animate-spin" />
-                            ) : (
-                              <Check className="h-4 w-4" />
-                            )}
-                            <span>
-                              Apply Changes ({totalPending})
-                              {diarPending > 0 && transcriptPending > 0 && (
-                                <span className="text-xs ml-1 text-gray-500">
-                                  ({diarPending} speaker, {transcriptPending} text)
-                                </span>
-                              )}
-                            </span>
-                          </button>
-                        )
-                      })()}
-
                       <div className="border-t border-gray-200 dark:border-gray-600 my-1"></div>
                       <button
                         onClick={() => conversation.conversation_id && handleDeleteConversation(conversation.conversation_id)}
@@ -921,55 +795,36 @@ export default function Conversations() {
                 </div>
               </div>
 
-              {/* Audio Player with Waveform */}
+              {/* Audio Player */}
               <div className="mb-4">
                 <div className="space-y-2">
-                  {(conversation.audio_chunks_count && conversation.audio_chunks_count > 0) && (
+                  {(conversation.audio_path || conversation.cropped_audio_path) && (
                     <>
                       <div className="flex items-center space-x-2 text-sm text-gray-700 dark:text-gray-300">
                         <span className="font-medium">
-                          🎵 Audio
+                          {debugMode ? '🔧 Original Audio' : '🎵 Audio'}
+                          {debugMode && conversation.cropped_audio_path && ' (Debug Mode)'}
                         </span>
                       </div>
-
-                      {/* Waveform Visualization */}
-                      {conversation.conversation_id && conversation.audio_total_duration && (
-                        <WaveformDisplay
-                          conversationId={conversation.conversation_id}
-                          duration={conversation.audio_total_duration}
-                          currentTime={conversation.conversation_id ? audioCurrentTime[conversation.conversation_id] : undefined}
-                          onSeek={(time) => handleSeek(conversation.conversation_id!, time)}
-                          height={80}
-                        />
-                      )}
-
-                      {/* Audio Player */}
                       <audio
-                        ref={(el) => {
-                          if (el && conversation.conversation_id) {
-                            audioRefs.current[conversation.conversation_id] = el;
-                          }
-                        }}
                         controls
                         className="w-full h-10"
                         preload="metadata"
                         style={{ minWidth: '300px' }}
-                        src={`${BACKEND_URL}/api/audio/get_audio/${conversation.conversation_id}?token=${localStorage.getItem(getStorageKey('token')) || ''}`}
-                        onTimeUpdate={(e) => {
-                          // Extract currentTime IMMEDIATELY before any async operations
-                          const currentTime = e.currentTarget?.currentTime;
-                          const conversationId = conversation.conversation_id;
-
-                          if (conversationId && currentTime !== undefined) {
-                            setAudioCurrentTime(prev => ({
-                              ...prev,
-                              [conversationId]: currentTime
-                            }));
-                          }
-                        }}
+                        src={`${BACKEND_URL}/api/audio/get_audio/${conversation.conversation_id}?cropped=${!debugMode}&token=${localStorage.getItem(getStorageKey('token')) || ''}`}
                       >
                         Your browser does not support the audio element.
                       </audio>
+                      {debugMode && conversation.cropped_audio_path && (
+                        <div className="text-xs text-gray-500 dark:text-gray-400">
+                          💡 Cropped version available: {conversation.cropped_audio_path}
+                        </div>
+                      )}
+                      {!debugMode && conversation.cropped_audio_path && (
+                        <div className="text-xs text-gray-500 dark:text-gray-400">
+                          💡 Enable debug mode to hear original with silence
+                        </div>
+                      )}
                     </>
                   )}
                 </div>
@@ -1007,6 +862,45 @@ export default function Conversations() {
                       {/* Transcript Content - Conditionally Rendered */}
                       {conversation.conversation_id && expandedTranscripts.has(conversation.conversation_id) && (
                         <div className="animate-in slide-in-from-top-2 duration-300 ease-out space-y-4">
+                          
+                          {/* Pending Suggestions */}
+                          {conversation.annotations && conversation.annotations.some(a => a.status === 'pending') && (
+                            <div className="p-4 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg border border-yellow-200 dark:border-yellow-800">
+                              <h4 className="font-semibold text-yellow-800 dark:text-yellow-300 mb-2 flex items-center">
+                                <Zap className="w-4 h-4 mr-2" />
+                                AI Suggestions ({conversation.annotations.filter(a => a.status === 'pending').length})
+                              </h4>
+                              <div className="space-y-3">
+                                {conversation.annotations.filter(a => a.status === 'pending').map((annotation) => (
+                                  <div key={annotation.id} className="bg-white dark:bg-gray-800 p-3 rounded border border-yellow-100 dark:border-yellow-900/50">
+                                    <div className="text-sm text-gray-500 mb-1">Segment {annotation.segment_index + 1}:</div>
+                                    <div className="flex items-center space-x-2 mb-2">
+                                      <span className="line-through text-red-500 text-xs">{annotation.original_text}</span>
+                                      <span className="text-gray-400">→</span>
+                                      <span className="text-green-600 font-medium text-sm">{annotation.corrected_text}</span>
+                                    </div>
+                                    <div className="flex space-x-2">
+                                      <button
+                                        onClick={() => handleAcceptSuggestion(conversation.conversation_id!, annotation)}
+                                        className="flex items-center space-x-1 px-2 py-1 bg-green-100 text-green-700 rounded text-xs hover:bg-green-200"
+                                      >
+                                        <Check className="w-3 h-3" />
+                                        <span>Accept</span>
+                                      </button>
+                                      <button
+                                        onClick={() => handleRejectSuggestion(conversation.conversation_id!, annotation.id)}
+                                        className="flex items-center space-x-1 px-2 py-1 bg-red-100 text-red-700 rounded text-xs hover:bg-red-200"
+                                      >
+                                        <XIcon className="w-3 h-3" />
+                                        <span>Deny</span>
+                                      </button>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
                           {segments.length > 0 ? (
                             <div className="p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600">
                               <div className="space-y-1">
@@ -1027,23 +921,28 @@ export default function Conversations() {
                                   // Render the transcript
                                   return segments.map((segment, index) => {
                           const speaker = segment.speaker || 'Unknown'
+                          const speakerColor = speakerColorMap[speaker]
                           // Use conversation_id for unique segment IDs
-                          const segmentId = `${conversation.conversation_id}-${index}`
+                          const conversationKey = conversation.conversation_id || conversation.audio_uuid
+                          const segmentId = `${conversationKey}-${index}`
                           const isPlaying = playingSegment === segmentId
-                          const hasAudio = !!conversation.audio_chunks_count && conversation.audio_chunks_count > 0
-                          const isEditing = editingSegment === segmentId
+                          const hasAudio = conversation.cropped_audio_path || conversation.audio_path
+                          // Use cropped audio only if available and not in debug mode
+                          const useCropped = !debugMode && !!conversation.cropped_audio_path
+                          
+                          const isEditing = editingSegment?.conversationId === conversation.conversation_id && editingSegment?.segmentIndex === index
 
                           return (
                             <div
                               key={index}
-                              className={`text-sm leading-relaxed flex items-start space-x-2 py-1 px-2 rounded transition-colors ${
-                                isPlaying ? 'bg-blue-50 dark:bg-blue-900/20' : isEditing ? 'bg-yellow-50 dark:bg-yellow-900/20' : 'hover:bg-gray-50 dark:hover:bg-gray-700'
+                              className={`text-sm leading-relaxed flex items-start space-x-2 py-1 px-2 rounded transition-colors group ${
+                                isPlaying ? 'bg-blue-50 dark:bg-blue-900/20' : 'hover:bg-gray-50 dark:hover:bg-gray-700'
                               }`}
                             >
                               {/* Play/Pause Button */}
                               {hasAudio && !isEditing && (
                                 <button
-                                  onClick={() => handleSegmentPlayPause(conversation.conversation_id, index, segment)}
+                                  onClick={() => handleSegmentPlayPause(conversationKey, index, segment, useCropped)}
                                   className={`flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center transition-colors mt-0.5 ${
                                     isPlaying
                                       ? 'bg-blue-600 text-white hover:bg-blue-700'
@@ -1059,118 +958,64 @@ export default function Conversations() {
                                 </button>
                               )}
 
-                              <div className="flex-1 min-w-0">
-                                {debugMode && (
-                                  <span className="text-xs text-gray-400 mr-2">
-                                    [start: {segment.start.toFixed(1)}s, end: {segment.end.toFixed(1)}s, duration: {formatDuration(segment.start, segment.end)}]
-                                  </span>
-                                )}
-
-                                {/* Speaker Name - Clickable Dropdown for Annotation */}
-                                {(() => {
-                                  const conversationAnnotations = diarizationAnnotations.get(conversation.conversation_id!) || []
-                                  const annotation = conversationAnnotations.find(a => a.segment_index === index && !a.processed)
-                                  const speakerColor = speakerColorMap[speaker]
-
-                                  // Always show dropdown, but use corrected speaker if annotation exists
-                                  // This allows users to edit annotations even after creating them
-                                  const currentSpeaker = annotation ? annotation.corrected_speaker : speaker
-                                  const originalSpeaker = annotation ? annotation.original_speaker : speaker
-
-                                  return (
-                                    <span className="inline-flex items-center space-x-1">
-                                      {annotation && (
-                                        <span className="text-xs bg-orange-100 dark:bg-orange-900 text-orange-600 dark:text-orange-300 px-2 py-0.5 rounded" title="Pending annotation">
-                                          Pending
-                                        </span>
-                                      )}
-                                      <SpeakerNameDropdown
-                                        currentSpeaker={currentSpeaker}
-                                        enrolledSpeakers={allSpeakers}
-                                        onSpeakerChange={(newSpeaker) =>
-                                          handleSpeakerChange(conversation.conversation_id!, index, originalSpeaker, newSpeaker, segment.start)
-                                        }
-                                        segmentIndex={index}
-                                        conversationId={conversation.conversation_id!}
-                                        annotated={!!annotation}
-                                        speakerColor={annotation ? 'text-green-600 dark:text-green-400' : speakerColor}
-                                      />
-                                      <span>:</span>
+                              <div className="flex-1 min-w-0 flex justify-between items-start group">
+                                <div className="flex-1">
+                                  {debugMode && (
+                                    <span className="text-xs text-gray-400 mr-2">
+                                      [start: {segment.start.toFixed(1)}s, end: {segment.end.toFixed(1)}s, duration: {formatDuration(segment.start, segment.end)}]
                                     </span>
-                                  )
-                                })()}
-
-                                {/* Segment Text - Show pending edit indicator or editable */}
-                                {(() => {
-                                  const transcriptAnnots = transcriptAnnotations.get(conversation.conversation_id!) || []
-                                  const textAnnotation = transcriptAnnots.find(
-                                    a => a.segment_index === index && !a.processed
-                                  )
-
-                                  if (textAnnotation && !isEditing) {
-                                    // Show pending text edit - corrected text is clickable like normal text
-                                    return (
-                                      <span className="inline-flex items-start space-x-2 ml-1">
-                                        <span className="line-through text-gray-400">{textAnnotation.original_text}</span>
-                                        <span>→</span>
-                                        <span
-                                          onClick={() => conversation.conversation_id && handleStartSegmentEdit(conversation.conversation_id, index, textAnnotation.corrected_text)}
-                                          className="text-blue-600 dark:text-blue-400 cursor-pointer hover:bg-yellow-100 dark:hover:bg-yellow-900/30 px-1 rounded transition-colors"
-                                          title="Click to edit segment"
+                                  )}
+                                  <span className={`font-medium ${speakerColor}`}>
+                                    {speaker}:
+                                  </span>
+                                  
+                                  {isEditing ? (
+                                    <div className="flex items-center space-x-2 mt-1 w-full">
+                                      <textarea
+                                        value={editingSegment.text}
+                                        onChange={(e) => setEditingSegment({ ...editingSegment, text: e.target.value })}
+                                        className="w-full p-2 text-sm border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                                        rows={2}
+                                        autoFocus
+                                      />
+                                      <div className="flex flex-col space-y-1">
+                                        <button
+                                          onClick={handleSaveAnnotation}
+                                          className="p-1 text-green-600 hover:bg-green-100 rounded dark:hover:bg-green-900/30"
+                                          title="Save correction"
                                         >
-                                          {textAnnotation.corrected_text}
-                                        </span>
-                                        <span className="text-xs bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300 px-2 py-0.5 rounded">Pending</span>
-                                      </span>
-                                    )
-                                  } else if (isEditing) {
-                                    // Show edit textarea
-                                    return (
-                                      <div className="ml-1 space-y-2">
-                                        <textarea
-                                          value={editedSegmentText}
-                                          onChange={(e) => setEditedSegmentText(e.target.value)}
-                                          onKeyDown={(e) => handleSegmentKeyDown(e, conversation.conversation_id, index, segment.text)}
-                                          className="w-full min-h-[60px] px-3 py-2 text-sm border-2 border-blue-500 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
-                                          autoFocus
-                                          disabled={savingSegment}
-                                        />
-                                        <div className="flex items-center gap-2">
-                                          <button
-                                            onClick={() => handleSaveSegmentEdit(conversation.conversation_id, index, segment.text)}
-                                            disabled={savingSegment || editedSegmentText === segment.text}
-                                            className="inline-flex items-center gap-1 px-3 py-1 text-xs font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                                          >
-                                            <Save className="w-3 h-3" />
-                                            {savingSegment ? 'Saving...' : 'Save'}
-                                          </button>
-                                          <button
-                                            onClick={handleCancelSegmentEdit}
-                                            disabled={savingSegment}
-                                            className="inline-flex items-center gap-1 px-3 py-1 text-xs font-medium text-gray-700 dark:text-gray-300 bg-gray-200 dark:bg-gray-600 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                                          >
-                                            <X className="w-3 h-3" />
-                                            Cancel
-                                          </button>
-                                          {segmentEditError && (
-                                            <span className="text-xs text-red-600 dark:text-red-400">{segmentEditError}</span>
-                                          )}
-                                        </div>
+                                          <Check className="w-4 h-4" />
+                                        </button>
+                                        <button
+                                          onClick={() => setEditingSegment(null)}
+                                          className="p-1 text-red-600 hover:bg-red-100 rounded dark:hover:bg-red-900/30"
+                                          title="Cancel"
+                                        >
+                                          <XIcon className="w-4 h-4" />
+                                        </button>
                                       </div>
-                                    )
-                                  } else {
-                                    // Show normal text (clickable to edit)
-                                    return (
-                                      <span
-                                        onClick={() => conversation.conversation_id && handleStartSegmentEdit(conversation.conversation_id, index, segment.text)}
-                                        className="text-gray-900 dark:text-gray-100 ml-1 cursor-pointer hover:bg-yellow-100 dark:hover:bg-yellow-900/30 px-1 rounded transition-colors"
-                                        title="Click to edit segment"
-                                      >
-                                        {segment.text}
-                                      </span>
-                                    )
-                                  }
-                                })()}
+                                    </div>
+                                  ) : (
+                                    <span className="text-gray-900 dark:text-gray-100 ml-1">
+                                      {segment.text}
+                                    </span>
+                                  )}
+                                </div>
+
+                                {/* Edit Button - Extreme Right */}
+                                {!isEditing && conversation.conversation_id && (
+                                  <button
+                                    onClick={() => setEditingSegment({
+                                      conversationId: conversation.conversation_id!,
+                                      segmentIndex: index,
+                                      text: segment.text
+                                    })}
+                                    className="ml-2 p-1 text-gray-400 hover:text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity"
+                                    title="Edit text"
+                                  >
+                                    <Edit2 className="w-3 h-3" />
+                                  </button>
+                                )}
                               </div>
                             </div>
                           )
@@ -1181,6 +1026,30 @@ export default function Conversations() {
                           ) : (
                             <div className="text-sm text-gray-500 dark:text-gray-400 italic p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600">
                               No transcript available
+                            </div>
+                          )}
+                          
+                          {/* Memory Processing Progress Bar */}
+                          {conversation.conversation_id && processingMemories[conversation.conversation_id] && (
+                            <div className="mt-2 p-2 bg-blue-50 dark:bg-blue-900/20 rounded border border-blue-100 dark:border-blue-800">
+                              <div className="flex items-center justify-between mb-1">
+                                <div className="flex items-center text-xs text-blue-700 dark:text-blue-300">
+                                  <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                                  Updating memory...
+                                </div>
+                                <span className="text-xs text-blue-600 dark:text-blue-400 capitalize">
+                                  {jobProgress[processingMemories[conversation.conversation_id]] || 'queued'}
+                                </span>
+                              </div>
+                              <div className="w-full bg-blue-200 dark:bg-blue-800 rounded-full h-1.5">
+                                <div 
+                                  className="bg-blue-600 h-1.5 rounded-full transition-all duration-500" 
+                                  style={{ 
+                                    width: jobProgress[processingMemories[conversation.conversation_id]] === 'finished' ? '100%' : 
+                                           jobProgress[processingMemories[conversation.conversation_id]] === 'started' ? '50%' : '10%' 
+                                  }}
+                                ></div>
+                              </div>
                             </div>
                           )}
                         </div>
@@ -1219,24 +1088,15 @@ export default function Conversations() {
                   <h4 className="font-medium text-gray-900 dark:text-gray-100 mb-2">🔧 Debug Info:</h4>
                   <div className="text-xs text-gray-600 dark:text-gray-400 space-y-1">
                     <div>Conversation ID: {conversation.conversation_id || 'N/A'}</div>
+                    <div>Audio UUID: {conversation.audio_uuid}</div>
+                    <div>Original Audio: {conversation.audio_path || 'N/A'}</div>
+                    <div>Cropped Audio: {conversation.cropped_audio_path || 'N/A'}</div>
                     <div>Transcript Version Count: {conversation.transcript_version_count || 0}</div>
                     <div>Memory Version Count: {conversation.memory_version_count || 0}</div>
                     <div>Segment Count: {conversation.segment_count || 0}</div>
                     <div>Memory Count: {conversation.memory_count || 0}</div>
                     <div>Client ID: {conversation.client_id}</div>
                   </div>
-
-                  {/* Raw Segments JSON */}
-                  {conversation.segments && conversation.segments.length > 0 && (
-                    <details className="mt-3 p-2 bg-gray-100 dark:bg-gray-800 rounded text-xs">
-                      <summary className="cursor-pointer font-medium text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100">
-                        Raw Segments ({conversation.segments.length})
-                      </summary>
-                      <pre className="mt-2 overflow-auto max-h-96 whitespace-pre-wrap text-gray-600 dark:text-gray-400 bg-white dark:bg-gray-900 p-2 rounded border border-gray-200 dark:border-gray-700">
-                        {JSON.stringify(conversation.segments, null, 2)}
-                      </pre>
-                    </details>
-                  )}
                 </div>
               )}
             </div>

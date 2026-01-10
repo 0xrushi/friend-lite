@@ -11,10 +11,13 @@ from typing import Any, Dict
 
 from advanced_omi_backend.controllers.queue_controller import (
     JOB_RESULT_TTL,
+    default_queue,
     memory_queue,
 )
-from advanced_omi_backend.models.job import JobPriority, async_job
+from advanced_omi_backend.models.job import BaseRQJob, JobPriority, async_job
+from advanced_omi_backend.services.memory.base import MemoryEntry
 from advanced_omi_backend.services.plugin_service import ensure_plugin_router
+from advanced_omi_backend.workers.conversation_jobs import generate_title_summary_job
 
 logger = logging.getLogger(__name__)
 
@@ -330,4 +333,23 @@ def enqueue_memory_processing(
     )
 
     logger.info(f"📥 RQ: Enqueued memory job {job.id} for conversation {conversation_id}")
+
+    # Also enqueue title/summary generation to ensure summaries reflect any transcript changes
+    try:
+        # Use a timestamp in job_id to avoid conflicts if re-run frequently
+        summary_job_id = f"title_summary_{conversation_id[:8]}_{int(time.time())}"
+        
+        default_queue.enqueue(
+            generate_title_summary_job,
+            conversation_id,
+            job_timeout=300,
+            result_ttl=JOB_RESULT_TTL,
+            job_id=summary_job_id,
+            description=f"Generate title and summary for conversation {conversation_id[:8]}",
+        )
+        logger.info(f"📥 RQ: Enqueued summary job {summary_job_id} for conversation {conversation_id}")
+    except Exception as e:
+        logger.error(f"Failed to enqueue summary job: {e}")
+        raise e
+
     return job

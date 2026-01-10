@@ -33,6 +33,7 @@ from .queue_routes import router as queue_router
 from .system_routes import router as system_router
 from .user_routes import router as user_router
 from .websocket_routes import router as websocket_router
+from .annotation_routes import router as annotation_router
 
 __all__ = [
    "admin_router",
@@ -50,4 +51,5 @@ __all__ = [
    "system_router",
    "user_router",
    "websocket_router",
+   "annotation_router",
 ]

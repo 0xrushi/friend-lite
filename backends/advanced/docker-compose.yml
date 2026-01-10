@@ -137,14 +137,21 @@ services:
     container_name: chronicle-annotation-cron
     env_file:
       - .env
+    volumes:
+      - ./src:/app/src
+      - ./data:/app/data
+      - ../../config:/app/config  # Mount entire config directory (includes config.yml, defaults.yml, plugins.yml)
     environment:
       - MONGODB_URI=mongodb://mongo:27017
+      - REDIS_URL=redis://redis:6379/0
       - DEV_MODE=${DEV_MODE:-false}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - LLM_PROVIDER=${LLM_PROVIDER:-openai}
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL}
     depends_on:
       mongo:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     restart: unless-stopped
     profiles:

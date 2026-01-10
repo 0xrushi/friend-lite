@@ -108,7 +108,7 @@ async def lifespan(app: FastAPI):
     try:
         from beanie import init_beanie
 
-        from advanced_omi_backend.models.annotation import Annotation
+        from advanced_omi_backend.models.annotation import Annotation, TranscriptAnnotation
         from advanced_omi_backend.models.audio_chunk import AudioChunkDocument
         from advanced_omi_backend.models.conversation import Conversation
         from advanced_omi_backend.models.user import User
@@ -116,7 +116,7 @@ async def lifespan(app: FastAPI):
 
         await init_beanie(
             database=config.db,
-            document_models=[User, Conversation, AudioChunkDocument, WaveformData, Annotation],
+            document_models=[User, Conversation, AudioChunkDocument, WaveformData, Annotation, TranscriptAnnotation],
         )
         application_logger.info("Beanie initialized for all document models")
     except Exception as e:
