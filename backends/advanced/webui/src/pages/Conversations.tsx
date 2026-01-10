@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { MessageSquare, RefreshCw, Calendar, User, Play, Pause, MoreVertical, RotateCcw, Zap, ChevronDown, ChevronUp, Trash2, Edit2, Check, X as XIcon, Loader2 } from 'lucide-react'
+import { MessageSquare, RefreshCw, Calendar, User, Play, Pause, MoreVertical, RotateCcw, Zap, ChevronDown, ChevronUp, Trash2, Check, X as XIcon, Loader2 } from 'lucide-react'
 import { conversationsApi, annotationsApi, queueApi, BACKEND_URL } from '../services/api'
 import ConversationVersionHeader from '../components/ConversationVersionHeader'
 import { getStorageKey } from '../utils/storage'
@@ -57,6 +57,49 @@ const SPEAKER_COLOR_PALETTE = [
   'text-teal-600 dark:text-teal-400',
   'text-cyan-600 dark:text-cyan-400',
 ];
+
+interface AutoResizingTextareaProps {
+  value: string
+  onChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void
+  onSave: () => void
+  onCancel: () => void
+}
+
+const AutoResizingTextarea = ({ value, onChange, onSave, onCancel }: AutoResizingTextareaProps) => {
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto'
+      textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px'
+    }
+  }, [value])
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      onSave()
+    }
+    if (e.key === 'Escape') {
+      onCancel()
+    }
+  }
+
+  return (
+    <div className="relative w-full ml-1">
+      <textarea
+        ref={textareaRef}
+        value={value}
+        onChange={onChange}
+        onKeyDown={handleKeyDown}
+        onBlur={onSave}
+        className="w-full bg-transparent border-none p-0 text-sm font-medium leading-relaxed text-gray-900 dark:text-gray-100 resize-none focus:ring-0 outline-none selection:bg-blue-100 dark:selection:bg-blue-900"
+        style={{ overflow: 'hidden' }}
+        autoFocus
+      />
+    </div>
+  )
+}
 
 export default function Conversations() {
   const [conversations, setConversations] = useState<Conversation[]>([])
@@ -970,52 +1013,27 @@ export default function Conversations() {
                                   </span>
                                   
                                   {isEditing ? (
-                                    <div className="flex items-center space-x-2 mt-1 w-full">
-                                      <textarea
-                                        value={editingSegment.text}
-                                        onChange={(e) => setEditingSegment({ ...editingSegment, text: e.target.value })}
-                                        className="w-full p-2 text-sm border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-                                        rows={2}
-                                        autoFocus
-                                      />
-                                      <div className="flex flex-col space-y-1">
-                                        <button
-                                          onClick={handleSaveAnnotation}
-                                          className="p-1 text-green-600 hover:bg-green-100 rounded dark:hover:bg-green-900/30"
-                                          title="Save correction"
-                                        >
-                                          <Check className="w-4 h-4" />
-                                        </button>
-                                        <button
-                                          onClick={() => setEditingSegment(null)}
-                                          className="p-1 text-red-600 hover:bg-red-100 rounded dark:hover:bg-red-900/30"
-                                          title="Cancel"
-                                        >
-                                          <XIcon className="w-4 h-4" />
-                                        </button>
-                                      </div>
-                                    </div>
+                                    <AutoResizingTextarea
+                                      value={editingSegment.text}
+                                      onChange={(e) => setEditingSegment({ ...editingSegment, text: e.target.value })}
+                                      onSave={handleSaveAnnotation}
+                                      onCancel={() => setEditingSegment(null)}
+                                    />
                                   ) : (
-                                    <span className="text-gray-900 dark:text-gray-100 ml-1">
+                                    <span 
+                                      onClick={() => conversation.conversation_id && setEditingSegment({
+                                        conversationId: conversation.conversation_id,
+                                        segmentIndex: index,
+                                        text: segment.text
+                                      })}
+                                      className={`text-gray-900 dark:text-gray-100 ml-1 rounded px-1 -ml-1 transition-colors ${
+                                        conversation.conversation_id ? 'cursor-text hover:bg-gray-100 dark:hover:bg-gray-700/50' : ''
+                                      }`}
+                                    >
                                       {segment.text}
                                     </span>
                                   )}
                                 </div>
-
-                                {/* Edit Button - Extreme Right */}
-                                {!isEditing && conversation.conversation_id && (
-                                  <button
-                                    onClick={() => setEditingSegment({
-                                      conversationId: conversation.conversation_id!,
-                                      segmentIndex: index,
-                                      text: segment.text
-                                    })}
-                                    className="ml-2 p-1 text-gray-400 hover:text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity"
-                                    title="Edit text"
-                                  >
-                                    <Edit2 className="w-3 h-3" />
-                                  </button>
-                                )}
                               </div>
                             </div>
                           )
