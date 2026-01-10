@@ -340,7 +340,7 @@ SPEAKER_SERVICE_URL=http://speaker-recognition:8085
 ### Common Endpoints
 - **GET /health**: Basic application health check
 - **GET /readiness**: Service dependency validation
-- **WS /ws_pcm**: Primary audio streaming endpoint (Wyoming protocol + raw PCM fallback)
+- **WS /ws**: Audio streaming endpoint with codec parameter (Wyoming protocol, supports pcm and opus codecs)
 - **GET /api/conversations**: User's conversations with transcripts
 - **GET /api/memories/search**: Semantic memory search with relevance scoring
 - **POST /auth/jwt/login**: Email-based login (returns JWT token)

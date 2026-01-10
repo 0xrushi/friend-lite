@@ -1,5 +1,7 @@
 """
-Deepgram WebSocket streaming consumer for real-time transcription.
+Generic streaming transcription consumer for real-time audio processing.
+
+Uses registry-driven transcription provider from config.yml (supports any streaming provider).
 
 Reads from: audio:stream:* streams
 Publishes interim to: Redis Pub/Sub channel transcription:interim:{session_id}
@@ -24,22 +26,24 @@ from advanced_omi_backend.client_manager import get_client_owner_async
 logger = logging.getLogger(__name__)
 
 
-class DeepgramStreamingConsumer:
+class StreamingTranscriptionConsumer:
     """
-    Deepgram streaming consumer for real-time WebSocket transcription.
+    Generic streaming transcription consumer using registry-driven providers.
 
     - Discovers audio:stream:* streams dynamically
     - Uses Redis consumer groups for fan-out (allows batch workers to process same stream)
-    - Starts WebSocket connections to Deepgram per stream
+    - Starts WebSocket connections using configured provider (from config.yml)
     - Sends audio immediately (no buffering)
     - Publishes interim results to Redis Pub/Sub for client display
     - Publishes final results to Redis Streams for storage
     - Triggers plugins only on final results
+
+    Supported providers (via config.yml): Any streaming STT service with WebSocket API
     """
 
     def __init__(self, redis_client: redis.Redis, plugin_router: Optional[PluginRouter] = None):
         """
-        Initialize Deepgram streaming consumer.
+        Initialize streaming transcription consumer.
 
         Args:
             redis_client: Connected Redis client
@@ -235,22 +239,30 @@ class DeepgramStreamingConsumer:
         try:
             stream_name = f"transcription:results:{session_id}"
 
-            # Prepare result entry
+            # Prepare result entry - MUST match aggregator's expected schema
+            # All keys and values must be bytes to match consumer.py format
             entry = {
-                "message_id": chunk_id or f"final_{int(time.time() * 1000)}",
-                "text": result.get("text", ""),
-                "confidence": result.get("confidence", 0.0),
-                "provider": "deepgram-stream",
-                "timestamp": time.time(),
-                "words": json.dumps(result.get("words", [])),
-                "segments": json.dumps(result.get("segments", [])),
-                "is_final": "true"
+                b"text": result.get("text", "").encode(),
+                b"chunk_id": (chunk_id or f"final_{int(time.time() * 1000)}").encode(),
+                b"provider": b"deepgram-stream",
+                b"confidence": str(result.get("confidence", 0.0)).encode(),
+                b"processing_time": b"0.0",  # Streaming has minimal processing time
+                b"timestamp": str(time.time()).encode(),
             }
+
+            # Add optional JSON fields
+            words = result.get("words", [])
+            if words:
+                entry[b"words"] = json.dumps(words).encode()
+
+            segments = result.get("segments", [])
+            if segments:
+                entry[b"segments"] = json.dumps(segments).encode()
 
             # Write to Redis Stream
             await self.redis_client.xadd(stream_name, entry)
 
-            logger.info(f"💾 Stored final result to {stream_name}: {entry['text'][:50]}...")
+            logger.info(f"💾 Stored final result to {stream_name}: {result.get('text', '')[:50]}...")
 
         except Exception as e:
             logger.error(f"Error storing final result for {session_id}: {e}", exc_info=True)

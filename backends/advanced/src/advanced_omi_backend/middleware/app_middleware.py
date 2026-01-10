@@ -56,8 +56,6 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         "/auth/jwt/logout",
         "/auth/cookie/logout",
         "/ws",
-        "/ws_omi",
-        "/ws_pcm",
         "/mcp",
         "/health",
         "/auth/health",

@@ -344,7 +344,7 @@ async def transcribe_full_audio_job(
         for seg in segments:
             # Use identified_as if available (from speaker recognition), otherwise use speaker label
             speaker_id = seg.get("identified_as") or seg.get("speaker", "Unknown")
-            # Convert speaker ID to string if it's an integer (Deepgram returns int speaker IDs)
+            # Convert speaker ID to string if it's an integer (some providers return int speaker IDs)
             speaker_name = f"Speaker {speaker_id}" if isinstance(speaker_id, int) else speaker_id
 
             speaker_segments.append(
@@ -357,8 +357,8 @@ async def transcribe_full_audio_job(
                 )
             )
     elif transcript_text:
-        # NOTE: Parakeet falls here.
-        # If no segments but we have text, create a single segment from the full transcript
+        # Fallback: If no segments but we have text, create a single segment from the full transcript
+        # This handles providers that don't support segmentation
         # Calculate duration from words if available, otherwise estimate from audio
         start_time_seg = 0.0
         end_time_seg = 0.0

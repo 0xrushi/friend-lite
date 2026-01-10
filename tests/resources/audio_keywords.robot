@@ -111,11 +111,3 @@ Upload Audio File And Wait For Memory
     Log    Successfully extracted ${memory_count} memories
 
     RETURN    ${conversation}    ${memories}
-
-
-Get Cropped Audio Info
-    [Documentation]    Get cropped audio information for a conversation
-    [Arguments]     ${audio_uuid}
-
-    ${response}=    GET On Session    api    /api/conversations/${audio_uuid}/cropped    headers=${headers}
-    RETURN    ${response.json()}[cropped_audios]    

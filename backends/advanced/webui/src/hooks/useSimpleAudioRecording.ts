@@ -168,13 +168,13 @@ export const useSimpleAudioRecording = (): SimpleAudioRecordingReturn => {
     if (BACKEND_URL && BACKEND_URL.startsWith('http')) {
       // BACKEND_URL is a full URL (e.g., http://localhost:8000)
       const backendHost = BACKEND_URL.replace(/^https?:\/\//, '')
-      wsUrl = `${wsProtocol}//${backendHost}/ws_pcm?token=${token}&device_name=webui-simple-recorder`
+      wsUrl = `${wsProtocol}//${backendHost}/ws?codec=pcm&token=${token}&device_name=webui-recorder`
     } else if (BACKEND_URL && BACKEND_URL !== '') {
       // BACKEND_URL is a path (e.g., /prod)
-      wsUrl = `${wsProtocol}//${window.location.host}${BACKEND_URL}/ws_pcm?token=${token}&device_name=webui-simple-recorder`
+      wsUrl = `${wsProtocol}//${window.location.host}${BACKEND_URL}/ws?codec=pcm&token=${token}&device_name=webui-recorder`
     } else {
       // BACKEND_URL is empty (same origin)
-      wsUrl = `${wsProtocol}//${window.location.host}/ws_pcm?token=${token}&device_name=webui-simple-recorder`
+      wsUrl = `${wsProtocol}//${window.location.host}/ws?codec=pcm&token=${token}&device_name=webui-recorder`
     }
     
     return new Promise<WebSocket>((resolve, reject) => {

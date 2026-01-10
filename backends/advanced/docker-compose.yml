@@ -117,36 +117,6 @@ services:
         condition: service_started
     restart: unless-stopped
 
-  # Deepgram WebSocket streaming worker
-  # Real-time transcription worker that processes audio via Deepgram's WebSocket API
-  # Publishes interim results to Redis Pub/Sub for client display
-  # Publishes final results to Redis Streams for storage
-  # Triggers plugins on final results only
-  deepgram-streaming-worker:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: prod  # Use prod stage without test dependencies
-    command: >
-      uv run python -m advanced_omi_backend.workers.audio_stream_deepgram_streaming_worker
-    env_file:
-      - .env
-    volumes:
-      - ./src:/app/src
-      - ./data:/app/data
-      - ../../config/config.yml:/app/config.yml
-      - ../../config/plugins.yml:/app/plugins.yml
-    environment:
-      - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY}
-      - REDIS_URL=redis://redis:6379/0
-      - HA_TOKEN=${HA_TOKEN}
-    depends_on:
-      redis:
-        condition: service_healthy
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    restart: unless-stopped
-
   webui:
     build:
       context: ./webui

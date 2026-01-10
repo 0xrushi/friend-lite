@@ -5,6 +5,7 @@ defaults:
   embedding: openai-embed
   llm: openai-llm
   stt: stt-deepgram
+  stt_stream: stt-deepgram-stream
   vector_store: vs-qdrant
 memory:
   extraction:
@@ -82,6 +83,37 @@ models:
           text: results.channels[0].alternatives[0].transcript
           words: results.channels[0].alternatives[0].words
         type: json
+- api_family: websocket
+  api_key: ${DEEPGRAM_API_KEY:-}
+  description: Deepgram Nova 3 (streaming)
+  model_provider: deepgram
+  model_type: stt_stream
+  model_url: wss://api.deepgram.com/v1/listen
+  name: stt-deepgram-stream
+  operations:
+    chunk_header:
+      message: {}
+    end:
+      message:
+        type: CloseStream
+    expect:
+      extract:
+        segments: []
+        text: channel.alternatives[0].transcript
+        words: channel.alternatives[0].words
+      final_type: Results
+      interim_type: Results
+    query:
+      channels: 1
+      encoding: linear16
+      interim_results: true
+      language: multi
+      model: nova-3
+      punctuate: true
+      sample_rate: 16000
+      smart_format: true
+    start:
+      message: {}
 speaker_recognition:
   enabled: false
   timeout: 60

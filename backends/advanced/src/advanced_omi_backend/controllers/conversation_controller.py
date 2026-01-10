@@ -103,7 +103,6 @@ async def get_conversation(conversation_id: str, user: User):
             "user_id": conversation.user_id,
             "client_id": conversation.client_id,
             "audio_path": conversation.audio_path,
-            "cropped_audio_path": conversation.cropped_audio_path,
             "created_at": conversation.created_at.isoformat() if conversation.created_at else None,
             "deleted": conversation.deleted,
             "deletion_reason": conversation.deletion_reason,
@@ -154,7 +153,6 @@ async def get_conversations(user: User):
                 "user_id": conv.user_id,
                 "client_id": conv.client_id,
                 "audio_path": conv.audio_path,
-                "cropped_audio_path": conv.cropped_audio_path,
                 "created_at": conv.created_at.isoformat() if conv.created_at else None,
                 "deleted": conv.deleted,
                 "deletion_reason": conv.deletion_reason,
@@ -210,7 +208,6 @@ async def delete_conversation(conversation_id: str, user: User):
 
         # Get file paths before deletion
         audio_path = conversation.audio_path
-        cropped_audio_path = conversation.cropped_audio_path
         audio_uuid = conversation.audio_uuid
         client_id = conversation.client_id
 
@@ -236,17 +233,6 @@ async def delete_conversation(conversation_id: str, user: User):
                     logger.info(f"Deleted audio file: {full_audio_path}")
             except Exception as e:
                 logger.warning(f"Failed to delete audio file {audio_path}: {e}")
-
-        if cropped_audio_path:
-            try:
-                # Construct full path to cropped audio file
-                full_cropped_path = Path("/app/audio_chunks") / cropped_audio_path
-                if full_cropped_path.exists():
-                    full_cropped_path.unlink()
-                    deleted_files.append(str(full_cropped_path))
-                    logger.info(f"Deleted cropped audio file: {full_cropped_path}")
-            except Exception as e:
-                logger.warning(f"Failed to delete cropped audio file {cropped_audio_path}: {e}")
 
         logger.info(f"Successfully deleted conversation {conversation_id} for user {user.user_id}")
 
@@ -321,10 +307,9 @@ async def reprocess_transcript(conversation_id: str, user: User):
         import uuid
         version_id = str(uuid.uuid4())
 
-        # Enqueue job chain with RQ (transcription -> speaker recognition -> cropping -> memory)
+        # Enqueue job chain with RQ (transcription -> speaker recognition -> memory)
         from advanced_omi_backend.workers.transcription_jobs import transcribe_full_audio_job
         from advanced_omi_backend.workers.speaker_jobs import recognise_speakers_job
-        from advanced_omi_backend.workers.audio_jobs import process_cropping_job
         from advanced_omi_backend.workers.memory_jobs import process_memory_job
         from advanced_omi_backend.controllers.queue_controller import transcription_queue, memory_queue, default_queue, JOB_RESULT_TTL
 
@@ -361,33 +346,19 @@ async def reprocess_transcript(conversation_id: str, user: User):
         )
         logger.info(f"📥 RQ: Enqueued speaker recognition job {speaker_job.id} (depends on {transcript_job.id})")
 
-        # Job 3: Audio cropping (depends on speaker recognition)
-        cropping_job = default_queue.enqueue(
-            process_cropping_job,
-            conversation_id,
-            str(full_audio_path),
-            depends_on=speaker_job,
-            job_timeout=300,
-            result_ttl=JOB_RESULT_TTL,
-            job_id=f"crop_{conversation_id[:8]}",
-            description=f"Crop audio for {conversation_id[:8]}",
-            meta={'audio_uuid': audio_uuid, 'conversation_id': conversation_id}
-        )
-        logger.info(f"📥 RQ: Enqueued audio cropping job {cropping_job.id} (depends on {speaker_job.id})")
-
-        # Job 4: Extract memories (depends on cropping)
+        # Job 3: Extract memories (depends on speaker recognition)
         # Note: redis_client is injected by @async_job decorator, don't pass it directly
         memory_job = memory_queue.enqueue(
             process_memory_job,
             conversation_id,
-            depends_on=cropping_job,
+            depends_on=speaker_job,
             job_timeout=1800,
             result_ttl=JOB_RESULT_TTL,
             job_id=f"memory_{conversation_id[:8]}",
             description=f"Extract memories for {conversation_id[:8]}",
             meta={'audio_uuid': audio_uuid, 'conversation_id': conversation_id}
         )
-        logger.info(f"📥 RQ: Enqueued memory job {memory_job.id} (depends on {cropping_job.id})")
+        logger.info(f"📥 RQ: Enqueued memory job {memory_job.id} (depends on {speaker_job.id})")
 
         job = transcript_job  # For backward compatibility with return value
         logger.info(f"Created transcript reprocessing job {job.id} (version: {version_id}) for conversation {conversation_id}")

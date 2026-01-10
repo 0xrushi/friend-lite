@@ -236,8 +236,8 @@ done
 print_info "Building workers..."
 docker compose -f docker-compose-test.yml build workers-test
 
-print_info "Starting RQ workers and Deepgram streaming worker..."
-docker compose -f docker-compose-test.yml up -d workers-test deepgram-streaming-worker-test
+print_info "Starting RQ workers..."
+docker compose -f docker-compose-test.yml up -d workers-test
 
 # Wait for workers container
 print_info "Waiting for workers container (up to 30s)..."
@@ -273,34 +273,20 @@ for i in {1..30}; do
     sleep 2
 done
 
-# Verify batch Deepgram worker is running
-print_info "Verifying Deepgram batch worker process..."
-BATCH_WORKER_CHECK=$(docker compose -f docker-compose-test.yml exec -T workers-test ps aux | grep -c "audio_stream_deepgram_worker" || echo "0" | tr -d '\n\r')
-BATCH_WORKER_CHECK=${BATCH_WORKER_CHECK//[^0-9]/}  # Remove non-numeric characters
-if [ -n "$BATCH_WORKER_CHECK" ] && [ "$BATCH_WORKER_CHECK" -gt 0 ]; then
-    print_success "Deepgram batch worker process is running"
+# Verify unified audio stream worker is running
+print_info "Verifying unified audio stream worker process..."
+STREAM_WORKER_CHECK=$(docker compose -f docker-compose-test.yml exec -T workers-test ps aux | grep -c "audio_stream_worker" || echo "0" | tr -d '\n\r')
+STREAM_WORKER_CHECK=${STREAM_WORKER_CHECK//[^0-9]/}  # Remove non-numeric characters
+if [ -n "$STREAM_WORKER_CHECK" ] && [ "$STREAM_WORKER_CHECK" -gt 0 ]; then
+    print_success "Unified audio stream worker process is running"
 else
-    print_warning "Deepgram batch worker process not found - checking logs..."
-    docker compose -f docker-compose-test.yml logs --tail=30 workers-test | grep -i "deepgram" || true
+    print_warning "Audio stream worker process not found - checking logs..."
+    docker compose -f docker-compose-test.yml logs --tail=30 workers-test | grep -i "audio.*stream.*worker" || true
 fi
 
 # Check Redis consumer groups registration
 print_info "Checking Redis Streams consumer groups..."
 docker compose -f docker-compose-test.yml exec -T redis-test redis-cli KEYS "audio:stream:*" 2>/dev/null || true
-
-# Wait for streaming worker to start
-print_info "Waiting for Deepgram streaming worker (up to 30s)..."
-for i in {1..15}; do
-    if docker compose -f docker-compose-test.yml ps deepgram-streaming-worker-test | grep -q "Up"; then
-        print_success "Deepgram streaming worker is running"
-        break
-    fi
-    if [ $i -eq 15 ]; then
-        print_warning "Deepgram streaming worker not detected (may still start async)"
-        break
-    fi
-    sleep 2
-done
 
 print_success "All services ready!"
 

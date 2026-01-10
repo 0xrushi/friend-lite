@@ -15,7 +15,6 @@ interface Conversation {
   segment_count?: number
   memory_count?: number
   audio_path?: string
-  cropped_audio_path?: string
   duration_seconds?: number
   has_memory?: boolean
   transcript?: string
@@ -170,21 +169,11 @@ function ConversationCard({ conversation, formatDuration }: ConversationCardProp
             )}
           </div>
 
-          {/* Audio Paths */}
-          {(conversation.audio_path || conversation.cropped_audio_path) && (
-            <div className="text-xs space-y-1">
-              {conversation.audio_path && (
-                <div>
-                  <span className="font-medium text-gray-700">Audio:</span>{' '}
-                  <span className="text-gray-600 font-mono">{conversation.audio_path}</span>
-                </div>
-              )}
-              {conversation.cropped_audio_path && (
-                <div>
-                  <span className="font-medium text-gray-700">Cropped:</span>{' '}
-                  <span className="text-gray-600 font-mono">{conversation.cropped_audio_path}</span>
-                </div>
-              )}
+          {/* Audio Path */}
+          {conversation.audio_path && (
+            <div className="text-xs">
+              <span className="font-medium text-gray-700">Audio:</span>{' '}
+              <span className="text-gray-600 font-mono">{conversation.audio_path}</span>
             </div>
           )}
         </div>

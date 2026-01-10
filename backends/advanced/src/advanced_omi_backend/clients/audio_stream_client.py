@@ -65,7 +65,7 @@ class AudioStreamClient:
         base_url: str,
         token: str,
         device_name: str = "python-client",
-        endpoint: str = "ws_pcm",
+        endpoint: str = "ws?codec=pcm",
     ):
         """Initialize the audio stream client.
 
@@ -73,7 +73,7 @@ class AudioStreamClient:
             base_url: Base URL of the backend (e.g., "http://localhost:8000")
             token: JWT authentication token
             device_name: Device name for client identification
-            endpoint: WebSocket endpoint ("ws_pcm" or "ws_omi")
+            endpoint: WebSocket endpoint ("ws?codec=pcm" or "ws?codec=opus")
         """
         self.base_url = base_url
         self.token = token
@@ -87,7 +87,9 @@ class AudioStreamClient:
     def ws_url(self) -> str:
         """Build WebSocket URL from base URL."""
         url = self.base_url.replace("http://", "ws://").replace("https://", "wss://")
-        return f"{url}/{self.endpoint}?token={self.token}&device_name={self.device_name}"
+        # Check if endpoint already has query params
+        separator = "&" if "?" in self.endpoint else "?"
+        return f"{url}/{self.endpoint}{separator}token={self.token}&device_name={self.device_name}"
 
     async def connect(self, wait_for_ready: bool = True) -> WebSocketClientProtocol:
         """Connect to the WebSocket endpoint.
@@ -105,8 +107,8 @@ class AudioStreamClient:
         self.ws = await websockets.connect(self.ws_url)
         logger.info("WebSocket connected")
 
-        if wait_for_ready and self.endpoint == "ws_pcm":
-            # PCM endpoint sends "ready" message after auth (line 261-268 in websocket_controller.py)
+        if wait_for_ready and "codec=pcm" in self.endpoint:
+            # PCM codec sends "ready" message after auth (line 261-268 in websocket_controller.py)
             ready_msg = await self.ws.recv()
             ready = json.loads(ready_msg.strip() if isinstance(ready_msg, str) else ready_msg.decode().strip())
             if ready.get("type") != "ready":

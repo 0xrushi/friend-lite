@@ -113,9 +113,12 @@ def get_jobs(
     Returns:
         Dict with jobs list and pagination metadata matching frontend expectations
     """
+    logger.info(f"🔍 DEBUG get_jobs: Filtering - queue_name={queue_name}, job_type={job_type}, client_id={client_id}")
     all_jobs = []
+    seen_job_ids = set()  # Track which job IDs we've already processed to avoid duplicates
 
     queues_to_check = [queue_name] if queue_name else QUEUE_NAMES
+    logger.info(f"🔍 DEBUG get_jobs: Checking queues: {queues_to_check}")
 
     for qname in queues_to_check:
         queue = get_queue(qname)
@@ -131,6 +134,11 @@ def get_jobs(
 
         for job_ids, status in registries:
             for job_id in job_ids:
+                # Skip if we've already processed this job_id (prevents duplicates across registries)
+                if job_id in seen_job_ids:
+                    continue
+                seen_job_ids.add(job_id)
+
                 try:
                     job = Job.fetch(job_id, connection=redis_conn)
 
@@ -140,15 +148,22 @@ def get_jobs(
                     # Extract just the function name (e.g., "listen_for_speech_job" from "module.listen_for_speech_job")
                     func_name = job.func_name.split('.')[-1] if job.func_name else "unknown"
 
+                    # Debug: Log job details before filtering
+                    logger.debug(f"🔍 DEBUG get_jobs: Job {job_id} - func_name={func_name}, full_func_name={job.func_name}, meta_client_id={job.meta.get('client_id', '') if job.meta else ''}, status={status}")
+
                     # Apply job_type filter
                     if job_type and job_type not in func_name:
+                        logger.debug(f"🔍 DEBUG get_jobs: Filtered out {job_id} - job_type '{job_type}' not in func_name '{func_name}'")
                         continue
 
                     # Apply client_id filter (partial match in meta)
                     if client_id:
                         job_client_id = job.meta.get("client_id", "") if job.meta else ""
                         if client_id not in job_client_id:
+                            logger.debug(f"🔍 DEBUG get_jobs: Filtered out {job_id} - client_id '{client_id}' not in job_client_id '{job_client_id}'")
                             continue
+
+                    logger.debug(f"🔍 DEBUG get_jobs: Including job {job_id} in results")
 
                     all_jobs.append({
                         "job_id": job.id,
@@ -181,6 +196,8 @@ def get_jobs(
     total_jobs = len(all_jobs)
     paginated_jobs = all_jobs[offset:offset + limit]
     has_more = (offset + limit) < total_jobs
+
+    logger.info(f"🔍 DEBUG get_jobs: Found {total_jobs} matching jobs (returning {len(paginated_jobs)} after pagination)")
 
     return {
         "jobs": paginated_jobs,
@@ -296,6 +313,7 @@ def start_streaming_jobs(
         meta={'audio_uuid': session_id, 'client_id': client_id, 'session_level': True}
     )
     logger.info(f"📥 RQ: Enqueued speech detection job {speech_job.id}")
+    logger.info(f"🔍 DEBUG: Created job - ID={speech_job.id}, func_name={speech_job.func_name}, client_id={client_id}, meta={speech_job.meta}")
 
     # Store job ID for cleanup (keyed by client_id for easy WebSocket cleanup)
     try:
@@ -319,6 +337,7 @@ def start_streaming_jobs(
         meta={'audio_uuid': session_id, 'session_level': True}  # Mark as session-level job
     )
     logger.info(f"📥 RQ: Enqueued audio persistence job {audio_job.id} on audio queue")
+    logger.info(f"🔍 DEBUG: Created audio job - ID={audio_job.id}, func_name={audio_job.func_name}, client_id={client_id}, meta={audio_job.meta}")
 
     return {
         'speech_detection': speech_job.id,
@@ -341,10 +360,9 @@ def start_post_conversation_jobs(
 
     This creates the standard processing chain after a conversation is created:
     1. [Optional] Transcription job - Batch transcription (if post_transcription=True)
-    2. Audio cropping job - Removes silence from audio
-    3. Speaker recognition job - Identifies speakers in audio
-    4. Memory extraction job - Extracts memories from conversation (parallel)
-    5. Title/summary generation job - Generates title and summary (parallel)
+    2. Speaker recognition job - Identifies speakers in audio
+    3. Memory extraction job - Extracts memories from conversation (parallel)
+    4. Title/summary generation job - Generates title and summary (parallel)
 
     Args:
         conversation_id: Conversation identifier
@@ -354,14 +372,13 @@ def start_post_conversation_jobs(
         post_transcription: If True, run batch transcription step (for uploads)
                            If False, skip transcription (streaming already has it)
         transcript_version_id: Transcript version ID (auto-generated if None)
-        depends_on_job: Optional job dependency for cropping job
+        depends_on_job: Optional job dependency for first job
 
     Returns:
         Dict with job IDs (transcription will be None if post_transcription=False)
     """
     from advanced_omi_backend.workers.transcription_jobs import transcribe_full_audio_job
     from advanced_omi_backend.workers.speaker_jobs import recognise_speakers_job
-    from advanced_omi_backend.workers.audio_jobs import process_cropping_job
     from advanced_omi_backend.workers.memory_jobs import process_memory_job
     from advanced_omi_backend.workers.conversation_jobs import generate_title_summary_job
 
@@ -392,29 +409,11 @@ def start_post_conversation_jobs(
         meta=job_meta
     )
     logger.info(f"📥 RQ: Enqueued transcription job {transcription_job.id}, meta={transcription_job.meta}")
-    crop_depends_on = transcription_job
 
-    # Step 2: Audio cropping job (depends on transcription if it ran, otherwise depends_on_job)
-    crop_job_id = f"crop_{conversation_id[:12]}"
-    logger.info(f"🔍 DEBUG: Creating crop job with job_id={crop_job_id}, conversation_id={conversation_id[:12]}, audio_uuid={audio_uuid[:12]}")
+    # Speaker recognition depends on transcription (no cropping step)
+    speaker_depends_on = transcription_job
 
-    cropping_job = default_queue.enqueue(
-        process_cropping_job,
-        conversation_id,
-        audio_file_path,
-        job_timeout=300,  # 5 minutes
-        result_ttl=JOB_RESULT_TTL,
-        depends_on=crop_depends_on,
-        job_id=crop_job_id,
-        description=f"Crop audio for conversation {conversation_id[:8]}",
-        meta=job_meta
-    )
-    logger.info(f"📥 RQ: Enqueued cropping job {cropping_job.id}, meta={cropping_job.meta}")
-
-    # Speaker recognition depends on cropping
-    speaker_depends_on = cropping_job
-
-    # Step 3: Speaker recognition job
+    # Step 2: Speaker recognition job
     speaker_job_id = f"speaker_{conversation_id[:12]}"
     logger.info(f"🔍 DEBUG: Creating speaker job with job_id={speaker_job_id}, conversation_id={conversation_id[:12]}, audio_uuid={audio_uuid[:12]}")
 
@@ -434,7 +433,7 @@ def start_post_conversation_jobs(
     )
     logger.info(f"📥 RQ: Enqueued speaker recognition job {speaker_job.id}, meta={speaker_job.meta} (depends on {speaker_depends_on.id})")
 
-    # Step 4: Memory extraction job (parallel with title/summary)
+    # Step 3: Memory extraction job (parallel with title/summary)
     memory_job_id = f"memory_{conversation_id[:12]}"
     logger.info(f"🔍 DEBUG: Creating memory job with job_id={memory_job_id}, conversation_id={conversation_id[:12]}, audio_uuid={audio_uuid[:12]}")
 
@@ -450,7 +449,7 @@ def start_post_conversation_jobs(
     )
     logger.info(f"📥 RQ: Enqueued memory extraction job {memory_job.id}, meta={memory_job.meta} (depends on {speaker_job.id})")
 
-    # Step 5: Title/summary generation job (parallel with memory, independent)
+    # Step 4: Title/summary generation job (parallel with memory, independent)
     # This ensures conversations always get titles/summaries even if memory job fails
     title_job_id = f"title_summary_{conversation_id[:12]}"
     logger.info(f"🔍 DEBUG: Creating title/summary job with job_id={title_job_id}, conversation_id={conversation_id[:12]}, audio_uuid={audio_uuid[:12]}")
@@ -468,7 +467,6 @@ def start_post_conversation_jobs(
     logger.info(f"📥 RQ: Enqueued title/summary job {title_summary_job.id}, meta={title_summary_job.meta} (depends on {speaker_job.id})")
 
     return {
-        'cropping': cropping_job.id,
         'transcription': transcription_job.id if transcription_job else None,
         'speaker_recognition': speaker_job.id,
         'memory': memory_job.id,

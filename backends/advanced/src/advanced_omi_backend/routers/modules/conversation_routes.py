@@ -42,14 +42,6 @@ async def get_conversation_detail(
     return await conversation_controller.get_conversation(conversation_id, current_user)
 
 
-@router.get("/{audio_uuid}/cropped")
-async def get_cropped_audio_info(
-    audio_uuid: str, current_user: User = Depends(current_active_user)
-):
-    """Get cropped audio information for a conversation. Users can only access their own conversations."""
-    return await audio_controller.get_cropped_audio_info(audio_uuid, current_user)
-
-
 # New reprocessing endpoints
 @router.post("/{conversation_id}/reprocess-transcript")
 async def reprocess_transcript(

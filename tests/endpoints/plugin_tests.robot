@@ -34,8 +34,9 @@ Plugin Mock Config Creation
     [Tags]    infra
 
     # Test single event subscription
+    ${single_subscription}=    Create List    transcript.streaming
     ${config}=    Create Mock Plugin Config
-    ...    subscriptions=["transcript.streaming"]
+    ...    subscriptions=${single_subscription}
     Verify Plugin Config Format    ${config}
 
     ${subscriptions}=    Get From Dictionary    ${config}    subscriptions
@@ -43,8 +44,9 @@ Plugin Mock Config Creation
     ...    msg=Plugin should subscribe to transcript.streaming event
 
     # Test multiple event subscriptions
+    ${subscriptions_list}=    Create List    transcript.streaming    transcript.batch    conversation.complete
     ${multi_config}=    Create Mock Plugin Config
-    ...    subscriptions=["transcript.streaming", "transcript.batch", "conversation.complete"]
+    ...    subscriptions=${subscriptions_list}
     ${multi_subs}=    Get From Dictionary    ${multi_config}    subscriptions
     ${length}=    Get Length    ${multi_subs}
     Should Be Equal As Integers    ${length}    3
@@ -55,8 +57,9 @@ Plugin Mock With Wake Word Trigger
     [Tags]    infra
 
     ${wake_words}=    Create List    hey vivi    vivi    hey jarvis
+    ${wake_word_subscriptions}=    Create List    transcript.streaming
     ${config}=    Create Mock Plugin Config
-    ...    subscriptions=["transcript.streaming"]
+    ...    subscriptions=${wake_word_subscriptions}
     ...    trigger_type=wake_word
     ...    wake_words=${wake_words}
 

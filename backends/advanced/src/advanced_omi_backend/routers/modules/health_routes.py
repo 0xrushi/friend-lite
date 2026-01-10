@@ -139,7 +139,6 @@ async def health_check():
             "chunk_dir": str(os.getenv("CHUNK_DIR", "./audio_chunks")),
             "active_clients": get_client_manager().get_client_count(),
             "new_conversation_timeout_minutes": float(os.getenv("NEW_CONVERSATION_TIMEOUT_MINUTES", "1.5")),
-            "audio_cropping_enabled": os.getenv("AUDIO_CROPPING_ENABLED", "true").lower() == "true",
             "llm_provider": (_llm_def.model_provider if _llm_def else None),
             "llm_model": (_llm_def.model_name if _llm_def else None),
             "llm_base_url": (_llm_def.model_url if _llm_def else None),

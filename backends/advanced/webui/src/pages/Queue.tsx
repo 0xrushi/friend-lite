@@ -516,7 +516,7 @@ const Queue: React.FC = () => {
       borderColor = 'border-green-600';
     }
     // Audio processing - orange shades
-    else if (type.includes('audio') || type.includes('persist') || type.includes('cropping')) {
+    else if (type.includes('audio') || type.includes('persist')) {
       bgColor = 'bg-orange-500';
       borderColor = 'border-orange-600';
     }
@@ -637,22 +637,6 @@ const Queue: React.FC = () => {
     if (durationMs < 60000) return `${(durationMs / 1000).toFixed(1)}s`;
     if (durationMs < 3600000) return `${Math.floor(durationMs / 60000)}m ${Math.floor((durationMs % 60000) / 1000)}s`;
     return `${Math.floor(durationMs / 3600000)}h ${Math.floor((durationMs % 3600000) / 60000)}m`;
-  };
-
-  // Format seconds to readable time format (e.g., 3m34s or 1h22m32s)
-  const formatSeconds = (seconds: number): string => {
-    if (seconds < 60) {
-      return `${Math.floor(seconds)}s`;
-    } else if (seconds < 3600) {
-      const mins = Math.floor(seconds / 60);
-      const secs = Math.floor(seconds % 60);
-      return `${mins}m${secs}s`;
-    } else {
-      const hours = Math.floor(seconds / 3600);
-      const mins = Math.floor((seconds % 3600) / 60);
-      const secs = Math.floor(seconds % 60);
-      return `${hours}h${mins}m${secs}s`;
-    }
   };
 
   const toggleSessionExpansion = (sessionId: string) => {
@@ -2478,22 +2462,6 @@ const Queue: React.FC = () => {
                         {selectedJob.meta.processing_time !== undefined && (
                           <div className="text-sm">
                             <span className="font-medium">Processing Time:</span> {selectedJob.meta.processing_time.toFixed(1)}s
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {/* process_cropping_job formatted metadata */}
-                    {selectedJob.func_name?.includes('process_cropping_job') && (
-                      <div className="bg-green-50 p-3 rounded mb-3 space-y-2">
-                        {selectedJob.meta.cropped_duration_seconds !== undefined && (
-                          <div className="text-sm">
-                            <span className="font-medium">Cropped Duration:</span> {formatSeconds(selectedJob.meta.cropped_duration_seconds)}
-                          </div>
-                        )}
-                        {selectedJob.meta.segments_cropped !== undefined && (
-                          <div className="text-sm">
-                            <span className="font-medium">Segments Cropped:</span> {selectedJob.meta.segments_cropped}
                           </div>
                         )}
                       </div>

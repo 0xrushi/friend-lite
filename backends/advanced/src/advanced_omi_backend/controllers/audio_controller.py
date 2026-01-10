@@ -219,14 +219,13 @@ async def upload_and_process_audio_files(
         )
 
 
-async def get_conversation_audio_path(conversation_id: str, user: User, cropped: bool = False) -> Path:
+async def get_conversation_audio_path(conversation_id: str, user: User) -> Path:
     """
     Get the file path for a conversation's audio file.
 
     Args:
         conversation_id: The conversation ID
         user: The authenticated user
-        cropped: If True, return cropped audio path; if False, return original audio path
 
     Returns:
         Path object for the audio file
@@ -244,12 +243,11 @@ async def get_conversation_audio_path(conversation_id: str, user: User, cropped:
     if not user.is_superuser and conversation.user_id != str(user.user_id):
         raise ValueError("Access denied")
 
-    # Get the appropriate audio path
-    audio_path = conversation.cropped_audio_path if cropped else conversation.audio_path
+    # Get the audio path
+    audio_path = conversation.audio_path
 
     if not audio_path:
-        audio_type = "cropped" if cropped else "original"
-        raise ValueError(f"No {audio_type} audio file available for this conversation")
+        raise ValueError(f"No audio file available for this conversation")
 
     # Build full file path
     from advanced_omi_backend.app_config import get_audio_chunk_dir
@@ -261,39 +259,3 @@ async def get_conversation_audio_path(conversation_id: str, user: User, cropped:
         raise ValueError("Audio file not found on disk")
 
     return file_path
-
-
-async def get_cropped_audio_info(audio_uuid: str, user: User):
-    """
-    Get audio cropping metadata from the conversation.
-
-    This is an audio service operation that retrieves cropping-related metadata
-    such as speech segments, cropped audio path, and cropping timestamps.
-
-    Used for: Checking cropping status and retrieving audio processing details.
-    Works with: Conversation model.
-    """
-    try:
-        # Find the conversation
-        conversation = await Conversation.find_one(Conversation.audio_uuid == audio_uuid)
-        if not conversation:
-            return JSONResponse(status_code=404, content={"error": "Conversation not found"})
-
-        # Check ownership for non-admin users
-        if not user.is_superuser:
-            if conversation.user_id != str(user.user_id):
-                return JSONResponse(status_code=404, content={"error": "Conversation not found"})
-
-        return {
-            "audio_uuid": audio_uuid,
-            "cropped_audio_path": conversation.cropped_audio_path,
-            "speech_segments": conversation.speech_segments if hasattr(conversation, 'speech_segments') else [],
-            "cropped_duration": conversation.cropped_duration if hasattr(conversation, 'cropped_duration') else None,
-            "cropped_at": conversation.cropped_at if hasattr(conversation, 'cropped_at') else None,
-            "original_audio_path": conversation.audio_path,
-        }
-
-    except Exception as e:
-        # Database or unexpected errors when fetching audio metadata
-        audio_logger.exception("Error fetching cropped audio info")
-        return JSONResponse(status_code=500, content={"error": "Error fetching cropped audio info"})

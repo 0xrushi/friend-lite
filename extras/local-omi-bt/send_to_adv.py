@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 from wyoming.audio import AudioChunk
 
 # Configuration
-websocket_uri = "ws://100.83.66.30:8000/ws_pcm"
+websocket_uri = "ws://100.83.66.30:8000/ws?codec=pcm"
 backend_url = "http://100.83.66.30:8000"
 env_path = ".env"
 load_dotenv(env_path)

@@ -87,14 +87,14 @@ Verify HA Plugin Uses Events
 
 Clear Plugin Events
     [Documentation]    Clear all events from test plugin database
-    Connect To Database    sqlite3    /app/debug/test_plugin_events.db
+    Connect To Database    sqlite3    ${CURDIR}/../../backends/advanced/data/test_debug_dir/test_plugin_events.db
     Execute SQL String    DELETE FROM plugin_events
     Disconnect From Database
 
 Get Plugin Events By Type
     [Arguments]    ${event_type}
     [Documentation]    Query plugin events by event type
-    Connect To Database    sqlite3    /app/debug/test_plugin_events.db
+    Connect To Database    sqlite3    ${CURDIR}/../../backends/advanced/data/test_debug_dir/test_plugin_events.db
     ${query}=    Query    SELECT * FROM plugin_events WHERE event = '${event_type}' ORDER BY created_at DESC
     Disconnect From Database
     RETURN    ${query}
@@ -102,14 +102,14 @@ Get Plugin Events By Type
 Get Plugin Events By User
     [Arguments]    ${user_id}
     [Documentation]    Query plugin events by user_id
-    Connect To Database    sqlite3    /app/debug/test_plugin_events.db
+    Connect To Database    sqlite3    ${CURDIR}/../../backends/advanced/data/test_debug_dir/test_plugin_events.db
     ${query}=    Query    SELECT * FROM plugin_events WHERE user_id = '${user_id}' ORDER BY created_at DESC
     Disconnect From Database
     RETURN    ${query}
 
 Get All Plugin Events
     [Documentation]    Get all events from test plugin database
-    Connect To Database    sqlite3    /app/debug/test_plugin_events.db
+    Connect To Database    sqlite3    ${CURDIR}/../../backends/advanced/data/test_debug_dir/test_plugin_events.db
     ${query}=    Query    SELECT * FROM plugin_events ORDER BY created_at DESC
     Disconnect From Database
     RETURN    ${query}
@@ -117,7 +117,7 @@ Get All Plugin Events
 Get Plugin Event Count
     [Arguments]    ${event_type}=${NONE}
     [Documentation]    Get count of events, optionally filtered by type
-    Connect To Database    sqlite3    /app/debug/test_plugin_events.db
+    Connect To Database    sqlite3    ${CURDIR}/../../backends/advanced/data/test_debug_dir/test_plugin_events.db
     IF    '${event_type}' != 'None'
         ${count}=    Row Count    SELECT COUNT(*) FROM plugin_events WHERE event = '${event_type}'
     ELSE

@@ -41,9 +41,6 @@ class AudioFile(Document):
     user_id: Indexed(str) = Field(description="User who owns this audio")
     user_email: Optional[str] = Field(None, description="User email")
 
-    # Audio processing
-    cropped_audio_path: Optional[str] = Field(None, description="Path to cropped audio (speech only)")
-
     # Speech-driven conversation linking
     conversation_id: Optional[str] = Field(
         None,

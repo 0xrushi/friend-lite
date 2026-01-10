@@ -47,11 +47,6 @@ class AppConfig:
             os.getenv("NEW_CONVERSATION_TIMEOUT_MINUTES", "1.5")
         )
 
-        # Audio cropping configuration
-        self.audio_cropping_enabled = os.getenv("AUDIO_CROPPING_ENABLED", "true").lower() == "true"
-        self.min_speech_segment_duration = float(os.getenv("MIN_SPEECH_SEGMENT_DURATION", "1.0"))
-        self.cropping_context_padding = float(os.getenv("CROPPING_CONTEXT_PADDING", "0.1"))
-
         # Transcription Configuration (registry-based)
         self.transcription_provider = get_transcription_provider(None)
         if self.transcription_provider:

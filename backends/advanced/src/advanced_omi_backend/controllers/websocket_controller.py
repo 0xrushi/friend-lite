@@ -381,10 +381,9 @@ async def _initialize_streaming_session(
         application_logger.debug(f"Session already initialized for {client_id}")
         return None
 
-    # Initialize stream session
-    client_state.stream_session_id = str(uuid.uuid4())
-    client_state.stream_chunk_count = 0
-    client_state.stream_audio_format = audio_format
+    # Initialize stream session - use client_id as session_id for predictable lookup
+    # All other session metadata goes to Redis (single source of truth)
+    client_state.stream_session_id = client_state.client_id
     application_logger.info(f"🆔 Created stream session: {client_state.stream_session_id}")
 
     # Determine transcription provider from config.yml
@@ -398,20 +397,30 @@ async def _initialize_streaming_session(
     if not stt_model:
         raise ValueError("No default STT model configured in config.yml (defaults.stt)")
 
-    provider = stt_model.model_provider.lower()
-    if provider not in ["deepgram", "parakeet"]:
-        raise ValueError(f"Unsupported STT provider: {provider}. Expected: deepgram or parakeet")
+    # Use model_provider for session tracking (generic, not validated against hardcoded list)
+    provider = stt_model.model_provider.lower() if stt_model.model_provider else stt_model.name
 
     application_logger.info(f"📋 Using STT provider: {provider} (model: {stt_model.name})")
-    
-    # Initialize session tracking in Redis
+
+    # Initialize session tracking in Redis (SINGLE SOURCE OF TRUTH for session metadata)
+    # This includes user_email, connection info, audio format, chunk counters, job IDs, etc.
+    connection_id = f"ws_{client_id}_{int(time.time())}"
     await audio_stream_producer.init_session(
         session_id=client_state.stream_session_id,
         user_id=user_id,
         client_id=client_id,
+        user_email=user_email,
+        connection_id=connection_id,
         mode="streaming",
         provider=provider
     )
+
+    # Store audio format in Redis session (not in ClientState)
+    from advanced_omi_backend.services.audio_stream.producer import get_audio_stream_producer
+    import json
+    session_key = f"audio:session:{client_state.stream_session_id}"
+    redis_client = audio_stream_producer.redis_client
+    await redis_client.hset(session_key, "audio_format", json.dumps(audio_format))
 
     # Enqueue streaming jobs (speech detection + audio persistence)
     from advanced_omi_backend.controllers.queue_controller import start_streaming_jobs
@@ -422,8 +431,12 @@ async def _initialize_streaming_session(
         client_id=client_id
     )
 
-    client_state.speech_detection_job_id = job_ids['speech_detection']
-    client_state.audio_persistence_job_id = job_ids['audio_persistence']
+    # Store job IDs in Redis session (not in ClientState)
+    await audio_stream_producer.update_session_job_ids(
+        session_id=client_state.stream_session_id,
+        speech_detection_job_id=job_ids['speech_detection'],
+        audio_persistence_job_id=job_ids['audio_persistence']
+    )
 
     # Launch interim results subscriber if WebSocket provided
     subscriber_task = None
@@ -494,11 +507,10 @@ async def _finalize_streaming_session(
             f"✅ Session {session_id[:12]} marked as finalizing - open_conversation_job will handle cleanup"
         )
 
-        # Clear session state
-        for attr in ['stream_session_id', 'stream_chunk_count', 'stream_audio_format',
-                     'speech_detection_job_id', 'audio_persistence_job_id']:
-            if hasattr(client_state, attr):
-                delattr(client_state, attr)
+        # Clear session state from ClientState (only stream_session_id is stored there now)
+        # All other session metadata lives in Redis (single source of truth)
+        if hasattr(client_state, 'stream_session_id'):
+            delattr(client_state, 'stream_session_id')
 
     except Exception as finalize_error:
         application_logger.error(
@@ -534,14 +546,18 @@ async def _publish_audio_to_stream(
         application_logger.warning(f"⚠️ Received audio chunk before session initialized for {client_id}")
         return
 
-    # Increment chunk count and format chunk ID
-    client_state.stream_chunk_count += 1
-    chunk_id = f"{client_state.stream_chunk_count:05d}"
+    session_id = client_state.stream_session_id
+
+    # Increment chunk count in Redis (single source of truth) and format chunk ID
+    session_key = f"audio:session:{session_id}"
+    redis_client = audio_stream_producer.redis_client
+    chunk_count = await redis_client.hincrby(session_key, "chunks_published", 1)
+    chunk_id = f"{chunk_count:05d}"
 
     # Publish to Redis Stream using producer
     await audio_stream_producer.add_audio_chunk(
         audio_data=audio_data,
-        session_id=client_state.stream_session_id,
+        session_id=session_id,
         chunk_id=chunk_id,
         user_id=user_id,
         client_id=client_id,

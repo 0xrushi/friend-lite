@@ -19,11 +19,15 @@ class Conversation(Document):
 
     # Nested Enums
     class TranscriptProvider(str, Enum):
-        """Supported transcription providers."""
+        """
+        Transcription provider identifiers.
+
+        Note: Actual providers are configured in config.yml.
+        Any provider name from config.yml is valid - this enum is for common values only.
+        """
         DEEPGRAM = "deepgram"
-        PARAKEET = "parakeet"
-        SPEECH_DETECTION = "speech_detection"  # Legacy value
-        UNKNOWN = "unknown"  # Fallback value
+        SPEECH_DETECTION = "speech_detection"
+        UNKNOWN = "unknown"
 
     class MemoryProvider(str, Enum):
         """Supported memory providers."""
@@ -86,7 +90,6 @@ class Conversation(Document):
 
     # Audio file reference
     audio_path: Optional[str] = Field(None, description="Path to audio file (relative to CHUNK_DIR)")
-    cropped_audio_path: Optional[str] = Field(None, description="Path to cropped audio file (relative to CHUNK_DIR)")
 
     # Creation metadata
     created_at: Indexed(datetime) = Field(default_factory=datetime.utcnow, description="When the conversation was created")

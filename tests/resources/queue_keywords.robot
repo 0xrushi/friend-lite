@@ -309,9 +309,9 @@ Get Most Recent Job
 
 Get Conversation ID From Job Meta
     [Documentation]    Extract conversation_id from job meta, fails if not present
-    [Arguments]    ${job_type}    ${device_name}
+    [Arguments]    ${job_type}    ${client_id}
 
-    ${conv_jobs}=    Get Jobs By Type And Client    ${job_type}    ${device_name}
+    ${conv_jobs}=    Get Jobs By Type And Client    ${job_type}    ${client_id}
     ${conv_job}=    Get Most Recent Job    ${conv_jobs}
     ${conv_meta}=    Set Variable    ${conv_job}[meta]
     ${conversation_id}=    Evaluate    $conv_meta.get('conversation_id', '')

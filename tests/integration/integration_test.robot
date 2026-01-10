@@ -60,8 +60,8 @@ Audio Playback And Segment Timing Test
 
     Log    Conversation created: ${conversation_id}    INFO
 
-    # Wait for cropping job to complete (depends on transcription)
-    Sleep    10s    Wait for post-processing jobs to complete
+    # Wait for post-processing jobs to complete
+    Sleep    10s    Wait for post-processing jobs
 
     # Refresh conversation data
     ${conversation}=    Get Conversation By ID    ${conversation_id}
@@ -72,21 +72,6 @@ Audio Playback And Segment Timing Test
     ${original_audio_size}=    Get Length    ${audio_response.content}
     Should Be True    ${original_audio_size} > 1000    Original audio file too small: ${original_audio_size} bytes
     Log    Original audio accessible: ${original_audio_size} bytes    INFO
-
-    # Verify cropped audio is accessible (if available)
-    &{params}=    Create Dictionary    cropped=true
-    ${cropped_response}=    GET On Session    api    /api/audio/get_audio/${conversation_id}    params=${params}    expected_status=any
-    IF    ${cropped_response.status_code} == 200
-        Should Be Equal As Strings    ${cropped_response.headers}[content-type]    audio/wav
-        ${cropped_audio_size}=    Get Length    ${cropped_response.content}
-        Should Be True    ${cropped_audio_size} > 0    Cropped audio file is empty
-        Log    Cropped audio accessible: ${cropped_audio_size} bytes    INFO
-
-        # Cropped audio should be smaller or equal to original (silence removed)
-        Should Be True    ${cropped_audio_size} <= ${original_audio_size}    Cropped audio larger than original
-    ELSE
-        Log    Cropped audio not yet available (cropping job may still be running)    WARN
-    END
 
     # Verify segments exist and have valid timestamps
     Dictionary Should Contain Key    ${conversation}    segments

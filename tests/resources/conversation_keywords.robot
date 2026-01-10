@@ -95,13 +95,6 @@ Close Current Conversation
     ${response}=    POST On Session    api    /api/conversations/${client_id}/close    headers=${headers}
     RETURN    ${response.json()}
 
-Get Cropped Audio Info
-    [Documentation]    Get cropped audio information for a conversation
-    [Arguments]     ${audio_uuid}
-
-    ${response}=    GET On Session    api    /api/conversations/${audio_uuid}/cropped    headers=${headers}
-    RETURN    ${response.json()}[cropped_audios]    
-
 Add Speaker To Conversation
     [Documentation]    Add a speaker to the speakers_identified list
     [Arguments]    ${audio_uuid}    ${speaker_id}

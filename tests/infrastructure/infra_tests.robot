@@ -272,19 +272,20 @@ WebSocket Disconnect Conversation End Reason Test
 
     # Start audio stream and send chunks to trigger conversation
     ${device_name}=    Set Variable    disconnect
+    ${client_id}=    Get Client ID From Device Name    ${device_name}
     ${stream_id}=    Open Audio Stream    device_name=${device_name}
 
     # Send audio fast (no realtime pacing) to simulate disconnect before END signal
-    Send Audio Chunks To Stream    ${stream_id}    ${TEST_AUDIO_FILE}    num_chunks=200 
+    Send Audio Chunks To Stream    ${stream_id}    ${TEST_AUDIO_FILE}    num_chunks=200
 
     # Wait for conversation job to be created and conversation_id to be populated
     # Transcription + speech analysis takes time (30-60s with queue)
     ${conv_jobs}=    Wait Until Keyword Succeeds    60s    3s
-    ...    Job Type Exists For Client    open_conversation    ${device_name}
+    ...    Job Type Exists For Client    open_conversation    ${client_id}
 
     # Wait for conversation_id in job meta (created asynchronously)
     ${conversation_id}=    Wait Until Keyword Succeeds    10s    0.5s
-    ...    Get Conversation ID From Job Meta    open_conversation    ${device_name}
+    ...    Get Conversation ID From Job Meta    open_conversation    ${client_id}
 
     # Simulate WebSocket disconnect (Bluetooth dropout)
     Close Audio Stream    ${stream_id}

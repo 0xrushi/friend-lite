@@ -15,7 +15,6 @@ interface Conversation {
   segment_count?: number  // From list endpoint
   memory_count?: number  // From list endpoint
   audio_path?: string
-  cropped_audio_path?: string
   duration_seconds?: number
   has_memory?: boolean
   transcript?: string  // From detail endpoint
@@ -295,10 +294,9 @@ export default function Conversations() {
     }
   }
 
-  const handleSegmentPlayPause = (conversationId: string, segmentIndex: number, segment: any, useCropped: boolean) => {
+  const handleSegmentPlayPause = (conversationId: string, segmentIndex: number, segment: any) => {
     const segmentId = `${conversationId}-${segmentIndex}`;
-    // Include cropped flag in cache key to handle mode switches
-    const audioKey = `${conversationId}-${useCropped ? 'cropped' : 'original'}`;
+    const audioKey = conversationId; // Use conversation ID as cache key
 
     // If this segment is already playing, pause it
     if (playingSegment === segmentId) {
@@ -316,7 +314,7 @@ export default function Conversations() {
 
     // Stop any currently playing segment
     if (playingSegment) {
-      // Stop all audio elements (could be playing from different mode)
+      // Stop all audio elements
       Object.values(audioRefs.current).forEach(audio => {
         audio.pause();
       });
@@ -326,13 +324,13 @@ export default function Conversations() {
       }
     }
 
-    // Get or create audio element for this conversation + mode combination
+    // Get or create audio element for this conversation
     let audio = audioRefs.current[audioKey];
 
     // Check if we need to create a new audio element (none exists or previous had error)
     if (!audio || audio.error) {
       const token = localStorage.getItem(getStorageKey('token')) || '';
-      const audioUrl = `${BACKEND_URL}/api/audio/get_audio/${conversationId}?cropped=${useCropped}&token=${token}`;
+      const audioUrl = `${BACKEND_URL}/api/audio/get_audio/${conversationId}?token=${token}`;
       console.log('Creating audio element with URL:', audioUrl);
       console.log('Token present:', !!token, 'Token length:', token.length);
       audio = new Audio(audioUrl);
@@ -635,12 +633,11 @@ export default function Conversations() {
               {/* Audio Player */}
               <div className="mb-4">
                 <div className="space-y-2">
-                  {(conversation.audio_path || conversation.cropped_audio_path) && (
+                  {conversation.audio_path && (
                     <>
                       <div className="flex items-center space-x-2 text-sm text-gray-700 dark:text-gray-300">
                         <span className="font-medium">
-                          {debugMode ? '🔧 Original Audio' : '🎵 Audio'}
-                          {debugMode && conversation.cropped_audio_path && ' (Debug Mode)'}
+                          🎵 Audio
                         </span>
                       </div>
                       <audio
@@ -648,20 +645,10 @@ export default function Conversations() {
                         className="w-full h-10"
                         preload="metadata"
                         style={{ minWidth: '300px' }}
-                        src={`${BACKEND_URL}/api/audio/get_audio/${conversation.conversation_id}?cropped=${!debugMode}&token=${localStorage.getItem(getStorageKey('token')) || ''}`}
+                        src={`${BACKEND_URL}/api/audio/get_audio/${conversation.conversation_id}?token=${localStorage.getItem(getStorageKey('token')) || ''}`}
                       >
                         Your browser does not support the audio element.
                       </audio>
-                      {debugMode && conversation.cropped_audio_path && (
-                        <div className="text-xs text-gray-500 dark:text-gray-400">
-                          💡 Cropped version available: {conversation.cropped_audio_path}
-                        </div>
-                      )}
-                      {!debugMode && conversation.cropped_audio_path && (
-                        <div className="text-xs text-gray-500 dark:text-gray-400">
-                          💡 Enable debug mode to hear original with silence
-                        </div>
-                      )}
                     </>
                   )}
                 </div>
@@ -724,9 +711,7 @@ export default function Conversations() {
                           const conversationKey = conversation.conversation_id || conversation.audio_uuid
                           const segmentId = `${conversationKey}-${index}`
                           const isPlaying = playingSegment === segmentId
-                          const hasAudio = conversation.cropped_audio_path || conversation.audio_path
-                          // Use cropped audio only if available and not in debug mode
-                          const useCropped = !debugMode && !!conversation.cropped_audio_path
+                          const hasAudio = !!conversation.audio_path
 
                           return (
                             <div
@@ -738,7 +723,7 @@ export default function Conversations() {
                               {/* Play/Pause Button */}
                               {hasAudio && (
                                 <button
-                                  onClick={() => handleSegmentPlayPause(conversationKey, index, segment, useCropped)}
+                                  onClick={() => handleSegmentPlayPause(conversationKey, index, segment)}
                                   className={`flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center transition-colors mt-0.5 ${
                                     isPlaying
                                       ? 'bg-blue-600 text-white hover:bg-blue-700'
@@ -815,8 +800,7 @@ export default function Conversations() {
                   <div className="text-xs text-gray-600 dark:text-gray-400 space-y-1">
                     <div>Conversation ID: {conversation.conversation_id || 'N/A'}</div>
                     <div>Audio UUID: {conversation.audio_uuid}</div>
-                    <div>Original Audio: {conversation.audio_path || 'N/A'}</div>
-                    <div>Cropped Audio: {conversation.cropped_audio_path || 'N/A'}</div>
+                    <div>Audio Path: {conversation.audio_path || 'N/A'}</div>
                     <div>Transcript Version Count: {conversation.transcript_version_count || 0}</div>
                     <div>Memory Version Count: {conversation.memory_version_count || 0}</div>
                     <div>Segment Count: {conversation.segment_count || 0}</div>

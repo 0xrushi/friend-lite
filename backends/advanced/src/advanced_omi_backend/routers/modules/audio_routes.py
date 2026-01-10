@@ -37,7 +37,6 @@ async def upload_audio_from_drive_folder(
 @router.get("/get_audio/{conversation_id}")
 async def get_conversation_audio(
     conversation_id: str,
-    cropped: bool = Query(default=False, description="Serve cropped (speech-only) audio instead of original"),
     token: Optional[str] = Query(default=None, description="JWT token for audio element access"),
     current_user: Optional[User] = Depends(current_active_user_optional),
 ):
@@ -52,7 +51,6 @@ async def get_conversation_audio(
 
     Args:
         conversation_id: The conversation ID
-        cropped: If True, serve cropped audio; if False, serve original audio
         token: Optional JWT token as query param (for audio elements)
         current_user: Authenticated user (from header)
 
@@ -75,8 +73,7 @@ async def get_conversation_audio(
     try:
         file_path = await audio_controller.get_conversation_audio_path(
             conversation_id=conversation_id,
-            user=current_user,
-            cropped=cropped
+            user=current_user
         )
     except ValueError as e:
         # Map ValueError messages to appropriate HTTP status codes

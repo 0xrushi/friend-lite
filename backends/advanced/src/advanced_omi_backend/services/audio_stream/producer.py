@@ -41,32 +41,57 @@ class AudioStreamProducer:
         session_id: str,
         user_id: str,
         client_id: str,
+        user_email: str = "",
+        connection_id: str = "",
         mode: str = "streaming",
         provider: str = "deepgram"
     ):
         """
-        Initialize session tracking metadata.
+        Initialize session tracking metadata in Redis.
+
+        This is the SINGLE SOURCE OF TRUTH for session state.
+        All session metadata is stored here instead of in-memory ClientState.
 
         Args:
-            session_id: Session identifier
-            user_id: User identifier
-            client_id: Client identifier
+            session_id: Unique session identifier
+            user_id: User identifier (MongoDB ObjectId)
+            client_id: Client identifier (objectid_suffix-device_name)
+            user_email: User email for debugging/tracking
+            connection_id: WebSocket connection identifier
             mode: Processing mode (streaming/batch)
-            provider: Transcription provider ("deepgram", "parakeet", etc.)
+            provider: Transcription provider from config.yml
         """
         # Client-specific stream naming (one stream per client for isolation)
         stream_name = f"audio:stream:{client_id}"
         session_key = f"audio:session:{session_id}"
 
         await self.redis_client.hset(session_key, mapping={
+            # User & Client tracking
             "user_id": user_id,
+            "user_email": user_email,
             "client_id": client_id,
+            "connection_id": connection_id,
+
+            # Stream configuration
             "stream_name": stream_name,
             "provider": provider,
             "mode": mode,
+
+            # Timestamps
             "started_at": str(time.time()),
-            "chunks_published": "0",
             "last_chunk_at": str(time.time()),
+
+            # Counters
+            "chunks_published": "0",
+
+            # Job tracking (populated by queue_controller when jobs start)
+            "speech_detection_job_id": "",
+            "audio_persistence_job_id": "",
+
+            # Connection state
+            "websocket_connected": "true",
+
+            # Session status
             "status": "active"
         })
 
@@ -133,6 +158,63 @@ class AudioStreamProducer:
             approximate=True
         )
         logger.info(f"📡 Sent end-of-session signal for {session_id} to {stream_name}")
+
+    async def get_session(self, session_id: str) -> dict:
+        """
+        Get session metadata from Redis.
+
+        Args:
+            session_id: Session identifier
+
+        Returns:
+            Dictionary with session metadata, empty dict if not found
+        """
+        session_key = f"audio:session:{session_id}"
+        session_data = await self.redis_client.hgetall(session_key)
+
+        # Convert bytes to strings for easier handling
+        return {k.decode() if isinstance(k, bytes) else k: v.decode() if isinstance(v, bytes) else v
+                for k, v in session_data.items()} if session_data else {}
+
+    async def update_session_job_ids(
+        self,
+        session_id: str,
+        speech_detection_job_id: str = None,
+        audio_persistence_job_id: str = None
+    ):
+        """
+        Update job IDs in session metadata.
+
+        Args:
+            session_id: Session identifier
+            speech_detection_job_id: Speech detection job ID (optional)
+            audio_persistence_job_id: Audio persistence job ID (optional)
+        """
+        session_key = f"audio:session:{session_id}"
+        updates = {}
+
+        if speech_detection_job_id:
+            updates["speech_detection_job_id"] = speech_detection_job_id
+        if audio_persistence_job_id:
+            updates["audio_persistence_job_id"] = audio_persistence_job_id
+
+        if updates:
+            await self.redis_client.hset(session_key, mapping=updates)
+            logger.debug(f"📊 Updated job IDs for session {session_id}: {updates}")
+
+    async def mark_websocket_disconnected(self, session_id: str):
+        """
+        Mark session's websocket as disconnected.
+
+        Args:
+            session_id: Session identifier
+        """
+        session_key = f"audio:session:{session_id}"
+        await self.redis_client.hset(session_key, mapping={
+            "websocket_connected": "false",
+            "disconnected_at": str(time.time())
+        })
+        logger.info(f"🔌 Marked websocket disconnected for session {session_id}")
 
     async def finalize_session(self, session_id: str):
         """

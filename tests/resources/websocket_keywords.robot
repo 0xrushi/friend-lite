@@ -2,12 +2,31 @@
 Documentation    WebSocket audio streaming keywords using the shared AudioStreamClient
 Library          Collections
 Library          OperatingSystem
+Library          String
 Library          ../libs/audio_stream_library.py
 Variables        ../setup/test_env.py
 Resource         session_keywords.robot
 Resource         queue_keywords.robot
 
 *** Keywords ***
+Get Client ID From Device Name
+    [Documentation]    Construct client_id from device_name for test admin user
+    ...                Format: {last_6_chars_of_user_id}-{first_10_chars_of_device_name}
+    ...                Matches backend logic in client_manager.py:generate_client_id()
+    [Arguments]    ${device_name}
+
+    # Test admin user ID: 695f6e8595eae00281d26432 (actual ID from test environment)
+    ${user_suffix}=    Set Variable    d26432
+
+    # Sanitize and truncate device name to 10 chars (matches backend: [:10])
+    # Backend sanitizes: lowercase, alphanumeric + hyphens only
+    ${device_lower}=    Convert To Lower Case    ${device_name}
+    ${device_truncated}=    Get Substring    ${device_lower}    0    10
+
+    ${client_id}=    Set Variable    ${user_suffix}-${device_truncated}
+    RETURN    ${client_id}
+
+
 Stream Audio File Via WebSocket
     [Documentation]    Stream a WAV file via WebSocket using Wyoming protocol
     ...                Uses the shared AudioStreamClient from advanced_omi_backend.clients
@@ -117,8 +136,11 @@ Stream And Wait For Conversation
     ...                Works correctly even with existing conversations by tracking new conversation creation.
     [Arguments]    ${stream_id}    ${audio_file_path}    ${device_name}    ${num_chunks}=100
 
+    # Construct client_id from device_name for job lookups
+    ${client_id}=    Get Client ID From Device Name    ${device_name}
+
     # Get baseline conversation IDs before streaming to detect new conversation
-    ${baseline_jobs}=    Get Jobs By Type And Client    open_conversation    ${device_name}
+    ${baseline_jobs}=    Get Jobs By Type And Client    open_conversation    ${client_id}
     ${existing_conv_ids}=    Create List
     FOR    ${job}    IN    @{baseline_jobs}
         ${meta}=    Set Variable    ${job}[meta]
@@ -134,7 +156,7 @@ Stream And Wait For Conversation
 
     # Wait for NEW conversation job to be created (not in baseline)
     ${new_job}=    Wait Until Keyword Succeeds    60s    3s
-    ...    Wait For New Conversation Job    open_conversation    ${device_name}    ${existing_conv_ids}
+    ...    Wait For New Conversation Job    open_conversation    ${client_id}    ${existing_conv_ids}
 
     ${conv_meta}=    Set Variable    ${new_job}[meta]
     ${conversation_id}=    Evaluate    $conv_meta.get('conversation_id', '')

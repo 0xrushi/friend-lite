@@ -14,57 +14,27 @@ from .config import WorkerDefinition, WorkerType
 logger = logging.getLogger(__name__)
 
 
-def get_default_stt_provider() -> str:
+def has_streaming_stt_configured() -> bool:
     """
-    Query config.yml for the default STT provider.
+    Check if streaming STT provider is configured in config.yml.
 
     Returns:
-        Provider name (e.g., "deepgram", "parakeet") or empty string if not configured
+        True if defaults.stt_stream is configured, False otherwise
+
+    Note: Batch STT is handled by RQ workers in transcription_jobs.py,
+          no separate worker needed.
     """
     try:
         from advanced_omi_backend.model_registry import get_models_registry
 
         registry = get_models_registry()
         if registry and registry.defaults:
-            stt_model = registry.get_default("stt")
-            if stt_model:
-                return stt_model.model_provider or ""
+            stt_stream_model = registry.get_default("stt_stream")
+            return stt_stream_model is not None
     except Exception as e:
-        logger.warning(f"Failed to read STT provider from config.yml: {e}")
+        logger.warning(f"Failed to read streaming STT config from config.yml: {e}")
 
-    return ""
-
-
-def should_start_deepgram_batch() -> bool:
-    """
-    Check if Deepgram batch worker should start.
-
-    Conditions:
-    - DEFAULT_STT provider is "deepgram" (from config.yml)
-    - DEEPGRAM_API_KEY is set in environment
-    """
-    stt_provider = get_default_stt_provider()
-    has_api_key = bool(os.getenv("DEEPGRAM_API_KEY"))
-
-    enabled = stt_provider == "deepgram" and has_api_key
-
-    if stt_provider == "deepgram" and not has_api_key:
-        logger.warning(
-            "Deepgram configured as default STT but DEEPGRAM_API_KEY not set - worker disabled"
-        )
-
-    return enabled
-
-
-def should_start_parakeet() -> bool:
-    """
-    Check if Parakeet stream worker should start.
-
-    Conditions:
-    - DEFAULT_STT provider is "parakeet" (from config.yml)
-    """
-    stt_provider = get_default_stt_provider()
-    return stt_provider == "parakeet"
+    return False
 
 
 def build_worker_definitions() -> List[WorkerDefinition]:
@@ -115,43 +85,38 @@ def build_worker_definitions() -> List[WorkerDefinition]:
         )
     )
 
-    # Deepgram Batch Worker - Conditional (if DEFAULT_STT=deepgram + API key)
+    # Streaming STT Worker - Conditional (if streaming STT is configured in config.yml)
+    # This worker uses the registry-driven streaming provider (RegistryStreamingTranscriptionProvider)
+    # Batch transcription happens via RQ jobs in transcription_jobs.py (already uses registry provider)
     workers.append(
         WorkerDefinition(
-            name="deepgram-batch",
+            name="streaming-stt",
             command=[
                 "uv",
                 "run",
                 "python",
                 "-m",
-                "advanced_omi_backend.workers.audio_stream_deepgram_worker",
+                "advanced_omi_backend.workers.audio_stream_worker",
             ],
             worker_type=WorkerType.STREAM_CONSUMER,
-            enabled_check=should_start_deepgram_batch,
-            restart_on_failure=True,
-        )
-    )
-
-    # Parakeet Stream Worker - Conditional (if DEFAULT_STT=parakeet)
-    workers.append(
-        WorkerDefinition(
-            name="parakeet-stream",
-            command=[
-                "uv",
-                "run",
-                "python",
-                "-m",
-                "advanced_omi_backend.workers.audio_stream_parakeet_worker",
-            ],
-            worker_type=WorkerType.STREAM_CONSUMER,
-            enabled_check=should_start_parakeet,
+            enabled_check=has_streaming_stt_configured,
             restart_on_failure=True,
         )
     )
 
     # Log worker configuration
-    stt_provider = get_default_stt_provider()
-    logger.info(f"STT Provider from config.yml: {stt_provider or 'none'}")
+    try:
+        from advanced_omi_backend.model_registry import get_models_registry
+        registry = get_models_registry()
+        if registry:
+            stt_stream = registry.get_default("stt_stream")
+            stt_batch = registry.get_default("stt")
+            if stt_stream:
+                logger.info(f"Streaming STT configured: {stt_stream.name} ({stt_stream.model_provider})")
+            if stt_batch:
+                logger.info(f"Batch STT configured: {stt_batch.name} ({stt_batch.model_provider}) - handled by RQ workers")
+    except Exception as e:
+        logger.warning(f"Failed to log STT configuration: {e}")
 
     enabled_workers = [w for w in workers if w.is_enabled()]
     disabled_workers = [w for w in workers if not w.is_enabled()]

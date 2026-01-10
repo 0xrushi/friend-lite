@@ -78,7 +78,7 @@ Test Reprocess Conversation Job Queue
 
     # Wait for initial upload processing to complete (transcription job chain)
     Log    Waiting for initial conversation processing to complete...    INFO
-    Sleep    10s    # Give time for initial job chain (transcription -> speaker -> cropping -> memory)
+    Sleep    10s    # Give time for initial job chain (transcription -> speaker -> memory)
 
     # Get conversation to verify initial state
     ${initial_conversation}=    Get Conversation By ID    ${conversation_id}

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
-Deepgram WebSocket streaming audio worker.
+Generic streaming transcription worker using registry-driven providers.
 
-Starts a consumer that reads from audio:stream:* streams and transcribes via Deepgram WebSocket API.
+Starts a consumer that reads from audio:stream:* streams and transcribes via configured provider.
+Provider configuration is loaded from config.yml (supports any streaming STT service).
 Publishes interim results to Redis Pub/Sub for real-time client display.
 Publishes final results to Redis Streams for storage.
 Triggers plugins on final results only.
@@ -17,7 +18,7 @@ import sys
 import redis.asyncio as redis
 
 from advanced_omi_backend.services.plugin_service import init_plugin_router
-from advanced_omi_backend.services.transcription.deepgram_stream_consumer import DeepgramStreamingConsumer
+from advanced_omi_backend.services.transcription.streaming_consumer import StreamingTranscriptionConsumer
 from advanced_omi_backend.client_manager import initialize_redis_for_client_manager
 
 logging.basicConfig(
@@ -30,14 +31,8 @@ logger = logging.getLogger(__name__)
 
 async def main():
     """Main worker entry point."""
-    logger.info("🚀 Starting Deepgram WebSocket streaming worker")
-
-    # Validate DEEPGRAM_API_KEY
-    api_key = os.getenv("DEEPGRAM_API_KEY")
-    if not api_key:
-        logger.error("DEEPGRAM_API_KEY environment variable not set")
-        logger.error("Cannot start Deepgram streaming worker without API key")
-        sys.exit(1)
+    logger.info("🚀 Starting streaming transcription worker")
+    logger.info("📋 Provider configuration loaded from config.yml (defaults.stt_stream)")
 
     redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
@@ -76,15 +71,16 @@ async def main():
         logger.error(f"Failed to initialize plugin router: {e}", exc_info=True)
         plugin_router = None
 
-    # Create Deepgram streaming consumer
+    # Create streaming transcription consumer (uses registry-driven provider from config.yml)
     try:
-        consumer = DeepgramStreamingConsumer(
+        consumer = StreamingTranscriptionConsumer(
             redis_client=redis_client,
             plugin_router=plugin_router
         )
-        logger.info("✅ Deepgram streaming consumer created")
+        logger.info("✅ Streaming transcription consumer created")
     except Exception as e:
-        logger.error(f"Failed to create Deepgram streaming consumer: {e}", exc_info=True)
+        logger.error(f"Failed to create streaming transcription consumer: {e}", exc_info=True)
+        logger.error("Ensure config.yml has defaults.stt_stream configured with valid provider")
         await redis_client.aclose()
         sys.exit(1)
 
@@ -97,7 +93,7 @@ async def main():
     signal.signal(signal.SIGTERM, signal_handler)
 
     try:
-        logger.info("✅ Deepgram streaming worker ready")
+        logger.info("✅ Streaming transcription worker ready")
         logger.info("📡 Listening for audio streams on audio:stream:* pattern")
         logger.info("📢 Publishing interim results to transcription:interim:{session_id}")
         logger.info("💾 Publishing final results to transcription:results:{session_id}")
@@ -112,7 +108,7 @@ async def main():
         sys.exit(1)
     finally:
         await redis_client.aclose()
-        logger.info("👋 Deepgram streaming worker stopped")
+        logger.info("👋 Streaming transcription worker stopped")
 
 
 if __name__ == "__main__":
