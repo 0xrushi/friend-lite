@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List
 from pydantic import Field
 from beanie import Document, Indexed
@@ -27,8 +27,8 @@ class TranscriptAnnotation(Document):
     status: AnnotationStatus = Field(default=AnnotationStatus.ACCEPTED) # User edits are accepted by default
     source: AnnotationSource = Field(default=AnnotationSource.USER)
     
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     class Settings:
         name = "transcript_annotations"

@@ -5,6 +5,9 @@ from datetime import datetime
 import signal
 import sys
 
+from advanced_omi_backend.workers.annotation_jobs import surface_error_suggestions, finetune_hallucination_model
+from advanced_omi_backend.database import init_db
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -12,9 +15,6 @@ logging.basicConfig(
     stream=sys.stdout
 )
 logger = logging.getLogger("cron_scheduler")
-
-from advanced_omi_backend.workers.annotation_jobs import surface_error_suggestions, finetune_hallucination_model
-from advanced_omi_backend.database import init_db
 
 # Frequency configuration (in seconds)
 SUGGESTION_INTERVAL = 24 * 60 * 60 # Daily

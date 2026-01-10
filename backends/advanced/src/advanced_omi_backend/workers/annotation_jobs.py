@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import random
 from datetime import datetime, timedelta
@@ -90,9 +91,8 @@ async def finetune_hallucination_model():
     logger.info("Initiating LORA fine-tuning process...")
     # In a real scenario, this would call a training service or script
     # e.g., train_lora(model="speech-understanding", data=training_pairs)
-    
+
     # Simulate time taken
-    import time
-    time.sleep(2) 
-    
+    await asyncio.sleep(2)
+
     logger.info("Fine-tuning job completed successfully (Mock).")
