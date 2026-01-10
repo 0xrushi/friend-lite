@@ -7,6 +7,7 @@ Interactive configuration for all services and API keys
 import argparse
 import getpass
 import os
+import platform
 import secrets
 import shutil
 import subprocess
@@ -15,7 +16,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict
 
-import yaml
 from dotenv import get_key, set_key
 from rich.console import Console
 from rich.panel import Panel
@@ -157,13 +157,36 @@ class ChronicleSetup:
         self.console.print("[blue][INFO][/blue] API keys are stored in .env")
         self.console.print()
 
-        choices = {
-            "1": "Deepgram (recommended - high quality, cloud-based)",
-            "2": "Offline (Parakeet ASR - requires GPU, runs locally)",
-            "3": "None (skip transcription setup)"
-        }
+        # Check if transcription provider was provided via command line
+        if hasattr(self.args, 'transcription_provider') and self.args.transcription_provider:
+            provider = self.args.transcription_provider
+            self.console.print(f"[green][SUCCESS][/green] Transcription provider configured via wizard: {provider}")
 
-        choice = self.prompt_choice("Choose your transcription provider:", choices, "1")
+            # Map provider to choice
+            if provider == "deepgram":
+                choice = "1"
+            elif provider == "parakeet":
+                choice = "2"
+            elif provider == "none":
+                choice = "3"
+            else:
+                choice = "1"  # Default to Deepgram
+        else:
+            # Interactive prompt
+            is_macos = platform.system() == 'Darwin'
+
+            if is_macos:
+                parakeet_desc = "Offline (Parakeet ASR - CPU-based, runs locally)"
+            else:
+                parakeet_desc = "Offline (Parakeet ASR - GPU recommended, runs locally)"
+
+            choices = {
+                "1": "Deepgram (recommended - high quality, cloud-based)",
+                "2": parakeet_desc,
+                "3": "None (skip transcription setup)"
+            }
+
+            choice = self.prompt_choice("Choose your transcription provider:", choices, "1")
 
         if choice == "1":
             self.console.print("[blue][INFO][/blue] Deepgram selected")
@@ -446,30 +469,7 @@ class ChronicleSetup:
                 except subprocess.CalledProcessError:
                     self.console.print("[yellow][WARNING][/yellow] SSL certificate generation failed")
             else:
-                self.console.print(f"[yellow][WARNING][/yellow] SSL script not found at {ssl_script}")
-            
-            # Generate nginx.conf from template
-            self.console.print("[blue][INFO][/blue] Creating nginx configuration...")
-            nginx_template = script_dir / "nginx.conf.template"
-            if nginx_template.exists():
-                try:
-                    with open(nginx_template, 'r') as f:
-                        nginx_content = f.read()
-                    
-                    # Replace TAILSCALE_IP with server_ip
-                    nginx_content = nginx_content.replace('TAILSCALE_IP', server_ip)
-                    
-                    with open('nginx.conf', 'w') as f:
-                        f.write(nginx_content)
-                    
-                    self.console.print(f"[green][SUCCESS][/green] nginx.conf created for: {server_ip}")
-                    self.config["HTTPS_ENABLED"] = "true"
-                    self.config["SERVER_IP"] = server_ip
-                    
-                except Exception as e:
-                    self.console.print(f"[yellow][WARNING][/yellow] nginx.conf generation failed: {e}")
-            else:
-                self.console.print("[yellow][WARNING][/yellow] nginx.conf.template not found")
+                self.console.print(f"[yellow][WARNING][/warning] SSL script not found at {ssl_script}")
 
             # Generate Caddyfile from template
             self.console.print("[blue][INFO][/blue] Creating Caddyfile configuration...")
@@ -496,6 +496,8 @@ class ChronicleSetup:
                             f.write(caddyfile_content)
 
                         self.console.print(f"[green][SUCCESS][/green] Caddyfile created for: {server_ip}")
+                        self.config["HTTPS_ENABLED"] = "true"
+                        self.config["SERVER_IP"] = server_ip
 
                 except Exception as e:
                     self.console.print(f"[red]❌ ERROR: Caddyfile generation failed: {e}[/red]")
@@ -690,10 +692,13 @@ class ChronicleSetup:
 def main():
     """Main entry point"""
     parser = argparse.ArgumentParser(description="Chronicle Advanced Backend Setup")
-    parser.add_argument("--speaker-service-url", 
+    parser.add_argument("--speaker-service-url",
                        help="Speaker Recognition service URL (default: prompt user)")
-    parser.add_argument("--parakeet-asr-url", 
+    parser.add_argument("--parakeet-asr-url",
                        help="Parakeet ASR service URL (default: prompt user)")
+    parser.add_argument("--transcription-provider",
+                       choices=["deepgram", "parakeet", "none"],
+                       help="Transcription provider (default: prompt user)")
     parser.add_argument("--enable-https", action="store_true",
                        help="Enable HTTPS configuration (default: prompt user)")
     parser.add_argument("--server-ip",
