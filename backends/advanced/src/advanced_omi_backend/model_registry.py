@@ -160,15 +160,15 @@ class ModelDef(BaseModel):
 
 class AppModels(BaseModel):
     """Application models registry.
-    
+
     Contains default model selections and all available model definitions.
     """
-    
+
     model_config = ConfigDict(
         extra='allow',
         validate_assignment=True,
     )
-    
+
     defaults: Dict[str, str] = Field(
         default_factory=dict,
         description="Default model names for each model_type"
@@ -184,6 +184,10 @@ class AppModels(BaseModel):
     speaker_recognition: Dict[str, Any] = Field(
         default_factory=dict,
         description="Speaker recognition service configuration"
+    )
+    chat: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Chat service configuration including system prompt"
     )
     
     def get_by_name(self, name: str) -> Optional[ModelDef]:
@@ -318,6 +322,7 @@ def load_models_config(force_reload: bool = False) -> Optional[AppModels]:
     model_list = raw.get("models", []) or []
     memory_settings = raw.get("memory", {}) or {}
     speaker_recognition_cfg = raw.get("speaker_recognition", {}) or {}
+    chat_settings = raw.get("chat", {}) or {}
 
     # Parse and validate models using Pydantic
     models: Dict[str, ModelDef] = {}
@@ -336,7 +341,8 @@ def load_models_config(force_reload: bool = False) -> Optional[AppModels]:
         defaults=defaults,
         models=models,
         memory=memory_settings,
-        speaker_recognition=speaker_recognition_cfg
+        speaker_recognition=speaker_recognition_cfg,
+        chat=chat_settings
     )
     return _REGISTRY
 

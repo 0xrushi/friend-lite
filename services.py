@@ -274,9 +274,14 @@ def stop_services(services):
 
     console.print(f"\n[green]🎉 {success_count}/{len(services)} services stopped successfully[/green]")
 
-def restart_services(services):
+def restart_services(services, recreate=False):
     """Restart specified services"""
     console.print(f"🔄 [bold]Restarting {len(services)} services...[/bold]")
+
+    if recreate:
+        console.print("[dim]Using down + up to recreate containers (fixes WSL2 bind mount issues)[/dim]\n")
+    else:
+        console.print("[dim]Quick restart (use --recreate to fix bind mount issues)[/dim]\n")
 
     success_count = 0
     for service_name in services:
@@ -289,11 +294,25 @@ def restart_services(services):
             continue
 
         console.print(f"\n🔧 Restarting {service_name}...")
-        if run_compose_command(service_name, 'restart'):
-            console.print(f"[green]✅ {service_name} restarted[/green]")
-            success_count += 1
+
+        if recreate:
+            # Full recreation: down + up (fixes bind mount issues)
+            if not run_compose_command(service_name, 'down'):
+                console.print(f"[red]❌ Failed to stop {service_name}[/red]")
+                continue
+
+            if run_compose_command(service_name, 'up'):
+                console.print(f"[green]✅ {service_name} restarted[/green]")
+                success_count += 1
+            else:
+                console.print(f"[red]❌ Failed to start {service_name}[/red]")
         else:
-            console.print(f"[red]❌ Failed to restart {service_name}[/red]")
+            # Quick restart: docker compose restart
+            if run_compose_command(service_name, 'restart'):
+                console.print(f"[green]✅ {service_name} restarted[/green]")
+                success_count += 1
+            else:
+                console.print(f"[red]❌ Failed to restart {service_name}[/red]")
 
     console.print(f"\n[green]🎉 {success_count}/{len(services)} services restarted successfully[/green]")
 
@@ -343,6 +362,8 @@ def main():
     restart_parser.add_argument('services', nargs='*',
                                help='Services to restart: backend, speaker-recognition, asr-services, openmemory-mcp (or use --all)')
     restart_parser.add_argument('--all', action='store_true', help='Restart all services')
+    restart_parser.add_argument('--recreate', action='store_true',
+                               help='Recreate containers (down + up) instead of quick restart - fixes WSL2 bind mount issues')
 
     # Status command
     subparsers.add_parser('status', help='Show service status')
@@ -406,7 +427,7 @@ def main():
             console.print("[red]❌ No services specified. Use --all or specify service names.[/red]")
             return
 
-        restart_services(services)
+        restart_services(services, recreate=args.recreate)
 
 if __name__ == "__main__":
     main()
