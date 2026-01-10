@@ -8,3 +8,4 @@ for all data entities in the Chronicle system.
 # Models can be imported directly from their files
 # e.g. from .job import TranscriptionJob
 # e.g. from .conversation import Conversation, create_conversation
+from .annotation import TranscriptAnnotation

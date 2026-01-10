@@ -76,6 +76,27 @@ services:
         condition: service_started
     restart: unless-stopped
 
+  cron:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["uv", "run", "python", "-m", "advanced_omi_backend.cron"]
+    env_file:
+      - .env
+    volumes:
+      - ./src:/app/src
+      - ./data:/app/data
+      - ../../config/config.yml:/app/config.yml
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - MONGO_URL=${MONGO_URL:-mongodb://mongo:27017}
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
   webui:
     build:
       context: ./webui
