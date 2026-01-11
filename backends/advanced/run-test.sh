@@ -256,8 +256,9 @@ export TEST_MODE=dev
 
 # Run the Robot Framework integration tests with extended timeout (mem0 needs time for comprehensive extraction)
 # IMPORTANT: Robot tests must be run from the repository root where backends/ and tests/ are siblings
+# Run full test suite from tests/integration/ directory (includes all test files)
 print_info "Starting Robot Framework integration tests (timeout: 15 minutes)..."
-if (cd ../.. && timeout 900 robot --outputdir test-results --loglevel INFO tests/integration/integration_test.robot); then
+if (cd ../.. && timeout 900 uv run --with-requirements tests/test-requirements.txt robot --outputdir test-results --loglevel INFO tests/integration/); then
     print_success "Integration tests completed successfully!"
 else
     TEST_EXIT_CODE=$?

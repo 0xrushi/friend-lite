@@ -216,7 +216,7 @@ async def audio_streaming_persistence_job(
 
         # If no file open yet, wait for conversation to be created
         if not file_sink:
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(0.0001)  # Minimal sleep to yield to event loop
             continue
 
         # Read audio chunks from stream (non-blocking)
@@ -226,7 +226,7 @@ async def audio_streaming_persistence_job(
                 audio_consumer_name,
                 {audio_stream_name: ">"},
                 count=20,  # Read up to 20 chunks at a time for efficiency
-                block=500  # 500ms timeout
+                block=100  # 100ms timeout - more responsive
             )
 
             if audio_messages:
@@ -279,7 +279,7 @@ async def audio_streaming_persistence_job(
             # Stream might not exist yet or other transient errors
             logger.debug(f"Audio stream read error (non-fatal): {audio_error}")
 
-        await asyncio.sleep(0.1)  # Check every 100ms for responsiveness
+        await asyncio.sleep(0.0001)  # Minimal sleep to yield to event loop
 
     # Job complete - calculate final stats
     runtime_seconds = time.time() - start_time

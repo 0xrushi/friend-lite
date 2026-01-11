@@ -67,23 +67,25 @@ def build_worker_definitions() -> List[WorkerDefinition]:
             )
         )
 
-    # Audio Persistence Worker - Single-queue worker (audio queue)
-    workers.append(
-        WorkerDefinition(
-            name="audio-persistence",
-            command=[
-                "uv",
-                "run",
-                "python",
-                "-m",
-                "advanced_omi_backend.workers.rq_worker_entry",
-                "audio",
-            ],
-            worker_type=WorkerType.RQ_WORKER,
-            queues=["audio"],
-            restart_on_failure=True,
+    # Audio Persistence Workers - Single-queue workers (audio queue)
+    # Multiple workers allow concurrent audio persistence for multiple sessions
+    for i in range(1, 4):  # 3 audio workers
+        workers.append(
+            WorkerDefinition(
+                name=f"audio-persistence-{i}",
+                command=[
+                    "uv",
+                    "run",
+                    "python",
+                    "-m",
+                    "advanced_omi_backend.workers.rq_worker_entry",
+                    "audio",
+                ],
+                worker_type=WorkerType.RQ_WORKER,
+                queues=["audio"],
+                restart_on_failure=True,
+            )
         )
-    )
 
     # Streaming STT Worker - Conditional (if streaming STT is configured in config.yml)
     # This worker uses the registry-driven streaming provider (RegistryStreamingTranscriptionProvider)
