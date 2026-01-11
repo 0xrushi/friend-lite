@@ -635,6 +635,12 @@ async def flush_all_jobs(
                         # Try to fetch the job
                         job = Job.fetch(job_id, connection=redis_conn)
 
+                        # Skip session-level jobs (e.g., speech_detection, audio_persistence)
+                        # These run for the entire session and should not be killed by test cleanup
+                        if job.meta and job.meta.get("session_level"):
+                            logger.info(f"Skipping session-level job {job_id} ({job.description})")
+                            continue
+
                         # Handle running jobs differently to avoid worker deadlock
                         if job.is_started:
                             # Send stop command to worker instead of canceling/deleting immediately

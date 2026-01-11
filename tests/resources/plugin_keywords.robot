@@ -5,13 +5,13 @@ Documentation    Plugin testing resource file
 ...              Keywords in this file should handle:
 ...              - Mock plugin creation and registration
 ...              - Plugin event subscription verification
-...              - Event dispatch testing
+...              - Event dispatch testing via API
 ...              - Wake word trigger testing
 ...
 Library          Collections
 Library          OperatingSystem
 Library          Process
-Library          DatabaseLibrary
+Library          RequestsLibrary
 
 *** Keywords ***
 Create Mock Plugin Config
@@ -86,45 +86,50 @@ Verify HA Plugin Uses Events
 # Test Plugin Event Database Keywords
 
 Clear Plugin Events
-    [Documentation]    Clear all events from test plugin database
-    Connect To Database    sqlite3    ${CURDIR}/../../backends/advanced/data/test_debug_dir/test_plugin_events.db
-    Execute SQL String    DELETE FROM plugin_events
-    Disconnect From Database
+    [Documentation]    Clear all events from test plugin database via API
+    ${response}=    DELETE On Session    api    /api/test/plugins/events
+    Should Be Equal As Integers    ${response.status_code}    200
+    Log    Cleared ${response.json()}[events_cleared] plugin events
 
 Get Plugin Events By Type
     [Arguments]    ${event_type}
-    [Documentation]    Query plugin events by event type
-    Connect To Database    sqlite3    ${CURDIR}/../../backends/advanced/data/test_debug_dir/test_plugin_events.db
-    ${query}=    Query    SELECT * FROM plugin_events WHERE event = '${event_type}' ORDER BY created_at DESC
-    Disconnect From Database
-    RETURN    ${query}
+    [Documentation]    Query plugin events by event type via API
+    ${response}=    GET On Session    api    /api/test/plugins/events    params=event_type=${event_type}
+    Should Be Equal As Integers    ${response.status_code}    200
+    RETURN    ${response.json()}[events]
 
 Get Plugin Events By User
     [Arguments]    ${user_id}
     [Documentation]    Query plugin events by user_id
-    Connect To Database    sqlite3    ${CURDIR}/../../backends/advanced/data/test_debug_dir/test_plugin_events.db
-    ${query}=    Query    SELECT * FROM plugin_events WHERE user_id = '${user_id}' ORDER BY created_at DESC
-    Disconnect From Database
-    RETURN    ${query}
+    # Note: Not implemented in API yet, keeping for backward compatibility
+    ${response}=    GET On Session    api    /api/test/plugins/events
+    Should Be Equal As Integers    ${response.status_code}    200
+    ${all_events}=    Set Variable    ${response.json()}[events]
+    # Filter by user_id in Robot Framework
+    ${filtered}=    Create List
+    FOR    ${event}    IN    @{all_events}
+        IF    '${event}[user_id]' == '${user_id}'
+            Append To List    ${filtered}    ${event}
+        END
+    END
+    RETURN    ${filtered}
 
 Get All Plugin Events
-    [Documentation]    Get all events from test plugin database
-    Connect To Database    sqlite3    ${CURDIR}/../../backends/advanced/data/test_debug_dir/test_plugin_events.db
-    ${query}=    Query    SELECT * FROM plugin_events ORDER BY created_at DESC
-    Disconnect From Database
-    RETURN    ${query}
+    [Documentation]    Get all events from test plugin database via API
+    ${response}=    GET On Session    api    /api/test/plugins/events
+    Should Be Equal As Integers    ${response.status_code}    200
+    RETURN    ${response.json()}[events]
 
 Get Plugin Event Count
     [Arguments]    ${event_type}=${NONE}
-    [Documentation]    Get count of events, optionally filtered by type
-    Connect To Database    sqlite3    ${CURDIR}/../../backends/advanced/data/test_debug_dir/test_plugin_events.db
+    [Documentation]    Get count of events via API, optionally filtered by type
     IF    '${event_type}' != 'None'
-        ${count}=    Row Count    SELECT COUNT(*) FROM plugin_events WHERE event = '${event_type}'
+        ${response}=    GET On Session    api    /api/test/plugins/events/count    params=event_type=${event_type}
     ELSE
-        ${count}=    Row Count    SELECT COUNT(*) FROM plugin_events
+        ${response}=    GET On Session    api    /api/test/plugins/events/count
     END
-    Disconnect From Database
-    RETURN    ${count}
+    Should Be Equal As Integers    ${response.status_code}    200
+    RETURN    ${response.json()}[count]
 
 Verify Event Contains Data
     [Arguments]    ${event}    @{required_fields}
@@ -133,3 +138,38 @@ Verify Event Contains Data
         Dictionary Should Contain Key    ${event}    ${field}
         ...    msg=Event should contain field '${field}'
     END
+
+Wait For Plugin Event
+    [Documentation]    Wait for at least one new plugin event of the specified type
+    ...
+    ...    Polls the database until the event count increases above the baseline.
+    ...    Uses configurable timeout and retry interval for efficient polling.
+    ...
+    ...    Arguments:
+    ...    - event_type: The event type to wait for (e.g., 'transcript.batch')
+    ...    - baseline_count: The event count before the operation started
+    ...    - timeout: Maximum time to wait (default: 30s)
+    ...    - retry_interval: Time between polling attempts (default: 2s)
+    [Arguments]    ${event_type}    ${baseline_count}    ${timeout}=30s    ${retry_interval}=2s
+
+    Wait Until Keyword Succeeds    ${timeout}    ${retry_interval}
+    ...    Plugin Event Count Should Be Greater Than    ${event_type}    ${baseline_count}
+
+    # After successful wait, get the final count
+    ${current_count}=    Get Plugin Event Count    ${event_type}
+    ${new_events}=    Evaluate    ${current_count} - ${baseline_count}
+    RETURN    ${new_events}
+
+Plugin Event Count Should Be Greater Than
+    [Documentation]    Assert that the current event count is greater than baseline
+    ...
+    ...    This keyword is used by Wait For Plugin Event for polling.
+    ...    It will fail (causing a retry) until the condition is met.
+    [Arguments]    ${event_type}    ${baseline_count}
+
+    ${current_count}=    Get Plugin Event Count    ${event_type}
+    ${new_events}=    Evaluate    ${current_count} - ${baseline_count}
+    Should Be True    ${new_events} > 0
+    ...    msg=Expected new ${event_type} events, but count is still ${current_count} (baseline: ${baseline_count})
+
+    RETURN    ${new_events}

@@ -307,13 +307,22 @@ def start_streaming_jobs(
         user_id,
         client_id,
         job_timeout=86400,  # 24 hours for all-day sessions
-        result_ttl=JOB_RESULT_TTL,
+        ttl=None,  # No pre-run expiry (job can wait indefinitely in queue)
+        result_ttl=JOB_RESULT_TTL,  # Cleanup AFTER completion
+        failure_ttl=86400,  # Cleanup failed jobs after 24h
         job_id=f"speech-detect_{session_id[:12]}",
         description=f"Listening for speech...",
         meta={'audio_uuid': session_id, 'client_id': client_id, 'session_level': True}
     )
+    # Log job enqueue with TTL information for debugging
+    actual_ttl = redis_conn.ttl(f"rq:job:{speech_job.id}")
     logger.info(f"📥 RQ: Enqueued speech detection job {speech_job.id}")
-    logger.info(f"🔍 DEBUG: Created job - ID={speech_job.id}, func_name={speech_job.func_name}, client_id={client_id}, meta={speech_job.meta}")
+    logger.info(
+        f"🔍 Job enqueue details: ID={speech_job.id}, "
+        f"job_timeout={speech_job.timeout}, result_ttl={speech_job.result_ttl}, "
+        f"failure_ttl={speech_job.failure_ttl}, redis_key_ttl={actual_ttl}, "
+        f"queue_length={transcription_queue.count}, client_id={client_id}"
+    )
 
     # Store job ID for cleanup (keyed by client_id for easy WebSocket cleanup)
     try:
@@ -331,13 +340,22 @@ def start_streaming_jobs(
         user_id,
         client_id,
         job_timeout=86400,  # 24 hours for all-day sessions
-        result_ttl=JOB_RESULT_TTL,
+        ttl=None,  # No pre-run expiry (job can wait indefinitely in queue)
+        result_ttl=JOB_RESULT_TTL,  # Cleanup AFTER completion
+        failure_ttl=86400,  # Cleanup failed jobs after 24h
         job_id=f"audio-persist_{session_id[:12]}",
         description=f"Audio persistence for session {session_id[:12]}",
         meta={'audio_uuid': session_id, 'session_level': True}  # Mark as session-level job
     )
+    # Log job enqueue with TTL information for debugging
+    actual_ttl = redis_conn.ttl(f"rq:job:{audio_job.id}")
     logger.info(f"📥 RQ: Enqueued audio persistence job {audio_job.id} on audio queue")
-    logger.info(f"🔍 DEBUG: Created audio job - ID={audio_job.id}, func_name={audio_job.func_name}, client_id={client_id}, meta={audio_job.meta}")
+    logger.info(
+        f"🔍 Job enqueue details: ID={audio_job.id}, "
+        f"job_timeout={audio_job.timeout}, result_ttl={audio_job.result_ttl}, "
+        f"failure_ttl={audio_job.failure_ttl}, redis_key_ttl={actual_ttl}, "
+        f"queue_length={audio_queue.count}, client_id={client_id}"
+    )
 
     return {
         'speech_detection': speech_job.id,
@@ -380,7 +398,7 @@ def start_post_conversation_jobs(
     from advanced_omi_backend.workers.transcription_jobs import transcribe_full_audio_job
     from advanced_omi_backend.workers.speaker_jobs import recognise_speakers_job
     from advanced_omi_backend.workers.memory_jobs import process_memory_job
-    from advanced_omi_backend.workers.conversation_jobs import generate_title_summary_job
+    from advanced_omi_backend.workers.conversation_jobs import generate_title_summary_job, dispatch_conversation_complete_event_job
 
     version_id = transcript_version_id or str(uuid.uuid4())
 
@@ -466,11 +484,34 @@ def start_post_conversation_jobs(
     )
     logger.info(f"📥 RQ: Enqueued title/summary job {title_summary_job.id}, meta={title_summary_job.meta} (depends on {speaker_job.id})")
 
+    # Step 5: Dispatch conversation.complete event (runs after both memory and title/summary complete)
+    # This ensures plugins receive the event after all processing is done
+    event_job_id = f"event_complete_{conversation_id[:12]}"
+    logger.info(f"🔍 DEBUG: Creating conversation complete event job with job_id={event_job_id}, conversation_id={conversation_id[:12]}, audio_uuid={audio_uuid[:12]}")
+
+    # Event job depends on both memory and title/summary jobs completing
+    # Use RQ's depends_on list to wait for both
+    event_dispatch_job = default_queue.enqueue(
+        dispatch_conversation_complete_event_job,
+        conversation_id,
+        audio_uuid,
+        client_id or "",
+        user_id,
+        job_timeout=120,  # 2 minutes
+        result_ttl=JOB_RESULT_TTL,
+        depends_on=[memory_job, title_summary_job],  # Wait for both parallel jobs
+        job_id=event_job_id,
+        description=f"Dispatch conversation complete event for {conversation_id[:8]}",
+        meta=job_meta
+    )
+    logger.info(f"📥 RQ: Enqueued conversation complete event job {event_dispatch_job.id}, meta={event_dispatch_job.meta} (depends on {memory_job.id} and {title_summary_job.id})")
+
     return {
         'transcription': transcription_job.id if transcription_job else None,
         'speaker_recognition': speaker_job.id,
         'memory': memory_job.id,
-        'title_summary': title_summary_job.id
+        'title_summary': title_summary_job.id,
+        'event_dispatch': event_dispatch_job.id
     }
 
 

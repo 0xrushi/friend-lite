@@ -58,14 +58,10 @@ Upload Audio And Verify Transcript Batch Event
     # Upload test audio file
     File Should Exist    ${TEST_AUDIO_FILE}
     ...    msg=Test audio file should exist
-    ${result}=    Upload Audio For Processing    ${TEST_AUDIO_FILE}
+    ${conversation}=    Upload Audio File    ${TEST_AUDIO_FILE}
 
-    # Wait for transcription to complete
-    Sleep    15s
-
-    # Query plugin events database
-    ${final_count}=    Get Plugin Event Count    transcript.batch
-    ${new_events}=    Evaluate    ${final_count} - ${baseline_count}
+    # Wait for transcription to complete (polls every 2s, max 30s)
+    ${new_events}=    Wait For Plugin Event    transcript.batch    ${baseline_count}    timeout=30s
 
     # Verify at least one new event was received
     Should Be True    ${new_events} > 0
@@ -80,9 +76,11 @@ Upload Audio And Verify Transcript Batch Event
     ${event}=    Set Variable    ${events}[0]
     Log    Event data: ${event}
 
-    # Verify event contains transcript data (data field is JSON, so check the data column)
-    Should Not Be Empty    ${event}[3]
-    ...    msg=Event should have transcript data
+    # Verify event contains required fields (API returns dictionaries)
+    Dictionary Should Contain Key    ${event}    data
+    ...    msg=Event should have data field
+    Dictionary Should Contain Key    ${event}    user_id
+    ...    msg=Event should have user_id field
 
 Conversation Complete Should Trigger Event
     [Documentation]    Verify conversation.complete event after conversation ends
@@ -96,14 +94,10 @@ Conversation Complete Should Trigger Event
 
     # Upload audio (triggers conversation creation and completion)
     File Should Exist    ${TEST_AUDIO_FILE}
-    ${result}=    Upload Audio For Processing    ${TEST_AUDIO_FILE}
+    ${conversation}=    Upload Audio File    ${TEST_AUDIO_FILE}
 
-    # Wait for full pipeline: transcription → conversation
-    Sleep    20s
-
-    # Verify conversation.complete event
-    ${final_count}=    Get Plugin Event Count    conversation.complete
-    ${new_events}=    Evaluate    ${final_count} - ${baseline_count}
+    # Wait for full pipeline: transcription → conversation (polls every 2s, max 40s)
+    ${new_events}=    Wait For Plugin Event    conversation.complete    ${baseline_count}    timeout=40s
 
     Should Be True    ${new_events} > 0
     ...    msg=At least one conversation.complete event should be logged
@@ -124,14 +118,10 @@ Memory Processing Should Trigger Event
 
     # Upload audio with meaningful content for memory extraction
     File Should Exist    ${TEST_AUDIO_FILE}
-    ${result}=    Upload Audio For Processing    ${TEST_AUDIO_FILE}
+    ${conversation}=    Upload Audio File    ${TEST_AUDIO_FILE}
 
-    # Wait for full pipeline: transcription → conversation → memory
-    Sleep    30s
-
-    # Verify memory.processed event
-    ${final_count}=    Get Plugin Event Count    memory.processed
-    ${new_events}=    Evaluate    ${final_count} - ${baseline_count}
+    # Wait for full pipeline: transcription → conversation → memory (polls every 2s, max 60s)
+    ${new_events}=    Wait For Plugin Event    memory.processed    ${baseline_count}    timeout=60s
 
     Should Be True    ${new_events} > 0
     ...    msg=At least one memory.processed event should be logged
@@ -154,19 +144,12 @@ Verify All Events Are Logged
 
     # Upload audio file (should trigger all events)
     File Should Exist    ${TEST_AUDIO_FILE}
-    ${result}=    Upload Audio For Processing    ${TEST_AUDIO_FILE}
+    ${conversation}=    Upload Audio File    ${TEST_AUDIO_FILE}
 
-    # Wait for full pipeline
-    Sleep    35s
-
-    # Verify all events were triggered
-    ${batch_final}=    Get Plugin Event Count    transcript.batch
-    ${conv_final}=    Get Plugin Event Count    conversation.complete
-    ${mem_final}=    Get Plugin Event Count    memory.processed
-
-    ${batch_new}=    Evaluate    ${batch_final} - ${batch_baseline}
-    ${conv_new}=    Evaluate    ${conv_final} - ${conv_baseline}
-    ${mem_new}=    Evaluate    ${mem_final} - ${mem_baseline}
+    # Wait for events in pipeline order (polls every 2s for each)
+    ${batch_new}=    Wait For Plugin Event    transcript.batch    ${batch_baseline}    timeout=30s
+    ${conv_new}=    Wait For Plugin Event    conversation.complete    ${conv_baseline}    timeout=30s
+    ${mem_new}=    Wait For Plugin Event    memory.processed    ${mem_baseline}    timeout=60s
 
     Should Be True    ${batch_new} > 0
     ...    msg=transcript.batch events should be logged
@@ -195,21 +178,3 @@ Test Cleanup
     # Standard cleanup
     # Note: We intentionally don't clear plugin events between tests
     # to allow for debugging and event inspection
-
-Upload Audio For Processing
-    [Arguments]    ${audio_file}
-    [Documentation]    Upload audio file for batch processing
-
-    # Get admin session
-    ${session}=    Get Admin API Session
-
-    # Upload audio file
-    ${files}=    Create Dictionary    files=${audio_file}
-    ${response}=    POST On Session    ${session}    /api/process-audio-files
-    ...    files=${files}
-    ...    expected_status=200
-
-    ${result}=    Set Variable    ${response.json()}
-    Log    Upload result: ${result}
-
-    RETURN    ${result}

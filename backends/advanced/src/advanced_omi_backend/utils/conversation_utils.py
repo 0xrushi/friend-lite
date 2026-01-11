@@ -87,37 +87,41 @@ def analyze_speech(transcript_data: dict) -> dict:
         valid_words = [w for w in words if w.get("confidence", 0) >= settings["min_confidence"]]
 
         if len(valid_words) < settings["min_words"]:
-            return {
-                "has_speech": False,
-                "reason": f"Not enough valid words ({len(valid_words)} < {settings['min_words']})",
-                "word_count": len(valid_words),
-                "duration": 0.0,
-            }
+            # Not enough valid words in word-level data - fall through to text-only analysis
+            # This handles cases where word-level data is incomplete or low confidence
+            logger.debug(f"Only {len(valid_words)} valid words, falling back to text-only analysis")
+            # Continue to Method 2 (don't return early)
+        else:
+            # Calculate speech duration from word timing
+            if valid_words:
+                speech_start = valid_words[0].get("start", 0)
+                speech_end = valid_words[-1].get("end", 0)
+                speech_duration = speech_end - speech_start
 
-        # Calculate speech duration from word timing
-        if valid_words:
-            speech_start = valid_words[0].get("start", 0)
-            speech_end = valid_words[-1].get("end", 0)
-            speech_duration = speech_end - speech_start
+                # If no timing data (duration = 0), fall back to text-only analysis
+                # This happens with some streaming transcription services
+                if speech_duration == 0:
+                    logger.debug("Word timing data missing, falling back to text-only analysis")
+                    # Continue to Method 2 (text-only fallback)
+                else:
+                    # Check minimum duration threshold when we have timing data
+                    min_duration = settings.get("min_duration", 10.0)
+                    if speech_duration < min_duration:
+                        return {
+                            "has_speech": False,
+                            "reason": f"Speech too short ({speech_duration:.1f}s < {min_duration}s)",
+                            "word_count": len(valid_words),
+                            "duration": speech_duration,
+                        }
 
-            # Check minimum duration threshold
-            min_duration = settings.get("min_duration", 10.0)
-            if speech_duration < min_duration:
-                return {
-                    "has_speech": False,
-                    "reason": f"Speech too short ({speech_duration:.1f}s < {min_duration}s)",
-                    "word_count": len(valid_words),
-                    "duration": speech_duration,
-                }
-
-            return {
-                "has_speech": True,
-                "word_count": len(valid_words),
-                "speech_start": speech_start,
-                "speech_end": speech_end,
-                "duration": speech_duration,
-                "reason": f"Valid speech detected ({len(valid_words)} words, {speech_duration:.1f}s)",
-            }
+                    return {
+                        "has_speech": True,
+                        "word_count": len(valid_words),
+                        "speech_start": speech_start,
+                        "speech_end": speech_end,
+                        "duration": speech_duration,
+                        "reason": f"Valid speech detected ({len(valid_words)} words, {speech_duration:.1f}s)",
+                    }
 
     # Method 2: Text-only fallback (when no word-level data available)
     text = transcript_data.get("text", "").strip()

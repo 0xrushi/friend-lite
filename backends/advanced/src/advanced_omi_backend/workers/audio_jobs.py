@@ -103,7 +103,7 @@ async def audio_streaming_persistence_job(
 
     while True:
         # Check if job still exists in Redis (detect zombie state)
-        if not await check_job_alive(redis_client, current_job):
+        if not await check_job_alive(redis_client, current_job, session_id):
             if file_sink:
                 await file_sink.close()
             break

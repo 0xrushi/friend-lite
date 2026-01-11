@@ -6,6 +6,7 @@ a single entry point for the API endpoints.
 """
 
 import logging
+import os
 
 from fastapi import APIRouter
 
@@ -40,5 +41,13 @@ router.include_router(system_router)
 router.include_router(queue_router)
 router.include_router(health_router)  # Also include under /api for frontend compatibility
 
+# Conditionally include test routes (only in test environments)
+if os.getenv("DEBUG_DIR"):
+    try:
+        from .modules.test_routes import router as test_router
+        router.include_router(test_router)
+        logger.info("✅ Test routes loaded (test environment detected)")
+    except Exception as e:
+        logger.error(f"Error loading test routes: {e}", exc_info=True)
 
 logger.info("API router initialized with all sub-modules")

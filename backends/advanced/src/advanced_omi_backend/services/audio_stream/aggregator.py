@@ -49,8 +49,8 @@ class TranscriptionResultsAggregator:
                     "text": fields[b"text"].decode(),
                     "confidence": float(fields[b"confidence"].decode()),
                     "provider": fields[b"provider"].decode(),
-                    "chunk_id": fields[b"chunk_id"].decode(),
-                    "processing_time": float(fields[b"processing_time"].decode()),
+                    "chunk_id": fields.get(b"chunk_id", b"unknown").decode(),  # Handle missing chunk_id gracefully
+                    "processing_time": float(fields.get(b"processing_time", b"0.0").decode()),
                     "timestamp": float(fields[b"timestamp"].decode()),
                 }
 
@@ -82,8 +82,6 @@ class TranscriptionResultsAggregator:
         """
         Get all transcription results combined into a single aggregated result.
 
-        This is what an aggregator should do - combine multiple chunks into one.
-
         Args:
             session_id: Session identifier
 
@@ -109,43 +107,24 @@ class TranscriptionResultsAggregator:
                 "provider": None
             }
 
-        # Combine text
-        full_text = " ".join([r.get("text", "") for r in results if r.get("text")])
-
-        # Combine words
-        all_words = []
-        for r in results:
-            if "words" in r and r["words"]:
-                all_words.extend(r["words"])
-
-        # Combine segments
-        all_segments = []
-        for r in results:
-            if "segments" in r and r["segments"]:
-                all_segments.extend(r["segments"])
-
-        # Sort segments by start time
-        all_segments.sort(key=lambda s: s.get("start", 0.0))
-
-        # Calculate average confidence
-        confidences = [r.get("confidence", 0.0) for r in results]
-        avg_confidence = sum(confidences) / len(confidences) if confidences else 0.0
-
-        # Get provider (assume all chunks from same provider)
-        provider = results[0].get("provider") if results else None
+        # For streaming providers (Deepgram), use ONLY the latest final result
+        # Each is_final=true result supersedes interim results for the same speech segment
+        # The latest result contains the most accurate transcription with best timing/confidence
+        latest_result = results[-1]
 
         combined = {
-            "text": full_text,
-            "words": all_words,
-            "segments": all_segments,
-            "chunk_count": len(results),
-            "total_confidence": avg_confidence,
-            "provider": provider
+            "text": latest_result.get("text", ""),
+            "words": latest_result.get("words", []),
+            "segments": latest_result.get("segments", []),
+            "chunk_count": len(results),  # Track how many results were received
+            "total_confidence": latest_result.get("confidence", 0.0),
+            "provider": latest_result.get("provider")
         }
 
-        logger.debug(
-            f"📦 Combined {len(results)} chunks for session {session_id}: "
-            f"{len(full_text)} chars, {len(all_words)} words, {len(all_segments)} segments"
+        logger.info(
+            f"🔤 TRANSCRIPT [AGGREGATOR] session={session_id}, "
+            f"total_results={len(results)}, words={len(combined['words'])}, "
+            f"text=\"{combined['text']}\""
         )
 
         return combined
@@ -188,7 +167,7 @@ class TranscriptionResultsAggregator:
                             "text": fields[b"text"].decode(),
                             "confidence": float(fields[b"confidence"].decode()),
                             "provider": fields[b"provider"].decode(),
-                            "chunk_id": fields[b"chunk_id"].decode(),
+                            "chunk_id": fields.get(b"chunk_id", b"unknown").decode(),  # Handle missing chunk_id gracefully
                         }
 
                         # Optional fields

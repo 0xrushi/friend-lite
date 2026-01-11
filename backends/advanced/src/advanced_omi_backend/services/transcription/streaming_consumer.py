@@ -131,6 +131,15 @@ class StreamingTranscriptionConsumer:
 
         except Exception as e:
             logger.error(f"Failed to start Deepgram stream for {session_id}: {e}", exc_info=True)
+
+            # Set error flag in Redis so speech detection can detect failure early
+            session_key = f"audio:session:{session_id}"
+            try:
+                await self.redis_client.hset(session_key, "transcription_error", str(e))
+                logger.info(f"Set transcription error flag for {session_id}")
+            except Exception as redis_error:
+                logger.warning(f"Failed to set error flag in Redis: {redis_error}")
+
             raise
 
     async def end_session_stream(self, session_id: str):
@@ -182,12 +191,23 @@ class StreamingTranscriptionConsumer:
             # Deepgram returns None if no response yet, or a dict with results
             if result:
                 is_final = result.get("is_final", False)
+                text = result.get("text", "")
+                word_count = len(result.get("words", []))
+
+                # Track transcript at each step
+                logger.info(
+                    f"🔤 TRANSCRIPT [DEEPGRAM] session={session_id}, is_final={is_final}, "
+                    f"words={word_count}, text=\"{text}\""
+                )
 
                 # Always publish to clients (interim + final) for real-time display
                 await self.publish_to_client(session_id, result, is_final=is_final)
 
                 # If final result, also store and trigger plugins
                 if is_final:
+                    logger.info(
+                        f"🔤 TRANSCRIPT [STORE] session={session_id}, words={word_count}, text=\"{text}\""
+                    )
                     await self.store_final_result(session_id, result, chunk_id=chunk_id)
 
                     # Trigger plugins on final results only

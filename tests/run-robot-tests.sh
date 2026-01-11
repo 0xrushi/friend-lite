@@ -43,7 +43,7 @@ print_info "Robot Framework Test Runner"
 print_info "============================"
 
 # Configuration
-CLEANUP_CONTAINERS="${CLEANUP_CONTAINERS:-true}"
+CLEANUP_CONTAINERS="${CLEANUP_CONTAINERS:-false}"  # Changed default: keep containers running for faster re-runs
 OUTPUTDIR="${OUTPUTDIR:-results}"
 
 # Set default CONFIG_FILE if not provided
@@ -138,160 +138,15 @@ DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY}
 # Test Configuration
 TEST_TIMEOUT=120
 TEST_DEVICE_NAME=robot-test
+
+# Docker Compose Project Name (defaults to advanced-backend-test if not set)
+COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME:-advanced-backend-test}
 EOF
     print_success "Created setup/.env.test"
 fi
 
-# Navigate to backend directory for docker compose
-cd "$BACKEND_DIR"
-
-print_info "Starting test infrastructure..."
-
-# Use unique project name to avoid conflicts with development environment
-export COMPOSE_PROJECT_NAME="advanced-backend-test"
-
-# Ensure required config files exist
-# memory_config.yaml no longer used; memory settings live in config.yml
-
-# Clean up any existing test containers and volumes for fresh start
-print_info "Cleaning up any existing test environment..."
-
-# Try cleanup with current project name
-docker compose -f docker-compose-test.yml down -v 2>/dev/null || true
-
-# Also try cleanup with default project name (in case containers were started without COMPOSE_PROJECT_NAME)
-COMPOSE_PROJECT_NAME=advanced docker compose -f docker-compose-test.yml down -v 2>/dev/null || true
-
-# Force remove any stuck containers with both naming patterns
-print_info "Removing any stuck test containers..."
-TEST_SERVICES=(mongo-test redis-test qdrant-test chronicle-backend-test workers-test webui-test speaker-service-test)
-
-# Remove containers with new project name (advanced-backend-test)
-for service in "${TEST_SERVICES[@]}"; do
-    docker rm -f "advanced-backend-test-${service}-1" 2>/dev/null || true
-done
-
-# Remove containers with old/default project name (advanced)
-for service in "${TEST_SERVICES[@]}"; do
-    docker rm -f "advanced-${service}-1" 2>/dev/null || true
-done
-
-# Start infrastructure services (MongoDB, Redis, Qdrant)
-print_info "Starting MongoDB, Redis, and Qdrant (fresh containers)..."
-docker compose -f docker-compose-test.yml up -d --quiet-pull mongo-test redis-test qdrant-test
-
-# Wait for MongoDB
-print_info "Waiting for MongoDB (up to 60s)..."
-for i in {1..30}; do
-    if docker compose -f docker-compose-test.yml exec -T mongo-test mongosh --eval "db.adminCommand({ping: 1})" > /dev/null 2>&1; then
-        print_success "MongoDB is ready"
-        break
-    fi
-    if [ $i -eq 30 ]; then
-        print_error "MongoDB failed to start"
-        docker compose -f docker-compose-test.yml logs mongo-test
-        exit 1
-    fi
-    sleep 2
-done
-
-# Wait for Qdrant
-print_info "Waiting for Qdrant (up to 60s)..."
-for i in {1..30}; do
-    if curl -s http://localhost:6337/healthz > /dev/null 2>&1; then
-        print_success "Qdrant is ready"
-        break
-    fi
-    if [ $i -eq 30 ]; then
-        print_error "Qdrant failed to start"
-        docker compose -f docker-compose-test.yml logs qdrant-test
-        exit 1
-    fi
-    sleep 2
-done
-
-# Build and start backend
-print_info "Building backend..."
-docker compose -f docker-compose-test.yml build chronicle-backend-test
-
-print_info "Starting backend..."
-docker compose -f docker-compose-test.yml up -d chronicle-backend-test
-
-# Wait for backend
-print_info "Waiting for backend (up to 120s)..."
-for i in {1..40}; do
-    if curl -s http://localhost:8001/health > /dev/null 2>&1; then
-        print_success "Backend is ready"
-        break
-    fi
-    if [ $i -eq 40 ]; then
-        print_error "Backend failed to start"
-        docker compose -f docker-compose-test.yml logs chronicle-backend-test
-        exit 1
-    fi
-    sleep 3
-done
-
-# Build and start workers
-print_info "Building workers..."
-docker compose -f docker-compose-test.yml build workers-test
-
-print_info "Starting RQ workers..."
-docker compose -f docker-compose-test.yml up -d workers-test
-
-# Wait for workers container
-print_info "Waiting for workers container (up to 30s)..."
-for i in {1..15}; do
-    if docker compose -f docker-compose-test.yml ps workers-test | grep -q "Up"; then
-        print_success "Workers container is running"
-        break
-    fi
-    if [ $i -eq 15 ]; then
-        print_error "Workers container failed to start"
-        docker compose -f docker-compose-test.yml logs workers-test
-        exit 1
-    fi
-    sleep 2
-done
-
-# Verify workers are registered
-print_info "Waiting for workers to register with Redis (up to 60s)..."
-for i in {1..30}; do
-    WORKER_COUNT=$(docker compose -f docker-compose-test.yml exec -T workers-test uv run python -c 'from rq import Worker; from redis import Redis; import os; r = Redis.from_url(os.getenv("REDIS_URL", "redis://redis-test:6379/0")); print(len(Worker.all(connection=r)))' 2>/dev/null || echo "0")
-
-    if [ "$WORKER_COUNT" -ge 6 ]; then
-        print_success "Found $WORKER_COUNT RQ workers registered"
-        break
-    fi
-
-    if [ $i -eq 30 ]; then
-        print_error "Workers failed to register after 60s"
-        docker compose -f docker-compose-test.yml logs --tail=50 workers-test
-        exit 1
-    fi
-
-    sleep 2
-done
-
-# Verify unified audio stream worker is running
-print_info "Verifying unified audio stream worker process..."
-STREAM_WORKER_CHECK=$(docker compose -f docker-compose-test.yml exec -T workers-test ps aux | grep -c "audio_stream_worker" || echo "0" | tr -d '\n\r')
-STREAM_WORKER_CHECK=${STREAM_WORKER_CHECK//[^0-9]/}  # Remove non-numeric characters
-if [ -n "$STREAM_WORKER_CHECK" ] && [ "$STREAM_WORKER_CHECK" -gt 0 ]; then
-    print_success "Unified audio stream worker process is running"
-else
-    print_warning "Audio stream worker process not found - checking logs..."
-    docker compose -f docker-compose-test.yml logs --tail=30 workers-test | grep -i "audio.*stream.*worker" || true
-fi
-
-# Check Redis consumer groups registration
-print_info "Checking Redis Streams consumer groups..."
-docker compose -f docker-compose-test.yml exec -T redis-test redis-cli KEYS "audio:stream:*" 2>/dev/null || true
-
-print_success "All services ready!"
-
-# Return to tests directory
-cd "$TESTS_DIR"
+# Start test containers using dedicated startup script
+FRESH_BUILD=true "$TESTS_DIR/setup-test-containers.sh"
 
 # Run Robot Framework tests via Makefile
 # Dependencies are handled automatically by 'uv run' in Makefile
@@ -405,16 +260,10 @@ cd "$TESTS_DIR"
 
 # Cleanup test containers
 if [ "$CLEANUP_CONTAINERS" = "true" ]; then
-    print_info "Cleaning up test containers..."
-    cd "$BACKEND_DIR"
-    docker compose -f docker-compose-test.yml down -v
-    # Also cleanup with default project name
-    COMPOSE_PROJECT_NAME=advanced docker compose -f docker-compose-test.yml down -v 2>/dev/null || true
-    cd "$TESTS_DIR"
-    print_success "Cleanup complete"
+    REMOVE_VOLUMES=true "$TESTS_DIR/teardown-test-containers.sh"
 else
-    print_warning "Skipping container cleanup (CLEANUP_CONTAINERS=false)"
-    print_info "To cleanup manually: cd $BACKEND_DIR && docker compose -f docker-compose-test.yml down -v"
+    print_warning "Keeping containers running for next test (CLEANUP_CONTAINERS=false)"
+    print_info "To cleanup manually: REMOVE_VOLUMES=true ./teardown-test-containers.sh"
 fi
 
 if [ $TEST_EXIT_CODE -eq 0 ]; then

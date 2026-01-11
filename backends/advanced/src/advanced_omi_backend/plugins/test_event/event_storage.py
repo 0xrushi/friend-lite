@@ -5,6 +5,7 @@ Provides async SQLite operations for logging and querying plugin events.
 """
 import json
 import logging
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -24,9 +25,52 @@ class EventStorage:
     async def initialize(self):
         """Initialize database and create tables"""
         # Ensure directory exists
-        Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
+        logger.info(f"🔍 DEBUG: Initializing event storage with db_path={self.db_path}")
 
-        self.db = await aiosqlite.connect(self.db_path)
+        db_dir = Path(self.db_path).parent
+        logger.info(f"🔍 DEBUG: Database directory: {db_dir}")
+        logger.info(f"🔍 DEBUG: Directory exists before mkdir: {db_dir.exists()}")
+
+        try:
+            db_dir.mkdir(parents=True, exist_ok=True)
+            logger.info(f"🔍 DEBUG: Directory created/verified: {db_dir}")
+            logger.info(f"🔍 DEBUG: Directory permissions: {oct(db_dir.stat().st_mode)}")
+        except Exception as e:
+            logger.error(f"🔍 DEBUG: Failed to create directory: {e}")
+            raise
+
+        logger.info(f"🔍 DEBUG: Attempting to connect to SQLite database...")
+        try:
+            self.db = await aiosqlite.connect(self.db_path)
+            logger.info(f"🔍 DEBUG: Successfully connected to database")
+
+            # Enable WAL mode for better concurrent access (allows concurrent reads/writes)
+            # This fixes the "readonly database" error when Robot tests access from host
+            await self.db.execute("PRAGMA journal_mode=WAL")
+            await self.db.execute("PRAGMA busy_timeout=5000")  # Wait up to 5s for locks
+            logger.info(f"✓ Enabled WAL mode for concurrent access")
+
+            # Set file permissions to 666 so host user can write (container runs as root)
+            # Robot tests run as host user and need write access to the database
+            try:
+                os.chmod(self.db_path, 0o666)
+                # Also set permissions on WAL and SHM files if they exist
+                wal_file = f"{self.db_path}-wal"
+                shm_file = f"{self.db_path}-shm"
+                if os.path.exists(wal_file):
+                    os.chmod(wal_file, 0o666)
+                if os.path.exists(shm_file):
+                    os.chmod(shm_file, 0o666)
+                logger.info(f"✓ Set database file permissions to 666 for host access")
+            except Exception as perm_error:
+                logger.warning(f"Could not set database permissions: {perm_error}")
+
+        except Exception as e:
+            logger.error(f"🔍 DEBUG: Failed to connect to database: {e}")
+            logger.error(f"🔍 DEBUG: Database file exists: {Path(self.db_path).exists()}")
+            if Path(self.db_path).exists():
+                logger.error(f"🔍 DEBUG: Database file permissions: {oct(Path(self.db_path).stat().st_mode)}")
+            raise
 
         # Create events table
         await self.db.execute("""

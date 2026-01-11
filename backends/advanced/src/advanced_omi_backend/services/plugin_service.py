@@ -112,6 +112,9 @@ def init_plugin_router() -> Optional[PluginRouter]:
 
         # Load plugin configuration
         plugins_yml = Path("/app/plugins.yml")
+        logger.info(f"🔍 Looking for plugins config at: {plugins_yml}")
+        logger.info(f"🔍 File exists: {plugins_yml.exists()}")
+
         if plugins_yml.exists():
             with open(plugins_yml, 'r') as f:
                 plugins_config = yaml.safe_load(f)
@@ -119,8 +122,11 @@ def init_plugin_router() -> Optional[PluginRouter]:
                 plugins_config = expand_env_vars(plugins_config)
                 plugins_data = plugins_config.get('plugins', {})
 
+            logger.info(f"🔍 Loaded plugins config with {len(plugins_data)} plugin(s): {list(plugins_data.keys())}")
+
             # Initialize each enabled plugin
             for plugin_id, plugin_config in plugins_data.items():
+                logger.info(f"🔍 Processing plugin '{plugin_id}', enabled={plugin_config.get('enabled', False)}")
                 if not plugin_config.get('enabled', False):
                     continue
 

@@ -16,7 +16,7 @@ from advanced_omi_backend.controllers.queue_controller import (
 )
 from advanced_omi_backend.models.job import BaseRQJob, JobPriority, async_job
 from advanced_omi_backend.services.memory.base import MemoryEntry
-from advanced_omi_backend.services.plugin_service import get_plugin_router
+from advanced_omi_backend.services.plugin_service import get_plugin_router, init_plugin_router
 
 logger = logging.getLogger(__name__)
 
@@ -243,7 +243,21 @@ async def process_memory_job(conversation_id: str, *, redis_client=None) -> Dict
 
             # Trigger memory-level plugins
             try:
+                # Get or initialize plugin router (same pattern as conversation_jobs.py)
                 plugin_router = get_plugin_router()
+                if not plugin_router:
+                    logger.info("🔧 Initializing plugin router in worker process...")
+                    plugin_router = init_plugin_router()
+
+                    # Initialize all plugins asynchronously (same as app_factory.py)
+                    if plugin_router:
+                        for plugin_id, plugin in plugin_router.plugins.items():
+                            try:
+                                await plugin.initialize()
+                                logger.info(f"✅ Plugin '{plugin_id}' initialized")
+                            except Exception as e:
+                                logger.error(f"Failed to initialize plugin '{plugin_id}': {e}")
+
                 if plugin_router:
                     plugin_data = {
                         'memories': created_memory_ids,

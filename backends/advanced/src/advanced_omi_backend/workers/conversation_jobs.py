@@ -10,11 +10,12 @@ import time, os
 from datetime import datetime
 from typing import Dict, Any
 from rq.job import Job
+from rq.exceptions import NoSuchJobError
 
 from advanced_omi_backend.models.job import async_job
 from advanced_omi_backend.controllers.queue_controller import redis_conn
 from advanced_omi_backend.controllers.session_controller import mark_session_complete
-from advanced_omi_backend.services.plugin_service import get_plugin_router
+from advanced_omi_backend.services.plugin_service import get_plugin_router, init_plugin_router
 
 from advanced_omi_backend.utils.conversation_utils import (
     analyze_speech,
@@ -238,14 +239,35 @@ async def open_conversation_job(
     # Link job metadata to conversation (cascading updates)
     current_job.meta["conversation_id"] = conversation_id
     current_job.save_meta()
-    speech_job = Job.fetch(speech_job_id, connection=redis_conn)
-    speech_job.meta["conversation_id"] = conversation_id
-    speech_job.save_meta()
-    speaker_check_job_id = speech_job.meta.get("speaker_check_job_id")
-    if speaker_check_job_id:
-        speaker_check_job = Job.fetch(speaker_check_job_id, connection=redis_conn)
-        speaker_check_job.meta["conversation_id"] = conversation_id
-        speaker_check_job.save_meta()
+
+    try:
+        speech_job = Job.fetch(speech_job_id, connection=redis_conn)
+        speech_job.meta["conversation_id"] = conversation_id
+        speech_job.save_meta()
+        speaker_check_job_id = speech_job.meta.get("speaker_check_job_id")
+        if speaker_check_job_id:
+            try:
+                speaker_check_job = Job.fetch(speaker_check_job_id, connection=redis_conn)
+                speaker_check_job.meta["conversation_id"] = conversation_id
+                speaker_check_job.save_meta()
+            except Exception as e:
+                if isinstance(e, NoSuchJobError):
+                    logger.error(
+                        f"❌ Missing job hash for speaker_check job {speaker_check_job_id}: "
+                        f"Job was linked to speech_job {speech_job_id} but hash key disappeared. "
+                        f"This may indicate TTL expiry or job collision."
+                    )
+                else:
+                    raise
+    except Exception as e:
+        if isinstance(e, NoSuchJobError):
+            logger.error(
+                f"❌ Missing job hash for speech_job {speech_job_id}: "
+                f"Job was created for session {session_id} but hash key disappeared before metadata link. "
+                f"This may indicate TTL expiry or job collision."
+            )
+        else:
+            raise
     
     # Signal audio persistence job to rotate to this conversation's file
     rotation_signal_key = f"conversation:current:{session_id}"
@@ -286,7 +308,7 @@ async def open_conversation_job(
     while True:
         # Check if job still exists in Redis (detect zombie state)
         from advanced_omi_backend.utils.job_utils import check_job_alive
-        if not await check_job_alive(redis_client, current_job):
+        if not await check_job_alive(redis_client, current_job, session_id):
             break
 
         # Check if session is finalizing (set by producer when recording stops)
@@ -711,3 +733,112 @@ async def generate_title_summary_job(conversation_id: str, *, redis_client=None)
         "detailed_summary": conversation.detailed_summary,
         "processing_time_seconds": processing_time,
     }
+
+
+@async_job(redis=True, beanie=True)
+async def dispatch_conversation_complete_event_job(
+    conversation_id: str,
+    audio_uuid: str,
+    client_id: str,
+    user_id: str,
+    *,
+    redis_client=None
+) -> Dict[str, Any]:
+    """
+    Dispatch conversation.complete plugin event for file upload processing.
+
+    This job runs at the end of the post-conversation job chain to ensure
+    plugins receive the conversation.complete event for uploaded audio files.
+    WebSocket streaming dispatches this event in open_conversation_job instead.
+
+    Args:
+        conversation_id: Conversation ID
+        audio_uuid: Audio UUID
+        client_id: Client ID
+        user_id: User ID
+        redis_client: Redis client (injected by decorator)
+
+    Returns:
+        Dict with success status and plugin results
+    """
+    from advanced_omi_backend.models.conversation import Conversation
+
+    logger.info(f"📌 Dispatching conversation.complete event for conversation {conversation_id}")
+
+    start_time = time.time()
+
+    # Get the conversation to include in event data
+    conversation = await Conversation.find_one(Conversation.conversation_id == conversation_id)
+    if not conversation:
+        logger.error(f"Conversation {conversation_id} not found")
+        return {"success": False, "error": "Conversation not found"}
+
+    # Get user email for event data
+    from advanced_omi_backend.models.user import User
+    user = await User.get(user_id)
+    user_email = user.email if user else ""
+
+    # Prepare plugin event data (same format as open_conversation_job)
+    try:
+        # Get or initialize plugin router (same pattern as transcription_jobs.py)
+        plugin_router = get_plugin_router()
+        if not plugin_router:
+            logger.info("🔧 Initializing plugin router in worker process...")
+            plugin_router = init_plugin_router()
+
+            # Initialize all plugins asynchronously (same as app_factory.py)
+            if plugin_router:
+                for plugin_id, plugin in plugin_router.plugins.items():
+                    try:
+                        await plugin.initialize()
+                        logger.info(f"✅ Plugin '{plugin_id}' initialized")
+                    except Exception as e:
+                        logger.error(f"Failed to initialize plugin '{plugin_id}': {e}")
+
+        if not plugin_router:
+            logger.warning("⚠️ Plugin router could not be initialized, skipping event dispatch")
+            return {"success": True, "skipped": True, "reason": "No plugin router"}
+
+        plugin_data = {
+            'conversation': {
+                'audio_uuid': audio_uuid,
+                'client_id': client_id,
+                'user_id': user_id,
+            },
+            'transcript': conversation.transcript if conversation else "",
+            'duration': 0,  # Duration not tracked for file uploads
+            'conversation_id': conversation_id,
+        }
+
+        plugin_results = await plugin_router.dispatch_event(
+            event='conversation.complete',
+            user_id=user_id,
+            data=plugin_data,
+            metadata={'end_reason': 'file_upload'}
+        )
+
+        if plugin_results:
+            logger.info(f"📌 Triggered {len(plugin_results)} conversation-level plugins")
+            for result in plugin_results:
+                if result.message:
+                    logger.info(f"  Plugin result: {result.message}")
+
+        processing_time = time.time() - start_time
+        logger.info(
+            f"✅ Conversation complete event dispatched for {conversation_id} in {processing_time:.2f}s"
+        )
+
+        return {
+            "success": True,
+            "conversation_id": conversation_id,
+            "plugin_count": len(plugin_results) if plugin_results else 0,
+            "processing_time_seconds": processing_time,
+        }
+
+    except Exception as e:
+        logger.warning(f"⚠️ Error dispatching conversation complete event: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "conversation_id": conversation_id,
+        }

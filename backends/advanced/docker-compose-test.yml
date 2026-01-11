@@ -47,6 +47,9 @@ services:
       - CORS_ORIGINS=http://localhost:3001,http://localhost:8001,https://localhost:3001,https://localhost:8001
       # Set low inactivity timeout for tests (2 seconds instead of 60)
       - SPEECH_INACTIVITY_THRESHOLD_SECONDS=2
+      # Set low speech detection thresholds for tests
+      - SPEECH_DETECTION_MIN_DURATION=2.0  # 2 seconds instead of 10
+      - SPEECH_DETECTION_MIN_WORDS=5  # 5 words instead of 10
       # Wait for audio queue to drain before timing out (test mode)
       - WAIT_FOR_AUDIO_QUEUE_DRAIN=true
     depends_on:
@@ -56,8 +59,6 @@ services:
         condition: service_healthy
       redis-test:
         condition: service_started
-      speaker-service-test:
-        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/readiness"]
       interval: 10s
@@ -191,6 +192,9 @@ services:
       - SPEAKER_SERVICE_URL=http://speaker-service-test:8085
       # Set low inactivity timeout for tests (2 seconds instead of 60)
       - SPEECH_INACTIVITY_THRESHOLD_SECONDS=2
+      # Set low speech detection thresholds for tests
+      - SPEECH_DETECTION_MIN_DURATION=2.0  # 2 seconds instead of 10
+      - SPEECH_DETECTION_MIN_WORDS=5  # 5 words instead of 10
       # Wait for audio queue to drain before timing out (test mode)
       - WAIT_FOR_AUDIO_QUEUE_DRAIN=true
     depends_on:
@@ -202,8 +206,6 @@ services:
         condition: service_started
       qdrant-test:
         condition: service_started
-      speaker-service-test:
-        condition: service_healthy
     restart: unless-stopped
 
   # Mycelia - AI memory and timeline service (test environment)

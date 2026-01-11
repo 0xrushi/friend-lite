@@ -9,6 +9,7 @@ import os
 import logging
 import time
 from typing import Dict, Any
+from rq.exceptions import NoSuchJobError
 
 from advanced_omi_backend.models.job import JobPriority, BaseRQJob, async_job
 
@@ -216,9 +217,12 @@ async def transcribe_full_audio_job(
 
             # Initialize plugin router if not already initialized (worker context)
             plugin_router = get_plugin_router()
+            logger.info(f"🔍 DEBUG: Plugin router from service: {plugin_router is not None}")
+
             if not plugin_router:
                 logger.info("🔧 Initializing plugin router in worker process...")
                 plugin_router = init_plugin_router()
+                logger.info(f"🔧 After init, plugin_router: {plugin_router is not None}, plugins count: {len(plugin_router.plugins) if plugin_router else 0}")
 
                 # Initialize async plugins
                 if plugin_router:
@@ -229,7 +233,7 @@ async def transcribe_full_audio_job(
                         except Exception as e:
                             logger.exception(f"Failed to initialize plugin '{plugin_id}' in worker: {e}")
 
-            logger.info(f"🔍 DEBUG: Plugin router retrieved: {plugin_router is not None}")
+            logger.info(f"🔍 DEBUG: Plugin router final check: {plugin_router is not None}, has {len(plugin_router.plugins) if plugin_router else 0} plugins")
 
             if plugin_router:
                 logger.info(f"🔍 DEBUG: Preparing to trigger transcript plugins for conversation {conversation_id}")
@@ -308,7 +312,10 @@ async def transcribe_full_audio_job(
                             cancelled_jobs.append(job_id)
                             logger.info(f"✅ Cancelled dependent job: {job_id}")
                     except Exception as e:
-                        logger.debug(f"Job {job_id} not found or already completed: {e}")
+                        if isinstance(e, NoSuchJobError):
+                            logger.debug(f"Job {job_id} hash not found (likely already completed or expired)")
+                        else:
+                            logger.debug(f"Job {job_id} not found or already completed: {e}")
 
                 if cancelled_jobs:
                     logger.info(
@@ -584,18 +591,30 @@ async def stream_speech_detection_job(
         )
         current_job.save_meta()
 
+    # Track when session closes for graceful shutdown
+    session_closed_at = None
+    final_check_grace_period = 15  # Wait up to 15 seconds for final transcription after session closes
+
     # Main loop: Listen for speech
     while True:
         # Check if job still exists in Redis (detect zombie state)
         from advanced_omi_backend.utils.job_utils import check_job_alive
 
-        if not await check_job_alive(redis_client, current_job):
+        if not await check_job_alive(redis_client, current_job, session_id):
             break
 
-        # Exit conditions
+        # Check if session has closed
         session_status = await redis_client.hget(session_key, "status")
-        if session_status and session_status.decode() in ["complete", "closed"]:
-            logger.info(f"🛑 Session ended, exiting")
+        session_closed = session_status and session_status.decode() in ["complete", "closed"]
+
+        if session_closed and session_closed_at is None:
+            # Session just closed - start grace period for final transcription
+            session_closed_at = time.time()
+            logger.info(f"🛑 Session closed, waiting up to {final_check_grace_period}s for final transcription results...")
+
+        # Exit if grace period expired without speech
+        if session_closed_at and (time.time() - session_closed_at) > final_check_grace_period:
+            logger.info(f"✅ Session ended without speech (grace period expired)")
             break
 
         if time.time() - start_time > max_runtime:
@@ -605,11 +624,35 @@ async def stream_speech_detection_job(
         # Get transcription results
         combined = await aggregator.get_combined_results(session_id)
         if not combined["text"]:
+            # Health check: detect transcription errors early during grace period
+            if session_closed_at:
+                # Check for streaming consumer errors in session metadata
+                error_status = await redis_client.hget(session_key, "transcription_error")
+                if error_status:
+                    error_msg = error_status.decode()
+                    logger.warning(f"❌ Transcription error detected: {error_msg}")
+                    logger.info(f"✅ Session ended without speech (transcription error)")
+                    break
+
+                # Check if we've been waiting too long with no results at all
+                grace_elapsed = time.time() - session_closed_at
+                if grace_elapsed > 5 and not combined.get("chunk_count", 0):
+                    # 5+ seconds with no transcription activity at all - likely API key issue
+                    logger.warning(f"⚠️ No transcription activity after {grace_elapsed:.1f}s - possible API key or connectivity issue")
+                    logger.info(f"✅ Session ended without speech (no transcription activity)")
+                    break
+
             await asyncio.sleep(2)
             continue
 
         # Step 1: Check for meaningful speech
         transcript_data = {"text": combined["text"], "words": combined.get("words", [])}
+
+        logger.info(
+            f"🔤 TRANSCRIPT [SPEECH_DETECT] session={session_id}, "
+            f"words={len(combined.get('words', []))}, text=\"{combined['text']}\""
+        )
+
         speech_analysis = analyze_speech(transcript_data)
 
         logger.info(
@@ -668,8 +711,6 @@ async def stream_speech_detection_job(
                 try:
                     speaker_check_job.refresh()
                 except Exception as e:
-                    from rq.exceptions import NoSuchJobError
-
                     if isinstance(e, NoSuchJobError):
                         logger.warning(
                             f"⚠️ Speaker check job disappeared from Redis (likely completed quickly), assuming not enrolled"

@@ -63,12 +63,14 @@ Clear Test Databases
 
     # Clear audio files (except fixtures subfolder)
     Run Process    bash    -c    find ${BACKEND_DIR}/data/test_audio_chunks -maxdepth 1 -name "*.wav" -delete || true    shell=True
-    Run Process    bash    -c    rm -rf ${BACKEND_DIR}/data/test_debug_dir/* || true    shell=True
+    # Don't delete plugin database - just clear its contents later via Clear Plugin Events keyword
+    # Run Process    bash    -c    rm -rf ${BACKEND_DIR}/data/test_debug_dir/* || true    shell=True
     Log To Console    Audio files cleared (fixtures/ subfolder preserved)
 
     # Clear container audio files (except fixtures subfolder)
     Run Process    bash    -c    docker exec ${BACKEND_CONTAINER} find /app/audio_chunks -maxdepth 1 -name "*.wav" -delete || true    shell=True
-    Run Process    bash    -c    docker exec ${BACKEND_CONTAINER} find /app/debug_dir -name "*" -type f -delete || true    shell=True
+    # Don't delete plugin database files - database is cleared via Clear Plugin Events keyword
+    # Run Process    bash    -c    docker exec ${BACKEND_CONTAINER} find /app/debug_dir -name "*" -type f -delete || true    shell=True
 
     # Clear Redis queues and job registries (preserve worker registrations, failed and completed jobs)
     # Delete all rq:* keys except worker registrations (rq:worker:*), failed jobs (rq:failed:*), and completed jobs (rq:finished:*)

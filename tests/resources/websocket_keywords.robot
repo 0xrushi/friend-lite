@@ -4,6 +4,7 @@ Library          Collections
 Library          OperatingSystem
 Library          String
 Library          ../libs/audio_stream_library.py
+Library          ../libs/auth_helpers.py
 Variables        ../setup/test_env.py
 Resource         session_keywords.robot
 Resource         queue_keywords.robot
@@ -15,8 +16,13 @@ Get Client ID From Device Name
     ...                Matches backend logic in client_manager.py:generate_client_id()
     [Arguments]    ${device_name}
 
-    # Test admin user ID: 695f6e8595eae00281d26432 (actual ID from test environment)
-    ${user_suffix}=    Set Variable    d26432
+    # Get admin user ID dynamically from JWT token (changes on each database reset)
+    ${admin_session}=    Get Admin API Session
+    ${token}=    Get Authentication Token    ${admin_session}    ${ADMIN_EMAIL}    ${ADMIN_PASSWORD}
+    ${user_id}=    Get User ID From Token    ${token}
+
+    # Extract last 6 characters of user ID (matches backend logic)
+    ${user_suffix}=    Get Substring    ${user_id}    -6
 
     # Sanitize and truncate device name to 10 chars (matches backend: [:10])
     # Backend sanitizes: lowercase, alphanumeric + hyphens only
