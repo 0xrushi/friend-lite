@@ -527,7 +527,6 @@ async def open_conversation_job(
     job_ids = start_post_conversation_jobs(
         conversation_id=conversation_id,
         audio_uuid=session_id,
-        audio_file_path=file_path,
         user_id=user_id,
         post_transcription=True,  # Run batch transcription for streaming audio
         client_id=client_id  # Pass client_id for UI tracking

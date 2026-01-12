@@ -156,7 +156,6 @@ async def upload_and_process_audio_files(
                 job_ids = start_post_conversation_jobs(
                     conversation_id=conversation_id,
                     audio_uuid=audio_uuid,
-                    audio_file_path=None,  # No file path - using MongoDB chunks
                     user_id=user.user_id,
                     post_transcription=True,  # Run batch transcription for uploads
                     client_id=client_id  # Pass client_id for UI tracking

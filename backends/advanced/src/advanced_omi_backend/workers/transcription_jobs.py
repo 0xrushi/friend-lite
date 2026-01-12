@@ -126,7 +126,6 @@ async def apply_speaker_recognition(
 async def transcribe_full_audio_job(
     conversation_id: str,
     audio_uuid: str,
-    audio_path: str,
     version_id: str,
     trigger: str = "reprocess",
     *,
@@ -136,17 +135,17 @@ async def transcribe_full_audio_job(
     RQ job function for transcribing full audio to text (transcription only, no speaker recognition).
 
     This job:
-    1. Transcribes audio to text with generic speaker labels (Speaker 0, Speaker 1, etc.)
-    2. Generates title and summary
-    3. Saves transcript version to conversation
-    4. Returns results for downstream jobs (speaker recognition, memory)
+    1. Reconstructs audio from MongoDB chunks
+    2. Transcribes audio to text with generic speaker labels (Speaker 0, Speaker 1, etc.)
+    3. Generates title and summary
+    4. Saves transcript version to conversation
+    5. Returns results for downstream jobs (speaker recognition, memory)
 
     Speaker recognition is handled by a separate job (recognise_speakers_job).
 
     Args:
         conversation_id: Conversation ID
         audio_uuid: Audio UUID (unused but kept for compatibility)
-        audio_path: Path to audio file
         version_id: Version ID for new transcript
         trigger: Trigger source
         redis_client: Redis client (injected by decorator)
@@ -182,52 +181,25 @@ async def transcribe_full_audio_job(
     logger.info(f"Using transcription provider: {provider_name}")
 
     # Reconstruct audio from MongoDB chunks
-    import tempfile
     from advanced_omi_backend.utils.audio_chunk_utils import reconstruct_wav_from_conversation
 
     logger.info(f"📦 Reconstructing audio from MongoDB chunks for conversation {conversation_id}")
 
     try:
-        # Reconstruct WAV from MongoDB chunks
+        # Reconstruct WAV from MongoDB chunks (already in memory as bytes)
         wav_data = await reconstruct_wav_from_conversation(conversation_id)
 
-        # Write to temporary file for transcription service
-        # (Services expect file paths, not bytes)
-        temp_wav_file = tempfile.NamedTemporaryFile(
-            suffix=".wav",
-            delete=False,
-            prefix=f"batch_transcribe_{conversation_id[:8]}_"
+        logger.info(
+            f"📦 Reconstructed audio from MongoDB chunks: "
+            f"{len(wav_data) / 1024 / 1024:.2f} MB"
         )
 
-        try:
-            temp_wav_file.write(wav_data)
-            temp_wav_file.flush()
-            temp_wav_path = temp_wav_file.name
-            temp_wav_file.close()
-
-            logger.info(
-                f"📁 Created temporary WAV file: {temp_wav_path} "
-                f"({len(wav_data) / 1024 / 1024:.2f} MB)"
-            )
-
-            # Read audio data for transcription
-            # Some providers need the file path, some need bytes
-            # Read both to support all provider types
-            with open(temp_wav_path, "rb") as f:
-                audio_data = f.read()
-
-            # Transcribe the audio (assume 16kHz sample rate)
-            transcription_result = await provider.transcribe(
-                audio_data=audio_data, sample_rate=16000, diarize=True
-            )
-
-        finally:
-            # Clean up temporary file
-            try:
-                Path(temp_wav_path).unlink(missing_ok=True)
-                logger.debug(f"🧹 Deleted temporary WAV file: {temp_wav_path}")
-            except Exception as cleanup_error:
-                logger.warning(f"Failed to delete temporary file {temp_wav_path}: {cleanup_error}")
+        # Transcribe the audio directly from memory (no disk I/O needed)
+        transcription_result = await provider.transcribe(
+            audio_data=wav_data,  # Pass bytes directly, already in memory
+            sample_rate=16000,
+            diarize=True
+        )
 
     except ValueError as e:
         # No chunks found for conversation
@@ -441,7 +413,7 @@ async def transcribe_full_audio_job(
     # Prepare metadata (transcription only - speaker recognition will add its own metadata)
     metadata = {
         "trigger": trigger,
-        "audio_file_size": len(audio_data),
+        "audio_file_size": len(wav_data),
         "segment_count": len(segments),
         "word_count": len(words),
         "words": words,  # Store words for speaker recognition job to read

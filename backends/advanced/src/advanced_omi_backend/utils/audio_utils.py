@@ -258,6 +258,49 @@ async def process_audio_chunk(
         client_state.update_audio_received(chunk)
 
 
+def pcm_to_wav_bytes(
+    pcm_data: bytes,
+    sample_rate: int = 16000,
+    channels: int = 1,
+    sample_width: int = 2
+) -> bytes:
+    """
+    Convert raw PCM audio data to WAV format in memory.
+
+    Args:
+        pcm_data: Raw PCM audio bytes
+        sample_rate: Sample rate in Hz (default: 16000)
+        channels: Number of audio channels (default: 1 for mono)
+        sample_width: Sample width in bytes (default: 2 for 16-bit)
+
+    Returns:
+        WAV file data as bytes
+    """
+    import wave
+    import io
+
+    logger.debug(
+        f"Converting PCM to WAV in memory: {len(pcm_data)} bytes "
+        f"(rate={sample_rate}, channels={channels}, width={sample_width})"
+    )
+
+    # Use BytesIO to create WAV in memory
+    wav_buffer = io.BytesIO()
+
+    with wave.open(wav_buffer, 'wb') as wav_file:
+        wav_file.setnchannels(channels)
+        wav_file.setsampwidth(sample_width)
+        wav_file.setframerate(sample_rate)
+        wav_file.writeframes(pcm_data)
+
+    # Get the WAV bytes
+    wav_bytes = wav_buffer.getvalue()
+
+    logger.debug(f"Created WAV in memory: {len(wav_bytes)} bytes")
+
+    return wav_bytes
+
+
 def write_pcm_to_wav(
     pcm_data: bytes,
     output_path: str,

@@ -366,7 +366,6 @@ def start_streaming_jobs(
 def start_post_conversation_jobs(
     conversation_id: str,
     audio_uuid: str,
-    audio_file_path: str,
     user_id: str,
     post_transcription: bool = True,
     transcript_version_id: Optional[str] = None,
@@ -382,15 +381,17 @@ def start_post_conversation_jobs(
     3. Memory extraction job - Extracts memories from conversation (parallel)
     4. Title/summary generation job - Generates title and summary (parallel)
 
+    Note: Audio is reconstructed from MongoDB chunks, not files.
+
     Args:
         conversation_id: Conversation identifier
         audio_uuid: Audio UUID for job tracking
-        audio_file_path: Path to audio file
         user_id: User identifier
         post_transcription: If True, run batch transcription step (for uploads)
                            If False, skip transcription (streaming already has it)
         transcript_version_id: Transcript version ID (auto-generated if None)
         depends_on_job: Optional job dependency for first job
+        client_id: Client ID for UI tracking
 
     Returns:
         Dict with job IDs (transcription will be None if post_transcription=False)
@@ -416,7 +417,6 @@ def start_post_conversation_jobs(
         transcribe_full_audio_job,
         conversation_id,
         audio_uuid,
-        audio_file_path,
         version_id,
         "batch",  # trigger
         job_timeout=1800,  # 30 minutes
@@ -439,9 +439,6 @@ def start_post_conversation_jobs(
         recognise_speakers_job,
         conversation_id,
         version_id,
-        audio_file_path,
-        "",  # transcript_text - will be read from DB
-        [],  # words - will be read from DB
         job_timeout=1200,  # 20 minutes
         result_ttl=JOB_RESULT_TTL,
         depends_on=speaker_depends_on,

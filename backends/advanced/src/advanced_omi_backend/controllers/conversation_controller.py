@@ -4,6 +4,7 @@ Conversation controller for handling conversation-related business logic.
 
 import logging
 import time
+from datetime import datetime
 from pathlib import Path
 
 from fastapi.responses import JSONResponse
@@ -382,34 +383,20 @@ async def reprocess_transcript(conversation_id: str, user: User):
         if not user.is_superuser and conversation_model.user_id != str(user.user_id):
             return JSONResponse(status_code=403, content={"error": "Access forbidden. You can only reprocess your own conversations."})
 
-        # Get audio_uuid and file path from conversation
+        # Get audio_uuid from conversation
         audio_uuid = conversation_model.audio_uuid
-        audio_path = conversation_model.audio_path
 
-        if not audio_path:
+        # Validate audio chunks exist in MongoDB
+        chunks = await AudioChunkDocument.find(
+            AudioChunkDocument.conversation_id == conversation_id
+        ).to_list()
+
+        if not chunks:
             return JSONResponse(
-                status_code=400, content={"error": "No audio file found for this conversation"}
-            )
-
-        # Check if file exists - try multiple possible locations
-        possible_paths = [
-            Path("/app/audio_chunks") / audio_path,
-            Path(audio_path),  # fallback to relative path
-        ]
-
-        full_audio_path = None
-        for path in possible_paths:
-            if path.exists():
-                full_audio_path = path
-                break
-
-        if not full_audio_path:
-            return JSONResponse(
-                status_code=422,
+                status_code=404,
                 content={
-                    "error": "Audio file not found on disk",
-                    "details": f"Conversation exists but audio file '{audio_path}' is missing from expected locations",
-                    "searched_paths": [str(p) for p in possible_paths]
+                    "error": "No audio data found for this conversation",
+                    "details": f"Conversation '{conversation_id}' exists but has no audio chunks in MongoDB"
                 }
             )
 
@@ -430,12 +417,11 @@ async def reprocess_transcript(conversation_id: str, user: User):
             transcribe_full_audio_job,
         )
 
-        # Job 1: Transcribe audio to text
+        # Job 1: Transcribe audio to text (reconstructs from MongoDB chunks)
         transcript_job = transcription_queue.enqueue(
             transcribe_full_audio_job,
             conversation_id,
             audio_uuid,
-            str(full_audio_path),
             version_id,
             "reprocess",
             job_timeout=600,
@@ -446,14 +432,11 @@ async def reprocess_transcript(conversation_id: str, user: User):
         )
         logger.info(f"📥 RQ: Enqueued transcription job {transcript_job.id}")
 
-        # Job 2: Recognize speakers (depends on transcription)
+        # Job 2: Recognize speakers (depends on transcription, reads data from DB)
         speaker_job = transcription_queue.enqueue(
             recognise_speakers_job,
             conversation_id,
             version_id,
-            str(full_audio_path),
-            "",  # transcript_text - will be read from DB
-            [],  # words - will be read from DB
             depends_on=transcript_job,
             job_timeout=600,
             result_ttl=JOB_RESULT_TTL,

@@ -39,6 +39,14 @@ Clear Test Databases
     # Clear conversations except those tagged as fixtures
     Run Process    docker exec ${MONGO_CONTAINER} mongosh test_db --eval "db.conversations.deleteMany({\\$or: [{'is_fixture': {\\$exists: false}}, {'is_fixture': false}]})"    shell=True
 
+    # Delete old fixture conversations that don't have audio chunks (from pre-MongoDB-migration)
+    ${delete_fixtures_script}=    Set Variable    const fixturesWithoutChunks = db.conversations.find({'is_fixture': true}).toArray().filter(c => db.audio_chunks.countDocuments({conversation_id: c.conversation_id}) === 0).map(c => c.conversation_id); if (fixturesWithoutChunks.length > 0) { db.conversations.deleteMany({conversation_id: {$in: fixturesWithoutChunks}}); print('Deleted ' + fixturesWithoutChunks.length + ' old fixture(s)'); }
+    Run Process    docker    exec    ${MONGO_CONTAINER}    mongosh    test_db    --eval    ${delete_fixtures_script}    shell=True
+
+    # Clear audio chunks except those belonging to remaining fixture conversations
+    ${clear_chunks_script}=    Set Variable    const fixtureIds = db.conversations.find({'is_fixture': true}, {conversation_id: 1}).map(c => c.conversation_id); db.audio_chunks.deleteMany({conversation_id: {$nin: fixtureIds}})
+    Run Process    docker    exec    ${MONGO_CONTAINER}    mongosh    test_db    --eval    ${clear_chunks_script}    shell=True
+
     # Clear job references from remaining conversations to prevent "No such job" errors
     Run Process    docker exec ${MONGO_CONTAINER} mongosh test_db --eval "db.conversations.updateMany({}, {\\$unset: {'transcription_job_id': '', 'speaker_job_id': '', 'memory_job_id': ''}})"    shell=True
 
@@ -85,6 +93,7 @@ Clear All Test Data
     # Wipe all MongoDB collections
     Run Process    docker exec ${MONGO_CONTAINER} mongosh test_db --eval "db.users.deleteMany({})"    shell=True
     Run Process    docker exec ${MONGO_CONTAINER} mongosh test_db --eval "db.conversations.deleteMany({})"    shell=True
+    Run Process    docker exec ${MONGO_CONTAINER} mongosh test_db --eval "db.audio_chunks.deleteMany({})"    shell=True
     Log To Console    MongoDB completely cleared
 
     # Clear Qdrant

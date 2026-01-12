@@ -121,9 +121,8 @@ async def check_enrolled_speakers_job(
 async def recognise_speakers_job(
     conversation_id: str,
     version_id: str,
-    audio_path: str,
-    transcript_text: str,
-    words: list,
+    transcript_text: str = "",
+    words: list = None,
     *,
     redis_client=None
 ) -> Dict[str, Any]:
@@ -131,16 +130,16 @@ async def recognise_speakers_job(
     RQ job function for identifying speakers in a transcribed conversation.
 
     This job runs after transcription and:
-    1. Calls speaker recognition service to identify speakers
-    2. Updates the transcript version with identified speaker labels
-    3. Returns results for downstream jobs (memory)
+    1. Reconstructs audio from MongoDB chunks
+    2. Calls speaker recognition service to identify speakers
+    3. Updates the transcript version with identified speaker labels
+    4. Returns results for downstream jobs (memory)
 
     Args:
         conversation_id: Conversation ID
         version_id: Transcript version ID to update
-        audio_path: Path to audio file
-        transcript_text: Transcript text from transcription job
-        words: Word-level timing data from transcription job
+        transcript_text: Transcript text from transcription job (optional, reads from DB if empty)
+        words: Word-level timing data from transcription job (optional, reads from DB if empty)
         redis_client: Redis client (injected by decorator)
 
     Returns:
@@ -186,77 +185,52 @@ async def recognise_speakers_job(
         }
 
     # Reconstruct audio from MongoDB chunks
-    import tempfile
-    from pathlib import Path
     from advanced_omi_backend.utils.audio_chunk_utils import reconstruct_wav_from_conversation
 
     logger.info(f"📦 Reconstructing audio from MongoDB chunks for conversation {conversation_id}")
 
     # Call speaker recognition service
     try:
-        # Reconstruct WAV from MongoDB chunks
+        # Reconstruct WAV from MongoDB chunks (already in memory as bytes)
         wav_data = await reconstruct_wav_from_conversation(conversation_id)
 
-        # Write to temporary file for speaker recognition service
-        temp_wav_file = tempfile.NamedTemporaryFile(
-            suffix=".wav",
-            delete=False,
-            prefix=f"speaker_recog_{conversation_id[:8]}_"
+        logger.info(
+            f"📦 Reconstructed audio from MongoDB chunks: "
+            f"{len(wav_data) / 1024 / 1024:.2f} MB"
         )
 
-        try:
-            temp_wav_file.write(wav_data)
-            temp_wav_file.flush()
-            temp_wav_path = temp_wav_file.name
-            temp_wav_file.close()
+        # Read transcript text and words from the transcript version
+        # (Parameters may be empty if called via job dependency)
+        actual_transcript_text = transcript_text or transcript_version.transcript or ""
+        actual_words = words if words else []
 
-            logger.info(
-                f"📁 Created temporary WAV file for speaker recognition: {temp_wav_path} "
-                f"({len(wav_data) / 1024 / 1024:.2f} MB)"
-            )
+        # If words not provided, we need to get them from metadata
+        if not actual_words and transcript_version.metadata:
+            actual_words = transcript_version.metadata.get("words", [])
 
-            # Read transcript text and words from the transcript version
-            # (Parameters may be empty if called via job dependency)
-            actual_transcript_text = transcript_text or transcript_version.transcript or ""
-            actual_words = words if words else []
-
-            # If words not provided, we need to get them from metadata
-            if not actual_words and transcript_version.metadata:
-                actual_words = transcript_version.metadata.get("words", [])
-
-            if not actual_transcript_text:
-                logger.warning(f"🎤 No transcript text found in version {version_id}")
-                # Clean up temp file before returning
-                Path(temp_wav_path).unlink(missing_ok=True)
-                return {
-                    "success": False,
-                    "conversation_id": conversation_id,
-                    "version_id": version_id,
-                    "error": "No transcript text available",
-                    "processing_time_seconds": 0
-                }
-
-            transcript_data = {
-                "text": actual_transcript_text,
-                "words": actual_words
+        if not actual_transcript_text:
+            logger.warning(f"🎤 No transcript text found in version {version_id}")
+            return {
+                "success": False,
+                "conversation_id": conversation_id,
+                "version_id": version_id,
+                "error": "No transcript text available",
+                "processing_time_seconds": 0
             }
 
-            logger.info(f"🎤 Calling speaker recognition service...")
+        transcript_data = {
+            "text": actual_transcript_text,
+            "words": actual_words
+        }
 
-            # Call speaker service with temporary file path
-            speaker_result = await speaker_client.diarize_identify_match(
-                audio_path=temp_wav_path,
-                transcript_data=transcript_data,
-                user_id=user_id
-            )
+        logger.info(f"🎤 Calling speaker recognition service...")
 
-        finally:
-            # Clean up temporary file
-            try:
-                Path(temp_wav_path).unlink(missing_ok=True)
-                logger.debug(f"🧹 Deleted temporary WAV file: {temp_wav_path}")
-            except Exception as cleanup_error:
-                logger.warning(f"Failed to delete temporary file {temp_wav_path}: {cleanup_error}")
+        # Call speaker service with in-memory audio data (no temp file needed!)
+        speaker_result = await speaker_client.diarize_identify_match(
+            audio_data=wav_data,  # Pass bytes directly, no disk I/O
+            transcript_data=transcript_data,
+            user_id=user_id
+        )
 
     except ValueError as e:
         # No chunks found for conversation
