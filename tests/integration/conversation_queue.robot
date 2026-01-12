@@ -14,6 +14,7 @@ Suite Setup      Suite Setup
 Suite Teardown   Suite Teardown
 Test Setup       Clear Test Databases
 
+Test Tags        queue	requires-api-keys
 
 *** Test Cases ***
 

@@ -14,6 +14,8 @@ Suite Setup      Suite Setup
 Suite Teardown   Suite Teardown
 Test Setup        Test Cleanup
 
+Test Tags         audio-streaming	requires-api-keys
+
 *** Variables ***
 
 

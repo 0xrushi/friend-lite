@@ -1,288 +1,137 @@
-# Chronicle API Tests
+# Chronicle Test Suite
 
-Comprehensive Robot Framework test suite for the Chronicle advanced backend API endpoints.
+Quick reference guide for running Robot Framework tests locally.
 
 ## Quick Start
 
-### Running Tests Locally
-
+### Run Tests Without API Keys (Fast)
 ```bash
-# From the tests/ directory
+cd tests
+./run-no-api-tests.sh
+```
+- **Runs**: ~70% of test suite (excludes `requires-api-keys` tag)
+- **Config**: `configs/mock-services.yml` (no external APIs)
+- **Time**: ~10-15 minutes
+- **Use**: Daily development, PR validation
+
+### Run Full Test Suite (Comprehensive)
+```bash
+# Set API keys first
+export DEEPGRAM_API_KEY=your-deepgram-key
+export OPENAI_API_KEY=your-openai-key
+
+cd tests
 ./run-robot-tests.sh
 ```
-
-The script will:
-1. Check for required API keys (DEEPGRAM_API_KEY, OPENAI_API_KEY)
-2. Start test infrastructure (MongoDB, Redis, Qdrant)
-3. Build and start the backend and workers
-4. Run all Robot Framework tests via Makefile
-5. Display results and cleanup
-
-**This mirrors the GitHub CI workflow for local development.**
-
-### Environment Setup
-
-The script will create `tests/setup/.env.test` automatically if it doesn't exist. You can also create it manually:
-
-```bash
-# API URLs
-API_URL=http://localhost:8001
-BACKEND_URL=http://localhost:8001
-FRONTEND_URL=http://localhost:3001
-
-# Test Admin Credentials
-ADMIN_EMAIL=test-admin@example.com
-ADMIN_PASSWORD=test-admin-password-123
-
-# API Keys (required)
-OPENAI_API_KEY=your-key-here
-DEEPGRAM_API_KEY=your-key-here
-
-# Test Configuration
-TEST_TIMEOUT=120
-TEST_DEVICE_NAME=robot-test
-```
-
-### Configuration Options
-
-```bash
-# Skip container cleanup (useful for debugging)
-CLEANUP_CONTAINERS=false ./run-robot-tests.sh
-
-# Custom output directory
-OUTPUTDIR=my-results ./run-robot-tests.sh
-
-# Leave containers running for debugging
-CLEANUP_CONTAINERS=false ./run-robot-tests.sh
-```
-
-## Running Tests via Makefile
-
-If you already have the backend running, you can use the Makefile directly:
-
-## Test Structure
-
-### Test Files
-- **`auth_tests.robot`** - Authentication and user management tests
-- **`memory_tests.robot`** - Memory management and search tests
-- **`conversation_tests.robot`** - Conversation management and versioning tests
-- **`health_tests.robot`** - Health check and status endpoint tests
-- **`chat_tests.robot`** - Chat service and session management tests
-- **`client_queue_tests.robot`** - Client management and queue monitoring tests
-- **`system_admin_tests.robot`** - System administration and configuration tests
-- **`all_api_tests.robot`** - Master test suite runner
-
-### Resource Files
-- **`resources/auth_keywords.robot`** - Authentication helper keywords
-- **`resources/memory_keywords.robot`** - Memory management keywords
-- **`resources/conversation_keywords.robot`** - Conversation management keywords
-- **`resources/chat_keywords.robot`** - Chat service keywords
-- **`resources/setup_resources.robot`** - Basic setup and health check keywords
-- **`resources/login_resources.robot`** - Login-specific utilities
-
-### Configuration
-- **`test_env.py`** - Environment configuration and test data
-- **`.env`** - Environment variables (create from template)
-
-## Running Tests
-
-### Prerequisites
-1. Chronicle backend running at `http://localhost:8001` (or set `API_URL` in `.env`)
-2. Admin user credentials configured in `.env`
-3. Robot Framework and RequestsLibrary installed
-
-### Environment Setup
-```bash
-# Copy environment template
-cp .env.template .env
-
-# Edit .env with your configuration
-API_URL=http://localhost:8001
-ADMIN_EMAIL=admin@example.com
-ADMIN_PASSWORD=your-secure-admin-password
-```
-
-### Running Individual Test Suites
-```bash
-# Authentication and user tests
-robot auth_tests.robot
-
-# Memory management tests
-robot memory_tests.robot
-
-# Conversation management tests
-robot conversation_tests.robot
-
-# Health and status tests
-robot health_tests.robot
-
-# Chat service tests
-robot chat_tests.robot
-
-# Client and queue tests
-robot client_queue_tests.robot
-
-# System administration tests
-robot system_admin_tests.robot
-```
-
-### Running All Tests
-```bash
-# Run complete test suite
-robot *.robot
-
-# Run with specific tags
-robot --include auth *.robot
-robot --include positive *.robot
-robot --include admin *.robot
-```
-
-### Test Output
-```bash
-# Custom output directory
-robot --outputdir results *.robot
-
-# Verbose logging
-robot --loglevel DEBUG *.robot
-
-# Parallel execution
-pabot --processes 4 *.robot
-```
-
-## Test Coverage
-
-### Authentication & Users (`/api/users`, `/auth`)
-- ✅ Login with valid/invalid credentials
-- ✅ Get current user information
-- ✅ Create/update/delete users (admin only)
-- ✅ User authorization and access control
-- ✅ Admin privilege enforcement
-
-### Memory Management (`/api/memories`)
-- ✅ Get user memories with pagination
-- ✅ Search memories with similarity thresholds
-- ✅ Get memories with transcripts
-- ✅ Delete specific memories
-- ✅ Admin memory access across users
-- ✅ Unfiltered memory access for debugging
-
-### Conversation Management (`/api/conversations`)
-- ✅ List and retrieve conversations
-- ✅ Conversation version history
-- ✅ Transcript reprocessing
-- ✅ Memory reprocessing with version selection
-- ✅ Version activation (transcript/memory)
-- ✅ Conversation deletion and cleanup
-- ✅ User data isolation
-
-### Health & Status (`/health`, `/readiness`)
-- ✅ Main health check with service details
-- ✅ Readiness check for orchestration
-- ✅ Authentication service health
-- ✅ Queue system health status
-- ✅ Chat service health check
-- ✅ System metrics (admin only)
-
-### Chat Service (`/api/chat`)
-- ✅ Session creation and management
-- ✅ Session title updates
-- ✅ Message retrieval
-- ✅ Chat statistics
-- ✅ Memory extraction from sessions
-- ✅ Session deletion and cleanup
-
-### Client & Queue Management
-- ✅ Active client monitoring
-- ✅ Queue job listing with pagination
-- ✅ Queue statistics and health
-- ✅ User job isolation
-- ✅ Processing task monitoring (admin only)
-
-### System Administration
-- ✅ Authentication configuration
-- ✅ Diarization settings management
-- ✅ Speaker configuration
-- ✅ Memory configuration (YAML)
-- ✅ Configuration validation and reload
-- ✅ Bulk memory deletion
+- **Runs**: 100% of test suite (all tests)
+- **Config**: `configs/deepgram-openai.yml` (with external APIs)
+- **Time**: ~20-30 minutes
+- **Use**: Before pushing to dev/main, testing API integrations
 
 ## Test Categories
 
-### By Access Level
-- **Public**: Health checks, auth config
-- **User**: Memories, conversations, chat sessions
-- **Admin**: User management, system config, metrics
+### No API Keys Required (~70%)
+- **Endpoint Tests**: Auth, CRUD operations, permissions
+- **Infrastructure Tests**: Worker management, queue operations
+- **Health Tests**: System health and readiness checks
+- **Basic Integration**: Non-transcription workflows
 
-### By Test Type
-- **Positive**: Valid operations and expected responses
-- **Negative**: Invalid inputs, unauthorized access
-- **Security**: Authentication, authorization, data isolation
-- **Integration**: Cross-service functionality
+### API Keys Required (~30%)
+Tagged with `requires-api-keys`:
+- **Audio Upload Tests**: File processing with transcription
+- **Memory Tests**: LLM-based memory operations
+- **Audio Streaming**: Real-time transcription tests
+- **E2E Integration**: Full pipeline with transcription and memory
 
-### By Component
-- **Auth**: Authentication and authorization
-- **Memory**: Memory storage and retrieval
-- **Conversation**: Audio processing and transcription
-- **Chat**: Interactive chat functionality
-- **System**: Configuration and administration
+## Configuration Files
 
-## Key Features Tested
+### `configs/mock-services.yml`
+- No external API calls
+- Dummy LLM/embedding models (satisfy config requirements)
+- Used by: `run-no-api-tests.sh`
+- Perfect for: Endpoint and infrastructure testing
 
-### Security
-- JWT token authentication
-- Role-based access control (admin vs user)
-- Data isolation between users
-- Unauthorized access prevention
+### `configs/deepgram-openai.yml`
+- Real Deepgram transcription
+- Real OpenAI LLM and embeddings
+- Used by: `run-robot-tests.sh`
+- Perfect for: Full E2E validation
 
-### Data Management
-- CRUD operations for all entities
-- Pagination and filtering
-- Search functionality with thresholds
-- Versioning and history tracking
+### `configs/parakeet-ollama.yml`
+- Local Parakeet ASR (offline transcription)
+- Local Ollama LLM (offline processing)
+- Perfect for: Fully offline testing
 
-### System Integration
-- Service health monitoring
-- Configuration management
-- Queue system monitoring
-- Cross-service communication
+## Environment Configuration
 
-### Error Handling
-- Invalid input validation
-- Non-existent resource handling
-- Permission denied scenarios
-- Service unavailability graceful degradation
+Tests use isolated test environment with separate ports and database:
 
-## Maintenance
-
-### Adding New Tests
-1. Create test file or add to existing suite
-2. Use appropriate resource keywords
-3. Follow naming conventions (`Test Name Test`)
-4. Include proper tags and documentation
-5. Add cleanup in teardown if needed
-
-### Updating Keywords
-1. Modify resource files for reusable functionality
-2. Keep keywords focused and single-purpose
-3. Use proper argument handling
-4. Include documentation strings
-
-### Environment Variables
-Update `test_env.py` when adding new configuration options or test data.
-
-## Troubleshooting
-
-### Common Issues
-- **401 Unauthorized**: Check admin credentials in `.env`
-- **Connection Refused**: Ensure backend is running
-- **Test Failures**: Check service health endpoints first
-- **Timeout Errors**: Increase timeouts in test configuration
-
-### Debug Mode
 ```bash
-# Run with detailed logging
-robot --loglevel TRACE auth_tests.robot
+# Test Ports (avoid conflicts with dev services)
+Backend:  8001 (vs 8000 prod)
+MongoDB:  27018 (vs 27017 prod)
+Qdrant:   6337/6338 (vs 6333/6334 prod)
+WebUI:    3001 (vs 5173 prod)
 
-# Stop on first failure
-robot --exitonfailure *.robot
+# Test Database
+Database: test_db (separate from production)
 ```
+
+### Test Credentials
+```bash
+# Admin account (created automatically)
+ADMIN_EMAIL=test-admin@example.com
+ADMIN_PASSWORD=test-admin-password-123
+
+# Authentication secret (test-specific)
+AUTH_SECRET_KEY=test-jwt-signing-key-for-integration-tests
+```
+
+## Test Scripts
+
+### `run-no-api-tests.sh`
+- Excludes tests tagged with `requires-api-keys`
+- Uses `configs/mock-services.yml`
+- No API key validation
+- Fast feedback loop
+
+### `run-robot-tests.sh`
+- Runs all tests (including API-dependent)
+- Uses `configs/deepgram-openai.yml`
+- Validates API keys before execution
+- Comprehensive test coverage
+
+### `run-api-tests.sh` (Optional)
+- Runs only tests tagged with `requires-api-keys`
+- Validates API integrations specifically
+- ~30% of test suite
+
+## Quick Command Reference
+
+```bash
+# No-API tests (fast)
+cd tests && ./run-no-api-tests.sh
+
+# Full tests (comprehensive)
+export DEEPGRAM_API_KEY=xxx OPENAI_API_KEY=yyy
+cd tests && ./run-robot-tests.sh
+
+# Run specific suites
+make endpoints
+make integration
+make infra
+
+# View results
+open results-no-api/report.html
+open results/log.html
+
+# Clean up
+docker compose -f ../backends/advanced/docker-compose-test.yml down -v
+```
+
+## Additional Resources
+
+- **TESTING_GUIDELINES.md**: Comprehensive testing patterns and rules
+- **tags.md**: Approved tag list (12 tags only)
+- **setup/test_env.py**: Test environment configuration
+- **setup/test_data.py**: Test data and fixtures
