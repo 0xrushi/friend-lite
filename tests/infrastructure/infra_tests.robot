@@ -180,7 +180,7 @@ Worker Count Validation Test
     ...
     ...                This test validates that:
     ...                - Health endpoint includes worker_count field
-    ...                - Worker count matches expected number (7 workers: 6 RQ + 1 audio)
+    ...                - Worker count matches expected number (9 workers: 6 RQ + 3 audio)
     ...                - Worker state information is accurate
     [Tags]    health	queue
 
@@ -217,10 +217,10 @@ Worker Count Validation Test
     Log To Console    Idle workers: ${idle_workers}
 
     # Verify exact worker count
-    # Expected: 7 RQ workers (6 general workers + 1 audio persistence worker)
+    # Expected: 9 RQ workers (6 general workers + 3 audio persistence workers)
     # Note: Audio stream workers (Deepgram/Parakeet) are NOT RQ workers - they don't register
     # We wait up to 20s for registration, so all workers should be present
-    Should Be Equal As Integers    ${worker_count}    7    msg=Expected exactly 7 RQ workers (6 general + 1 audio persistence)
+    Should Be Equal As Integers    ${worker_count}    9    msg=Expected exactly 9 RQ workers (6 general + 3 audio persistence)
 
     # Verify active + idle = total
     ${sum}=    Evaluate    ${active_workers} + ${idle_workers}
@@ -265,9 +265,10 @@ WebSocket Disconnect Conversation End Reason Test
     ...
     ...                This test simulates a Bluetooth/network dropout scenario:
     ...                1. Start streaming audio and create conversation
-    ...                2. Abruptly close WebSocket (simulating disconnect)
-    ...                3. Verify job exits gracefully (no 3600s timeout)
-    ...                4. Verify conversation has end_reason='websocket_disconnect'
+    ...                2. Keep sending audio to prevent inactivity timeout
+    ...                3. Abruptly close WebSocket (simulating disconnect)
+    ...                4. Verify job exits gracefully (no 3600s timeout)
+    ...                5. Verify conversation has end_reason='websocket_disconnect'
     [Tags]    infra	audio-streaming
 
     # Start audio stream and send chunks to trigger conversation
@@ -275,7 +276,7 @@ WebSocket Disconnect Conversation End Reason Test
     ${client_id}=    Get Client ID From Device Name    ${device_name}
     ${stream_id}=    Open Audio Stream    device_name=${device_name}
 
-    # Send audio fast (no realtime pacing) to simulate disconnect before END signal
+    # Send audio fast (no realtime pacing) to trigger conversation creation
     Send Audio Chunks To Stream    ${stream_id}    ${TEST_AUDIO_FILE}    num_chunks=200
 
     # Wait for conversation job to be created and conversation_id to be populated
@@ -286,6 +287,10 @@ WebSocket Disconnect Conversation End Reason Test
     # Wait for conversation_id in job meta (created asynchronously)
     ${conversation_id}=    Wait Until Keyword Succeeds    10s    0.5s
     ...    Get Conversation ID From Job Meta    open_conversation    ${client_id}
+
+    # CRITICAL: Keep sending audio to prevent inactivity timeout (SPEECH_INACTIVITY_THRESHOLD_SECONDS=2)
+    # Send a few more chunks to keep the conversation alive before disconnect
+    Send Audio Chunks To Stream    ${stream_id}    ${TEST_AUDIO_FILE}    num_chunks=50
 
     # Simulate WebSocket disconnect (Bluetooth dropout)
     Close Audio Stream    ${stream_id}

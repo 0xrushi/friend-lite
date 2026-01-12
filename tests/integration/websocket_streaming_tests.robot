@@ -76,9 +76,23 @@ Conversation Job Created After Speech Detection
     Log To Console    Open conversation job created after speech detection
 
     # Then verify speech detection job has conversation_job_id linked
-    ${speech_jobs}=    Wait Until Keyword Succeeds    15s    2s
-    ...    Job Type Exists For Client    speech_detection    ${client_id}
-    Job Has Conversation ID    ${speech_jobs}[0]
+    # Note: After conversation completes, a NEW speech_detection job is created for the next conversation
+    # So we need to get the jobs and find the one with conversation_job_id set
+    ${speech_jobs}=    Get Jobs By Type And Client    speech_detection    ${client_id}
+    Should Not Be Empty    ${speech_jobs}    msg=No speech_detection jobs found for ${client_id}
+
+    # Find the job with conversation_job_id (the original one that created the conversation)
+    ${found_linked_job}=    Set Variable    ${False}
+    FOR    ${job}    IN    @{speech_jobs}
+        ${meta}=    Set Variable    ${job}[meta]
+        ${conv_job_id}=    Evaluate    $meta.get('conversation_job_id')
+        IF    '${conv_job_id}' != 'None'
+            ${found_linked_job}=    Set Variable    ${True}
+            Log To Console    Found speech_detection job with conversation_job_id: ${conv_job_id}
+            BREAK
+        END
+    END
+    Should Be True    ${found_linked_job}    msg=No speech_detection job has conversation_job_id set
     [Teardown]    Close Audio Stream    ${stream_id}
 
 
