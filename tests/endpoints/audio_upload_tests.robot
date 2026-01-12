@@ -41,14 +41,12 @@ Single Audio File Upload Test
     # Verify conversation structure
     Dictionary Should Contain Key    ${conversation}    conversation_id
     Dictionary Should Contain Key    ${conversation}    audio_uuid
-    Dictionary Should Contain Key    ${conversation}    audio_path
     Dictionary Should Contain Key    ${conversation}    transcript
     Dictionary Should Contain Key    ${conversation}    segments
 
-    # Verify audio_path is set (should be just filename, no folder prefix)
-    Should Not Be Empty    ${conversation}[audio_path]
-    Should Not Contain    ${conversation}[audio_path]    /    msg=audio_path should be relative, not absolute
-    Should Contain    ${conversation}[audio_path]    .wav    msg=audio_path should contain .wav extension
+    # audio_path is legacy field (None for MongoDB storage)
+    # Just verify it exists in the dictionary, can be None
+    Dictionary Should Contain Key    ${conversation}    audio_path
 
     # Verify transcript was generated
     ${transcript}=    Set Variable    ${conversation}[transcript]
@@ -56,7 +54,7 @@ Single Audio File Upload Test
     Should Be True    ${transcript_length} > 100    msg=Transcript too short: ${transcript_length} chars
 
     Log To Console    ✅ Uploaded audio file
-    Log To Console    📁 Audio path: ${conversation}[audio_path]
+    Log To Console    💾 Storage: MongoDB chunks (audio_path is legacy field)
     Log To Console    📝 Transcript: ${transcript_length} characters
     Log To Console    🆔 Conversation ID: ${conversation}[conversation_id]
 
@@ -65,24 +63,24 @@ Audio File Upload With Fixtures Folder Test
     [Documentation]    Test uploading audio file to fixtures subfolder
     ...
     ...                Verifies:
-    ...                - File is stored in fixtures/ subfolder
-    ...                - audio_path includes folder prefix
+    ...                - Folder parameter is accepted (for backward compatibility)
+    ...                - Audio is stored in MongoDB chunks
     ...                - Conversation is created correctly
     [Tags]    audio-upload
 
     # Upload audio file to fixtures folder
     ${conversation}=    Upload Audio File    ${TEST_AUDIO_FILE}    device_name=fixture-upload    folder=fixtures
 
-    # Verify audio_path includes fixtures/ prefix
-    Should Start With    ${conversation}[audio_path]    fixtures/    msg=audio_path should start with 'fixtures/'
-    Should Contain    ${conversation}[audio_path]    .wav    msg=audio_path should contain .wav extension
+    # audio_path is legacy field (None for MongoDB storage)
+    # Folder parameter is accepted but audio is stored in MongoDB
+    Dictionary Should Contain Key    ${conversation}    audio_path
 
     # Verify conversation was created
     Dictionary Should Contain Key    ${conversation}    conversation_id
     Dictionary Should Contain Key    ${conversation}    transcript
 
-    Log To Console    ✅ Uploaded audio file to fixtures folder
-    Log To Console    📁 Audio path: ${conversation}[audio_path]
+    Log To Console    ✅ Uploaded audio file with folder parameter
+    Log To Console    💾 Storage: MongoDB chunks (folder param backward compatible)
     Log To Console    🆔 Conversation ID: ${conversation}[conversation_id]
 
 

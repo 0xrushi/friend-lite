@@ -829,8 +829,8 @@ async def _process_batch_audio_complete(
         return
 
     try:
-        from advanced_omi_backend.utils.audio_utils import write_audio_file
         from advanced_omi_backend.models.conversation import create_conversation
+        from advanced_omi_backend.utils.audio_chunk_utils import convert_audio_to_chunks
 
         # Combine all chunks
         complete_audio = b''.join(client_state.batch_audio_chunks)
@@ -842,20 +842,17 @@ async def _process_batch_audio_complete(
         audio_uuid = str(uuid.uuid4())
         timestamp = int(time.time() * 1000)
 
-        # Write audio file and create AudioFile entry
-        relative_audio_path, file_path, duration = await write_audio_file(
-            raw_audio_data=complete_audio,
-            audio_uuid=audio_uuid,
-            source="websocket",
-            client_id=client_id,
-            user_id=user_id,
-            user_email=user_email,
-            timestamp=timestamp,
-            validate=False  # PCM data, not WAV
-        )
+        # Get audio format from batch metadata (set during audio-start)
+        audio_format = getattr(client_state, 'batch_audio_format', {})
+        sample_rate = audio_format.get('rate', OMI_SAMPLE_RATE)
+        sample_width = audio_format.get('width', OMI_SAMPLE_WIDTH)
+        channels = audio_format.get('channels', OMI_CHANNELS)
+
+        # Calculate audio duration
+        duration = len(complete_audio) / (sample_rate * sample_width * channels)
 
         application_logger.info(
-            f"✅ Batch mode: Wrote audio file {relative_audio_path} ({duration:.1f}s)"
+            f"✅ Batch mode: Processing audio ({duration:.1f}s)"
         )
 
         # Create conversation immediately for batch audio (conversation_id auto-generated)
@@ -868,11 +865,30 @@ async def _process_batch_audio_complete(
             title="Batch Recording",
             summary="Processing batch audio..."
         )
-        conversation.audio_path = relative_audio_path
         await conversation.insert()
         conversation_id = conversation.conversation_id  # Get the auto-generated ID
 
         application_logger.info(f"📝 Batch mode: Created conversation {conversation_id}")
+
+        # Convert audio directly to MongoDB chunks (no disk intermediary)
+        try:
+            num_chunks = await convert_audio_to_chunks(
+                conversation_id=conversation_id,
+                audio_data=complete_audio,
+                sample_rate=sample_rate,
+                channels=channels,
+                sample_width=sample_width,
+            )
+            application_logger.info(
+                f"📦 Batch mode: Converted to {num_chunks} MongoDB chunks "
+                f"(conversation {conversation_id[:12]})"
+            )
+        except Exception as chunk_error:
+            application_logger.error(
+                f"Failed to convert batch audio to chunks: {chunk_error}",
+                exc_info=True
+            )
+            # Continue anyway - transcription job will handle it
 
         # Enqueue post-conversation processing job chain
         from advanced_omi_backend.controllers.queue_controller import start_post_conversation_jobs
@@ -880,7 +896,7 @@ async def _process_batch_audio_complete(
         job_ids = start_post_conversation_jobs(
             conversation_id=conversation_id,
             audio_uuid=audio_uuid,
-            audio_file_path=file_path,
+            audio_file_path=None,  # No file path - using MongoDB chunks
             user_id=None,  # Will be read from conversation in DB by jobs
             post_transcription=True,  # Run batch transcription for uploads
             client_id=client_id  # Pass client_id for UI tracking

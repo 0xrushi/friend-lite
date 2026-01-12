@@ -162,10 +162,6 @@ async def recognise_speakers_job(
     # Get user_id from conversation
     user_id = conversation.user_id
 
-    # Use the provided audio path
-    actual_audio_path = audio_path
-    logger.info(f"📁 Using audio for speaker recognition: {audio_path}")
-
     # Find the transcript version to update
     transcript_version = None
     for version in conversation.transcript_versions:
@@ -189,39 +185,101 @@ async def recognise_speakers_job(
             "processing_time_seconds": 0
         }
 
+    # Reconstruct audio from MongoDB chunks
+    import tempfile
+    from pathlib import Path
+    from advanced_omi_backend.utils.audio_chunk_utils import reconstruct_wav_from_conversation
+
+    logger.info(f"📦 Reconstructing audio from MongoDB chunks for conversation {conversation_id}")
+
     # Call speaker recognition service
     try:
-        logger.info(f"🎤 Calling speaker recognition service...")
+        # Reconstruct WAV from MongoDB chunks
+        wav_data = await reconstruct_wav_from_conversation(conversation_id)
 
-        # Read transcript text and words from the transcript version
-        # (Parameters may be empty if called via job dependency)
-        actual_transcript_text = transcript_text or transcript_version.transcript or ""
-        actual_words = words if words else []
+        # Write to temporary file for speaker recognition service
+        temp_wav_file = tempfile.NamedTemporaryFile(
+            suffix=".wav",
+            delete=False,
+            prefix=f"speaker_recog_{conversation_id[:8]}_"
+        )
 
-        # If words not provided, we need to get them from metadata
-        if not actual_words and transcript_version.metadata:
-            actual_words = transcript_version.metadata.get("words", [])
+        try:
+            temp_wav_file.write(wav_data)
+            temp_wav_file.flush()
+            temp_wav_path = temp_wav_file.name
+            temp_wav_file.close()
 
-        if not actual_transcript_text:
-            logger.warning(f"🎤 No transcript text found in version {version_id}")
-            return {
-                "success": False,
-                "conversation_id": conversation_id,
-                "version_id": version_id,
-                "error": "No transcript text available",
-                "processing_time_seconds": 0
+            logger.info(
+                f"📁 Created temporary WAV file for speaker recognition: {temp_wav_path} "
+                f"({len(wav_data) / 1024 / 1024:.2f} MB)"
+            )
+
+            # Read transcript text and words from the transcript version
+            # (Parameters may be empty if called via job dependency)
+            actual_transcript_text = transcript_text or transcript_version.transcript or ""
+            actual_words = words if words else []
+
+            # If words not provided, we need to get them from metadata
+            if not actual_words and transcript_version.metadata:
+                actual_words = transcript_version.metadata.get("words", [])
+
+            if not actual_transcript_text:
+                logger.warning(f"🎤 No transcript text found in version {version_id}")
+                # Clean up temp file before returning
+                Path(temp_wav_path).unlink(missing_ok=True)
+                return {
+                    "success": False,
+                    "conversation_id": conversation_id,
+                    "version_id": version_id,
+                    "error": "No transcript text available",
+                    "processing_time_seconds": 0
+                }
+
+            transcript_data = {
+                "text": actual_transcript_text,
+                "words": actual_words
             }
 
-        transcript_data = {
-            "text": actual_transcript_text,
-            "words": actual_words
+            logger.info(f"🎤 Calling speaker recognition service...")
+
+            # Call speaker service with temporary file path
+            speaker_result = await speaker_client.diarize_identify_match(
+                audio_path=temp_wav_path,
+                transcript_data=transcript_data,
+                user_id=user_id
+            )
+
+        finally:
+            # Clean up temporary file
+            try:
+                Path(temp_wav_path).unlink(missing_ok=True)
+                logger.debug(f"🧹 Deleted temporary WAV file: {temp_wav_path}")
+            except Exception as cleanup_error:
+                logger.warning(f"Failed to delete temporary file {temp_wav_path}: {cleanup_error}")
+
+    except ValueError as e:
+        # No chunks found for conversation
+        logger.error(f"No audio chunks found for conversation {conversation_id}: {e}")
+        return {
+            "success": False,
+            "conversation_id": conversation_id,
+            "version_id": version_id,
+            "error": f"No audio chunks found: {e}",
+            "processing_time_seconds": time.time() - start_time
+        }
+    except Exception as audio_error:
+        logger.error(f"Failed to reconstruct audio from MongoDB: {audio_error}", exc_info=True)
+        return {
+            "success": False,
+            "conversation_id": conversation_id,
+            "version_id": version_id,
+            "error": f"Audio reconstruction failed: {audio_error}",
+            "processing_time_seconds": time.time() - start_time
         }
 
-        speaker_result = await speaker_client.diarize_identify_match(
-            audio_path=actual_audio_path,
-            transcript_data=transcript_data,
-            user_id=user_id
-        )
+    # Continue with speaker recognition result processing
+    try:
 
         # Check for errors from speaker service
         if speaker_result.get("error"):

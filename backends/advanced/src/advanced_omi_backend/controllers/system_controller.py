@@ -127,6 +127,70 @@ async def save_diarization_settings(settings: dict):
         raise e
 
 
+async def get_cleanup_settings_controller(user: User) -> dict:
+    """
+    Get current cleanup settings (admin only).
+
+    Args:
+        user: Authenticated admin user
+
+    Returns:
+        Dict with cleanup settings
+    """
+    from advanced_omi_backend.config import get_cleanup_settings
+
+    return get_cleanup_settings()
+
+
+async def save_cleanup_settings_controller(
+    auto_cleanup_enabled: bool,
+    retention_days: int,
+    user: User
+) -> dict:
+    """
+    Save cleanup settings (admin only).
+
+    Args:
+        auto_cleanup_enabled: Enable/disable automatic cleanup
+        retention_days: Number of days to retain soft-deleted conversations
+        user: Authenticated admin user
+
+    Returns:
+        Updated cleanup settings
+
+    Raises:
+        ValueError: If validation fails
+    """
+    from advanced_omi_backend.config import CleanupSettings, save_cleanup_settings_to_file
+
+    # Validation
+    if not isinstance(auto_cleanup_enabled, bool):
+        raise ValueError("auto_cleanup_enabled must be a boolean")
+
+    if not isinstance(retention_days, int):
+        raise ValueError("retention_days must be an integer")
+
+    if retention_days < 1 or retention_days > 365:
+        raise ValueError("retention_days must be between 1 and 365")
+
+    # Create settings object
+    settings = CleanupSettings(
+        auto_cleanup_enabled=auto_cleanup_enabled,
+        retention_days=retention_days
+    )
+
+    # Save to file (also updates in-memory cache)
+    save_cleanup_settings_to_file(settings)
+
+    logger.info(f"Admin {user.email} updated cleanup settings: auto_cleanup={auto_cleanup_enabled}, retention={retention_days}d")
+
+    return {
+        "auto_cleanup_enabled": settings.auto_cleanup_enabled,
+        "retention_days": settings.retention_days,
+        "message": "Cleanup settings saved successfully"
+    }
+
+
 async def get_speaker_configuration(user: User):
     """Get current user's primary speakers configuration."""
     try:

@@ -11,6 +11,7 @@ import os
 from fastapi import APIRouter
 
 from .modules import (
+    admin_router,
     audio_router,
     chat_router,
     client_router,
@@ -30,6 +31,7 @@ audio_logger = logging.getLogger("audio_processing")
 router = APIRouter(prefix="/api", tags=["api"])
 
 # Include all sub-routers
+router.include_router(admin_router)
 router.include_router(audio_router)
 router.include_router(user_router)
 router.include_router(chat_router)

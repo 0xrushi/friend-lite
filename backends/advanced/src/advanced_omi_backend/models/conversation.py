@@ -88,8 +88,22 @@ class Conversation(Document):
     user_id: Indexed(str) = Field(description="User who owns this conversation")
     client_id: Indexed(str) = Field(description="Client device identifier")
 
-    # Audio file reference
-    audio_path: Optional[str] = Field(None, description="Path to audio file (relative to CHUNK_DIR)")
+    # Legacy audio path field - no longer used, audio stored as MongoDB chunks
+    audio_path: Optional[str] = Field(None, description="Legacy field, not populated for new conversations")
+
+    # MongoDB chunk-based audio storage (new system)
+    audio_chunks_count: Optional[int] = Field(
+        None,
+        description="Total number of 10-second audio chunks stored in MongoDB"
+    )
+    audio_total_duration: Optional[float] = Field(
+        None,
+        description="Total audio duration in seconds (sum of all chunks)"
+    )
+    audio_compression_ratio: Optional[float] = Field(
+        None,
+        description="Compression ratio (compressed_size / original_size), typically ~0.047 for Opus"
+    )
 
     # Creation metadata
     created_at: Indexed(datetime) = Field(default_factory=datetime.utcnow, description="When the conversation was created")

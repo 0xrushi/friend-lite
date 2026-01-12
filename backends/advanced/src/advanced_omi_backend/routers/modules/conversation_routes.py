@@ -91,7 +91,18 @@ async def get_conversation_version_history(
 
 @router.delete("/{conversation_id}")
 async def delete_conversation(
-    conversation_id: str, current_user: User = Depends(current_active_user)
+    conversation_id: str,
+    permanent: bool = Query(False, description="Permanently delete (admin only)"),
+    current_user: User = Depends(current_active_user)
 ):
-    """Delete a conversation and its associated audio file. Users can only delete their own conversations."""
-    return await conversation_controller.delete_conversation(conversation_id, current_user)
+    """Soft delete a conversation (or permanently delete if admin)."""
+    return await conversation_controller.delete_conversation(conversation_id, current_user, permanent)
+
+
+@router.post("/{conversation_id}/restore")
+async def restore_conversation(
+    conversation_id: str,
+    current_user: User = Depends(current_active_user)
+):
+    """Restore a soft-deleted conversation."""
+    return await conversation_controller.restore_conversation(conversation_id, current_user)

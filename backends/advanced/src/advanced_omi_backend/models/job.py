@@ -35,10 +35,10 @@ async def _ensure_beanie_initialized():
             from motor.motor_asyncio import AsyncIOMotorClient
             from beanie import init_beanie
             from advanced_omi_backend.models.conversation import Conversation
-            from advanced_omi_backend.models.audio_file import AudioFile
-            from advanced_omi_backend.models.user import User                       
+            from advanced_omi_backend.models.audio_chunk import AudioChunkDocument
+            from advanced_omi_backend.models.user import User
             from pymongo.errors import ConfigurationError
-  
+
             # Get MongoDB URI from environment
             mongodb_uri = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
 
@@ -54,7 +54,7 @@ async def _ensure_beanie_initialized():
             # Initialize Beanie
             await init_beanie(
                 database=database,
-                document_models=[User, Conversation, AudioFile],
+                document_models=[User, Conversation, AudioChunkDocument],
             )
 
             _beanie_initialized = True

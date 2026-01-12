@@ -137,7 +137,6 @@ async def write_audio_file(
     """
     from easy_audio_interfaces.filesystem.filesystem_interfaces import LocalFileSink
     from advanced_omi_backend.config import CHUNK_DIR
-    from advanced_omi_backend.models.audio_file import AudioFile
 
     # Validate and prepare audio if needed
     if validate:
@@ -194,22 +193,6 @@ async def write_audio_file(
     audio_logger.info(
         f"✅ Wrote audio file: {wav_filename} ({len(audio_data)} bytes, {duration:.1f}s)"
     )
-
-    # Create AudioFile database entry using Beanie model
-    audio_file = AudioFile(
-        audio_uuid=audio_uuid,
-        source=source,
-        audio_path=wav_filename,
-        client_id=client_id,
-        timestamp=timestamp,
-        user_id=user_id,
-        user_email=user_email,
-        has_speech=False,  # Will be updated by transcription
-        speech_analysis={}, 
-    )
-    await audio_file.insert()
-
-    audio_logger.info(f"✅ Created AudioFile entry for {audio_uuid}")
 
     return relative_audio_path, str(file_path), duration
 

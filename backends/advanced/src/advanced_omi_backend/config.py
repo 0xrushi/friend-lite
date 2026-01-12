@@ -9,7 +9,9 @@ import json
 import logging
 import os
 import shutil
+from dataclasses import dataclass, asdict
 from pathlib import Path
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -129,6 +131,101 @@ def save_diarization_settings_to_file(settings):
     except Exception as e:
         logger.error(f"Error saving diarization settings to {config_path}: {e}")
         return False
+
+
+# ============================================================================
+# Cleanup Settings (JSON file-based with in-memory caching)
+# ============================================================================
+
+@dataclass
+class CleanupSettings:
+    """Cleanup configuration for soft-deleted conversations."""
+    auto_cleanup_enabled: bool = False
+    retention_days: int = 30
+
+# Global cache for cleanup settings
+_cleanup_settings: Optional[CleanupSettings] = None
+
+
+def get_cleanup_config_path() -> Path:
+    """Get path to cleanup settings JSON file."""
+    data_dir = Path(os.getenv("DATA_DIR", "/app/data"))
+    data_dir.mkdir(parents=True, exist_ok=True)
+    return data_dir / "cleanup_config.json"
+
+
+def load_cleanup_settings_from_file() -> CleanupSettings:
+    """
+    Load cleanup settings from JSON file or return defaults.
+
+    Returns cached settings if available, otherwise loads from file.
+    If file doesn't exist, returns default settings.
+    """
+    global _cleanup_settings
+
+    # Return cached settings if available
+    if _cleanup_settings is not None:
+        return _cleanup_settings
+
+    config_path = get_cleanup_config_path()
+
+    # Try to load from file
+    if config_path.exists():
+        try:
+            with open(config_path, "r") as f:
+                data = json.load(f)
+                _cleanup_settings = CleanupSettings(**data)
+                logger.info(f"✅ Loaded cleanup settings: auto_cleanup={_cleanup_settings.auto_cleanup_enabled}, retention={_cleanup_settings.retention_days}d")
+                return _cleanup_settings
+        except Exception as e:
+            logger.error(f"❌ Failed to load cleanup settings from {config_path}: {e}")
+
+    # Return defaults if file doesn't exist or failed to load
+    _cleanup_settings = CleanupSettings()
+    logger.info("Using default cleanup settings (auto_cleanup_enabled=False, retention_days=30)")
+    return _cleanup_settings
+
+
+def save_cleanup_settings_to_file(settings: CleanupSettings) -> None:
+    """
+    Save cleanup settings to JSON file and update in-memory cache.
+
+    Args:
+        settings: CleanupSettings to persist
+
+    Raises:
+        Exception: If file write fails
+    """
+    global _cleanup_settings
+
+    config_path = get_cleanup_config_path()
+
+    try:
+        # Save to JSON file
+        with open(config_path, "w") as f:
+            json.dump(asdict(settings), f, indent=2)
+
+        # Update in-memory cache
+        _cleanup_settings = settings
+
+        logger.info(f"✅ Saved cleanup settings: auto_cleanup={settings.auto_cleanup_enabled}, retention={settings.retention_days}d")
+    except Exception as e:
+        logger.error(f"❌ Failed to save cleanup settings to {config_path}: {e}")
+        raise
+
+
+def get_cleanup_settings() -> dict:
+    """
+    Get current cleanup settings as dict (for API responses).
+
+    Returns:
+        Dict with auto_cleanup_enabled and retention_days
+    """
+    settings = load_cleanup_settings_from_file()
+    return {
+        "auto_cleanup_enabled": settings.auto_cleanup_enabled,
+        "retention_days": settings.retention_days,
+    }
 
 
 def get_speech_detection_settings():

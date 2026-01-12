@@ -57,6 +57,28 @@ async def save_diarization_settings(
     return await system_controller.save_diarization_settings(settings)
 
 
+@router.get("/cleanup-settings")
+async def get_cleanup_settings(
+    current_user: User = Depends(current_superuser)
+):
+    """Get cleanup configuration settings. Admin only."""
+    return await system_controller.get_cleanup_settings_controller(current_user)
+
+
+@router.post("/cleanup-settings")
+async def save_cleanup_settings(
+    auto_cleanup_enabled: bool = Body(..., description="Enable automatic cleanup of soft-deleted conversations"),
+    retention_days: int = Body(..., ge=1, le=365, description="Number of days to keep soft-deleted conversations"),
+    current_user: User = Depends(current_superuser)
+):
+    """Save cleanup configuration settings. Admin only."""
+    return await system_controller.save_cleanup_settings_controller(
+        auto_cleanup_enabled=auto_cleanup_enabled,
+        retention_days=retention_days,
+        user=current_user
+    )
+
+
 @router.get("/speaker-configuration")
 async def get_speaker_configuration(current_user: User = Depends(current_active_user)):
     """Get current user's primary speakers configuration."""

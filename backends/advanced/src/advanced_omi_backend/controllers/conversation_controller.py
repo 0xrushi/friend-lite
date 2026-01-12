@@ -5,24 +5,19 @@ Conversation controller for handling conversation-related business logic.
 import logging
 import time
 from pathlib import Path
-from typing import Optional
+
+from fastapi.responses import JSONResponse
 
 from advanced_omi_backend.client_manager import (
     ClientManager,
     client_belongs_to_user,
 )
-from advanced_omi_backend.models.audio_file import AudioFile
 from advanced_omi_backend.models.conversation import Conversation
+from advanced_omi_backend.models.audio_chunk import AudioChunkDocument
 from advanced_omi_backend.users import User
-from fastapi.responses import JSONResponse
 
 logger = logging.getLogger(__name__)
 audio_logger = logging.getLogger("audio_processing")
-
-# Legacy audio_chunks collection is still used by some endpoints (speaker assignment, segment updates)
-# But conversation queries now use the Conversation model directly
-# Audio cropping operations are handled in audio_controller.py
-
 
 async def close_current_conversation(client_id: str, user: User, client_manager: ClientManager):
     """Close the current conversation for a specific client. Users can only close their own conversations."""
@@ -103,6 +98,9 @@ async def get_conversation(conversation_id: str, user: User):
             "user_id": conversation.user_id,
             "client_id": conversation.client_id,
             "audio_path": conversation.audio_path,
+            "audio_chunks_count": conversation.audio_chunks_count,
+            "audio_total_duration": conversation.audio_total_duration,
+            "audio_compression_ratio": conversation.audio_compression_ratio,
             "created_at": conversation.created_at.isoformat() if conversation.created_at else None,
             "deleted": conversation.deleted,
             "deletion_reason": conversation.deletion_reason,
@@ -153,6 +151,9 @@ async def get_conversations(user: User):
                 "user_id": conv.user_id,
                 "client_id": conv.client_id,
                 "audio_path": conv.audio_path,
+                "audio_chunks_count": conv.audio_chunks_count,
+                "audio_total_duration": conv.audio_total_duration,
+                "audio_compression_ratio": conv.audio_compression_ratio,
                 "created_at": conv.created_at.isoformat() if conv.created_at else None,
                 "deleted": conv.deleted,
                 "deletion_reason": conv.deletion_reason,
@@ -177,12 +178,87 @@ async def get_conversations(user: User):
         return JSONResponse(status_code=500, content={"error": "Error fetching conversations"})
 
 
-async def delete_conversation(conversation_id: str, user: User):
-    """Delete a conversation and its associated audio files. Users can only delete their own conversations."""
+async def _soft_delete_conversation(conversation: Conversation, user: User) -> JSONResponse:
+    """Mark conversation and chunks as deleted (soft delete)."""
+    conversation_id = conversation.conversation_id
+
+    # Mark conversation as deleted
+    conversation.deleted = True
+    conversation.deletion_reason = "user_deleted"
+    conversation.deleted_at = datetime.utcnow()
+    await conversation.save()
+
+    logger.info(f"Soft deleted conversation {conversation_id} for user {user.user_id}")
+
+    # Soft delete all associated audio chunks
+    result = await AudioChunkDocument.find(
+        AudioChunkDocument.conversation_id == conversation_id,
+        AudioChunkDocument.deleted == False  # Only update non-deleted chunks
+    ).update_many({
+        "$set": {
+            "deleted": True,
+            "deleted_at": datetime.utcnow()
+        }
+    })
+
+    deleted_chunks = result.modified_count
+    logger.info(f"Soft deleted {deleted_chunks} audio chunks for conversation {conversation_id}")
+
+    return JSONResponse(
+        status_code=200,
+        content={
+            "message": f"Successfully soft deleted conversation '{conversation_id}'",
+            "deleted_chunks": deleted_chunks,
+            "conversation_id": conversation_id,
+            "client_id": conversation.client_id,
+            "deleted_at": conversation.deleted_at.isoformat() if conversation.deleted_at else None
+        }
+    )
+
+
+async def _hard_delete_conversation(conversation: Conversation) -> JSONResponse:
+    """Permanently delete conversation and chunks (admin only)."""
+    conversation_id = conversation.conversation_id
+    client_id = conversation.client_id
+    audio_uuid = conversation.audio_uuid
+
+    # Delete conversation document
+    await conversation.delete()
+    logger.info(f"Hard deleted conversation {conversation_id}")
+
+    # Delete all audio chunks
+    result = await AudioChunkDocument.find(
+        AudioChunkDocument.conversation_id == conversation_id
+    ).delete()
+
+    deleted_chunks = result.deleted_count
+    logger.info(f"Hard deleted {deleted_chunks} audio chunks for conversation {conversation_id}")
+
+    return JSONResponse(
+        status_code=200,
+        content={
+            "message": f"Successfully permanently deleted conversation '{conversation_id}'",
+            "deleted_chunks": deleted_chunks,
+            "conversation_id": conversation_id,
+            "client_id": client_id,
+            "audio_uuid": audio_uuid
+        }
+    )
+
+
+async def delete_conversation(conversation_id: str, user: User, permanent: bool = False):
+    """
+    Soft delete a conversation (mark as deleted but keep data).
+
+    Args:
+        conversation_id: Conversation to delete
+        user: Requesting user
+        permanent: If True, permanently delete (admin only)
+    """
     try:
         # Create masked identifier for logging
         masked_id = f"{conversation_id[:8]}...{conversation_id[-4:]}" if len(conversation_id) > 12 else "***"
-        logger.info(f"Attempting to delete conversation: {masked_id}")
+        logger.info(f"Attempting to {'permanently ' if permanent else ''}delete conversation: {masked_id}")
 
         # Find the conversation using Beanie
         conversation = await Conversation.find_one(Conversation.conversation_id == conversation_id)
@@ -206,57 +282,91 @@ async def delete_conversation(conversation_id: str, user: User):
                 }
             )
 
-        # Get file paths before deletion
-        audio_path = conversation.audio_path
-        audio_uuid = conversation.audio_uuid
-        client_id = conversation.client_id
+        # Hard delete (admin only, permanent flag)
+        if permanent and user.is_superuser:
+            return await _hard_delete_conversation(conversation)
 
-        # Delete the conversation from database
-        await conversation.delete()
-        logger.info(f"Deleted conversation {conversation_id}")
-
-        # Also delete from legacy AudioFile collection if it exists (backward compatibility)
-        audio_file = await AudioFile.find_one(AudioFile.audio_uuid == audio_uuid)
-        if audio_file:
-            await audio_file.delete()
-            logger.info(f"Deleted legacy audio file record for {audio_uuid}")
-
-        # Delete associated audio files from disk
-        deleted_files = []
-        if audio_path:
-            try:
-                # Construct full path to audio file
-                full_audio_path = Path("/app/audio_chunks") / audio_path
-                if full_audio_path.exists():
-                    full_audio_path.unlink()
-                    deleted_files.append(str(full_audio_path))
-                    logger.info(f"Deleted audio file: {full_audio_path}")
-            except Exception as e:
-                logger.warning(f"Failed to delete audio file {audio_path}: {e}")
-
-        logger.info(f"Successfully deleted conversation {conversation_id} for user {user.user_id}")
-
-        # Prepare response message
-        delete_summary = ["conversation"]
-        if deleted_files:
-            delete_summary.append(f"{len(deleted_files)} audio file(s)")
-
-        return JSONResponse(
-            status_code=200,
-            content={
-                "message": f"Successfully deleted {', '.join(delete_summary)} '{conversation_id}'",
-                "deleted_files": deleted_files,
-                "client_id": client_id,
-                "conversation_id": conversation_id,
-                "audio_uuid": audio_uuid
-            }
-        )
+        # Soft delete (default)
+        return await _soft_delete_conversation(conversation, user)
 
     except Exception as e:
         logger.error(f"Error deleting conversation {conversation_id}: {e}")
         return JSONResponse(
             status_code=500,
             content={"error": f"Failed to delete conversation: {str(e)}"}
+        )
+
+
+async def restore_conversation(conversation_id: str, user: User) -> JSONResponse:
+    """
+    Restore a soft-deleted conversation.
+
+    Args:
+        conversation_id: Conversation to restore
+        user: Requesting user
+    """
+    try:
+        conversation = await Conversation.find_one(
+            Conversation.conversation_id == conversation_id
+        )
+
+        if not conversation:
+            return JSONResponse(
+                status_code=404,
+                content={"error": "Conversation not found"}
+            )
+
+        # Permission check
+        if not user.is_superuser and conversation.user_id != str(user.user_id):
+            return JSONResponse(
+                status_code=403,
+                content={"error": "Access denied"}
+            )
+
+        if not conversation.deleted:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "Conversation is not deleted"}
+            )
+
+        # Restore conversation
+        conversation.deleted = False
+        conversation.deletion_reason = None
+        conversation.deleted_at = None
+        await conversation.save()
+
+        # Restore audio chunks
+        result = await AudioChunkDocument.find(
+            AudioChunkDocument.conversation_id == conversation_id,
+            AudioChunkDocument.deleted == True
+        ).update_many({
+            "$set": {
+                "deleted": False,
+                "deleted_at": None
+            }
+        })
+
+        restored_chunks = result.modified_count
+
+        logger.info(
+            f"Restored conversation {conversation_id} "
+            f"({restored_chunks} chunks) for user {user.user_id}"
+        )
+
+        return JSONResponse(
+            status_code=200,
+            content={
+                "message": f"Successfully restored conversation '{conversation_id}'",
+                "restored_chunks": restored_chunks,
+                "conversation_id": conversation_id,
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"Error restoring conversation {conversation_id}: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"Failed to restore conversation: {str(e)}"}
         )
 
 
@@ -308,10 +418,17 @@ async def reprocess_transcript(conversation_id: str, user: User):
         version_id = str(uuid.uuid4())
 
         # Enqueue job chain with RQ (transcription -> speaker recognition -> memory)
-        from advanced_omi_backend.workers.transcription_jobs import transcribe_full_audio_job
-        from advanced_omi_backend.workers.speaker_jobs import recognise_speakers_job
+        from advanced_omi_backend.controllers.queue_controller import (
+            JOB_RESULT_TTL,
+            default_queue,
+            memory_queue,
+            transcription_queue,
+        )
         from advanced_omi_backend.workers.memory_jobs import process_memory_job
-        from advanced_omi_backend.controllers.queue_controller import transcription_queue, memory_queue, default_queue, JOB_RESULT_TTL
+        from advanced_omi_backend.workers.speaker_jobs import recognise_speakers_job
+        from advanced_omi_backend.workers.transcription_jobs import (
+            transcribe_full_audio_job,
+        )
 
         # Job 1: Transcribe audio to text
         transcript_job = transcription_queue.enqueue(
@@ -414,8 +531,8 @@ async def reprocess_memory(conversation_id: str, transcript_version_id: str, use
         version_id = str(uuid.uuid4())
 
         # Enqueue memory processing job with RQ (RQ handles job tracking)
-        from advanced_omi_backend.workers.memory_jobs import enqueue_memory_processing
         from advanced_omi_backend.models.job import JobPriority
+        from advanced_omi_backend.workers.memory_jobs import enqueue_memory_processing
 
         job = enqueue_memory_processing(
             client_id=conversation_model.client_id,

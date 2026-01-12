@@ -492,18 +492,18 @@ async def open_conversation_job(
     # to avoid false negatives from aggregated results lacking proper word-level data
     logger.info("✅ Conversation has meaningful speech (validated during streaming), proceeding with post-processing")
 
-    # Wait for audio_streaming_persistence_job to complete and write the file path
-    from advanced_omi_backend.utils.conversation_utils import wait_for_audio_file
+    # Wait for audio_streaming_persistence_job to complete and write MongoDB chunks
+    from advanced_omi_backend.utils.audio_chunk_utils import wait_for_audio_chunks
 
-    file_path = await wait_for_audio_file(
-        conversation_id=conversation_id, redis_client=redis_client, max_wait_seconds=30
+    chunks_ready = await wait_for_audio_chunks(
+        conversation_id=conversation_id, max_wait_seconds=30, min_chunks=1
     )
 
-    if not file_path:
-        # Mark conversation as deleted - has speech but no audio file to process
+    if not chunks_ready:
+        # Mark conversation as deleted - has speech but no audio chunks to process
         await mark_conversation_deleted(
             conversation_id=conversation_id,
-            deletion_reason="audio_file_not_ready",
+            deletion_reason="audio_chunks_not_ready",
         )
 
         # Call shared cleanup/restart logic before returning
@@ -519,22 +519,7 @@ async def open_conversation_job(
             end_reason=end_reason,
         )
 
-    logger.info(f"📁 Retrieved audio file path: {file_path}")
-
-    # Update conversation with audio file path
-    conversation = await Conversation.find_one(Conversation.conversation_id == conversation_id)
-    if conversation:
-        # Store just the filename (relative to CHUNK_DIR)
-        from pathlib import Path
-
-        audio_filename = Path(file_path).name
-        conversation.audio_path = audio_filename
-        await conversation.save()
-        logger.info(
-            f"💾 Updated conversation {conversation_id[:12]} with audio_path: {audio_filename}"
-        )
-    else:
-        logger.warning(f"⚠️ Conversation {conversation_id} not found for audio_path update")
+    logger.info(f"📦 MongoDB audio chunks ready for conversation {conversation_id[:12]}")
 
     # Enqueue post-conversation processing pipeline
     client_id = conversation.client_id if conversation else None

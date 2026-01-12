@@ -515,50 +515,6 @@ async def update_job_progress_metadata(
     current_job.save_meta()
 
 
-async def wait_for_audio_file(
-    conversation_id: str, redis_client, max_wait_seconds: int = 30
-) -> Optional[str]:
-    """
-    Wait for audio persistence job to write audio file path to Redis.
-
-    Polls Redis for audio file path with configurable timeout.
-
-    Args:
-        conversation_id: Conversation ID
-        redis_client: Redis client instance
-        max_wait_seconds: Maximum wait time in seconds (default: 30)
-
-    Returns:
-        Audio file path (str) if ready, None if timeout
-    """
-    audio_file_key = f"audio:file:{conversation_id}"
-    wait_start = time.time()
-
-    while time.time() - wait_start < max_wait_seconds:
-        file_path_bytes = await redis_client.get(audio_file_key)
-        if file_path_bytes:
-            wait_duration = time.time() - wait_start
-            logger.info(f"✅ Audio file ready after {wait_duration:.1f}s")
-            return file_path_bytes.decode()
-
-        # Log progress every 5 seconds
-        elapsed = time.time() - wait_start
-        if elapsed % 5 == 0:
-            logger.info(
-                f"⏳ Waiting for audio file (conversation {conversation_id[:12]})... ({elapsed:.0f}s elapsed)"
-            )
-
-        await asyncio.sleep(0.5)  # Check every 500ms
-
-    logger.error(
-        f"❌ Audio file path not found in Redis after {max_wait_seconds}s (key: {audio_file_key})"
-    )
-    logger.warning(
-        "⚠️ Audio persistence job may not have rotated file yet - cannot enqueue batch transcription"
-    )
-    return None
-
-
 async def mark_conversation_deleted(conversation_id: str, deletion_reason: str) -> None:
     """
     Mark a conversation as deleted with a specific reason.

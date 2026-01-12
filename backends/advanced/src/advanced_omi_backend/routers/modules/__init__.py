@@ -12,8 +12,10 @@ This package contains organized router modules for different functional areas:
 - audio_routes: Audio file uploads and processing
 - health_routes: Health check endpoints
 - websocket_routes: WebSocket connection handling
+- admin_routes: Admin-only system management endpoints
 """
 
+from .admin_routes import router as admin_router
 from .audio_routes import router as audio_router
 from .chat_routes import router as chat_router
 from .client_routes import router as client_router
@@ -27,6 +29,7 @@ from .user_routes import router as user_router
 from .websocket_routes import router as websocket_router
 
 __all__ = [
+   "admin_router",
    "audio_router",
    "chat_router",
    "client_router",

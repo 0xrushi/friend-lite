@@ -5,7 +5,7 @@ import logging
 from starlette.datastructures import UploadFile as StarletteUploadFile
 from googleapiclient.http import MediaIoBaseDownload
 from advanced_omi_backend.clients.gdrive_audio_client import get_google_drive_client
-from advanced_omi_backend.models.audio_file import AudioFile
+from advanced_omi_backend.models.conversation import Conversation
 from advanced_omi_backend.utils.audio_utils import AudioValidationError
 
 
@@ -88,12 +88,11 @@ async def download_audio_files_from_drive(folder_id: str) -> List[StarletteUploa
         
         for item in audio_files_metadata:
             file_id = item["id"] # Get the Google Drive File ID
-            
-            #  Check if the file is already processed
-            existing = await AudioFile.find_one({
-                "audio_uuid": file_id,
-                "source": "gdrive"
-            })
+
+            # Check if the file is already processed (check Conversation by audio_uuid)
+            existing = await Conversation.find_one(
+                Conversation.audio_uuid == file_id
+            )
 
             if existing:
                 audio_logger.info(f"Skipping already processed file: {item['name']}")

@@ -173,10 +173,6 @@ async def transcribe_full_audio_job(
     user_id = str(conversation.user_id) if conversation.user_id else None
     client_id = conversation.client_id if hasattr(conversation, 'client_id') else None
 
-    # Use the provided audio path
-    actual_audio_path = audio_path
-    logger.info(f"📁 Using audio for transcription: {audio_path}")
-
     # Get the transcription provider
     provider = get_transcription_provider(mode="batch")
     if not provider:
@@ -185,19 +181,60 @@ async def transcribe_full_audio_job(
     provider_name = provider.name
     logger.info(f"Using transcription provider: {provider_name}")
 
-    # Read the audio file
-    audio_file_path = Path(actual_audio_path)
-    if not audio_file_path.exists():
-        raise FileNotFoundError(f"Audio file not found: {actual_audio_path}")
+    # Reconstruct audio from MongoDB chunks
+    import tempfile
+    from advanced_omi_backend.utils.audio_chunk_utils import reconstruct_wav_from_conversation
 
-    # Load audio data
-    with open(audio_file_path, "rb") as f:
-        audio_data = f.read()
+    logger.info(f"📦 Reconstructing audio from MongoDB chunks for conversation {conversation_id}")
 
-    # Transcribe the audio (assume 16kHz sample rate)
-    transcription_result = await provider.transcribe(
-        audio_data=audio_data, sample_rate=16000, diarize=True
-    )
+    try:
+        # Reconstruct WAV from MongoDB chunks
+        wav_data = await reconstruct_wav_from_conversation(conversation_id)
+
+        # Write to temporary file for transcription service
+        # (Services expect file paths, not bytes)
+        temp_wav_file = tempfile.NamedTemporaryFile(
+            suffix=".wav",
+            delete=False,
+            prefix=f"batch_transcribe_{conversation_id[:8]}_"
+        )
+
+        try:
+            temp_wav_file.write(wav_data)
+            temp_wav_file.flush()
+            temp_wav_path = temp_wav_file.name
+            temp_wav_file.close()
+
+            logger.info(
+                f"📁 Created temporary WAV file: {temp_wav_path} "
+                f"({len(wav_data) / 1024 / 1024:.2f} MB)"
+            )
+
+            # Read audio data for transcription
+            # Some providers need the file path, some need bytes
+            # Read both to support all provider types
+            with open(temp_wav_path, "rb") as f:
+                audio_data = f.read()
+
+            # Transcribe the audio (assume 16kHz sample rate)
+            transcription_result = await provider.transcribe(
+                audio_data=audio_data, sample_rate=16000, diarize=True
+            )
+
+        finally:
+            # Clean up temporary file
+            try:
+                Path(temp_wav_path).unlink(missing_ok=True)
+                logger.debug(f"🧹 Deleted temporary WAV file: {temp_wav_path}")
+            except Exception as cleanup_error:
+                logger.warning(f"Failed to delete temporary file {temp_wav_path}: {cleanup_error}")
+
+    except ValueError as e:
+        # No chunks found for conversation
+        raise FileNotFoundError(f"No audio chunks found for conversation {conversation_id}: {e}")
+    except Exception as e:
+        logger.error(f"Failed to reconstruct audio from MongoDB: {e}", exc_info=True)
+        raise RuntimeError(f"Audio reconstruction failed: {e}")
 
     # Extract results
     transcript_text = transcription_result.get("text", "")
@@ -517,7 +554,7 @@ Summary: <brief summary under 150 characters>"""
         "success": True,
         "conversation_id": conversation_id,
         "version_id": version_id,
-        "audio_path": str(audio_file_path),
+        "audio_source": "mongodb_chunks",  # Audio reconstructed from MongoDB, no permanent file
         "transcript": transcript_text,
         "segments": [seg.model_dump() for seg in speaker_segments],
         "words": words,  # Needed by speaker recognition

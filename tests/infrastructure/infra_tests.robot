@@ -279,21 +279,35 @@ WebSocket Disconnect Conversation End Reason Test
     # Send audio fast (no realtime pacing) to trigger conversation creation
     Send Audio Chunks To Stream    ${stream_id}    ${TEST_AUDIO_FILE}    num_chunks=200
 
-    # Wait for conversation job to be created and conversation_id to be populated
-    # Transcription + speech analysis takes time (30-60s with queue)
-    ${conv_jobs}=    Wait Until Keyword Succeeds    60s    3s
-    ...    Job Type Exists For Client    open_conversation    ${client_id}
+    # Keep sending audio in a loop to prevent inactivity timeout while waiting for conversation
+    # We need to continuously send audio because SPEECH_INACTIVITY_THRESHOLD_SECONDS=2
+    FOR    ${i}    IN RANGE    20    # Send 20 batches while waiting
+        # Try to get conversation job
+        ${conv_jobs}=    Get Jobs By Type And Client    open_conversation    ${client_id}
+        ${has_job}=    Evaluate    len($conv_jobs) > 0
 
-    # Wait for conversation_id in job meta (created asynchronously)
-    ${conversation_id}=    Wait Until Keyword Succeeds    10s    0.5s
-    ...    Get Conversation ID From Job Meta    open_conversation    ${client_id}
+        IF    ${has_job}
+            # Conversation job exists, try to get conversation_id
+            TRY
+                ${conversation_id}=    Get Conversation ID From Job Meta    open_conversation    ${client_id}
+                # Got conversation_id! Close websocket immediately to trigger disconnect
+                Log To Console    Conversation created (${conversation_id}), closing websocket NOW
+                Close Audio Stream    ${stream_id}
+                BREAK
+            EXCEPT
+                # conversation_id not set yet, keep sending audio
+                Send Audio Chunks To Stream    ${stream_id}    ${TEST_AUDIO_FILE}    num_chunks=50
+                Sleep    1s
+            END
+        ELSE
+            # No conversation job yet, keep sending audio
+            Send Audio Chunks To Stream    ${stream_id}    ${TEST_AUDIO_FILE}    num_chunks=50
+            Sleep    1s
+        END
+    END
 
-    # CRITICAL: Keep sending audio to prevent inactivity timeout (SPEECH_INACTIVITY_THRESHOLD_SECONDS=2)
-    # Send a few more chunks to keep the conversation alive before disconnect
-    Send Audio Chunks To Stream    ${stream_id}    ${TEST_AUDIO_FILE}    num_chunks=50
-
-    # Simulate WebSocket disconnect (Bluetooth dropout)
-    Close Audio Stream    ${stream_id}
+    # Verify we got the conversation_id before loop ended
+    Should Not Be Equal    ${conversation_id}    ${None}    Failed to get conversation_id within timeout
 
     # Wait for job to complete (should be fast, not 3600s timeout)
     ${conv_jobs}=    Get Jobs By Type And Client    open_conversation    ${device_name}

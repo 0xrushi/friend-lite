@@ -17,8 +17,9 @@ from fastapi.responses import JSONResponse
 
 from advanced_omi_backend.utils.audio_utils import (
     AudioValidationError,
-    write_audio_file,
+    validate_and_prepare_audio,
 )
+from advanced_omi_backend.utils.audio_chunk_utils import convert_audio_to_chunks
 from advanced_omi_backend.models.job import JobPriority
 from advanced_omi_backend.models.user import User
 from advanced_omi_backend.models.conversation import create_conversation
@@ -86,33 +87,19 @@ async def upload_and_process_audio_files(
                 # Generate audio UUID and timestamp
                 if source == "gdrive":
                     audio_uuid = getattr(file, "audio_uuid", None)
-                    if not audio_uuid: 
+                    if not audio_uuid:
                         audio_logger.error(f"Missing audio_uuid for gdrive file: {file.filename}")
-                        audio_uuid = str(uuid.uuid4()) 
-                else: 
+                        audio_uuid = str(uuid.uuid4())
+                else:
                     audio_uuid = str(uuid.uuid4())
                 timestamp = int(time.time() * 1000)
 
-                # Determine output directory (with optional subfolder)
-                from advanced_omi_backend.config import CHUNK_DIR
-                if folder:
-                    chunk_dir = CHUNK_DIR / folder
-                    chunk_dir.mkdir(parents=True, exist_ok=True)
-                else:
-                    chunk_dir = CHUNK_DIR
-
-                # Validate, write audio file and create AudioSession (all in one)
+                # Validate and prepare audio (read format from WAV file)
                 try:
-                    relative_audio_path, file_path, duration = await write_audio_file(
-                        raw_audio_data=content,
-                        audio_uuid=audio_uuid,
-                        source=source,
-                        client_id=client_id,
-                        user_id=user.user_id,
-                        user_email=user.email,
-                        timestamp=timestamp,
-                        chunk_dir=chunk_dir,
-                        validate=True,  # Validate WAV format, convert stereo→mono
+                    audio_data, sample_rate, sample_width, channels, duration = await validate_and_prepare_audio(
+                        audio_data=content,
+                        expected_sample_rate=16000,  # Expecting 16kHz
+                        convert_to_mono=True  # Convert stereo to mono
                     )
                 except AudioValidationError as e:
                     processed_files.append({
@@ -123,7 +110,7 @@ async def upload_and_process_audio_files(
                     continue
 
                 audio_logger.info(
-                    f"📊 {file.filename}: {duration:.1f}s → {relative_audio_path}"
+                    f"📊 {file.filename}: {duration:.1f}s ({sample_rate}Hz, {channels}ch, {sample_width} bytes/sample)"
                 )
 
                 # Create conversation immediately for uploaded files (conversation_id auto-generated)
@@ -139,12 +126,29 @@ async def upload_and_process_audio_files(
                     title=title,
                     summary="Processing uploaded audio file..."
                 )
-                # Use the relative path returned by write_audio_file (already includes folder prefix if applicable)
-                conversation.audio_path = relative_audio_path
                 await conversation.insert()
                 conversation_id = conversation.conversation_id  # Get the auto-generated ID
 
                 audio_logger.info(f"📝 Created conversation {conversation_id} for uploaded file")
+
+                # Convert audio directly to MongoDB chunks
+                try:
+                    num_chunks = await convert_audio_to_chunks(
+                        conversation_id=conversation_id,
+                        audio_data=audio_data,
+                        sample_rate=sample_rate,
+                        channels=channels,
+                        sample_width=sample_width,
+                    )
+                    audio_logger.info(
+                        f"📦 Converted uploaded file to {num_chunks} MongoDB chunks "
+                        f"(conversation {conversation_id[:12]})"
+                    )
+                except Exception as chunk_error:
+                    audio_logger.error(
+                        f"Failed to convert uploaded file to chunks: {chunk_error}",
+                        exc_info=True
+                    )
 
                 # Enqueue post-conversation processing job chain
                 from advanced_omi_backend.controllers.queue_controller import start_post_conversation_jobs
@@ -152,7 +156,7 @@ async def upload_and_process_audio_files(
                 job_ids = start_post_conversation_jobs(
                     conversation_id=conversation_id,
                     audio_uuid=audio_uuid,
-                    audio_file_path=file_path,
+                    audio_file_path=None,  # No file path - using MongoDB chunks
                     user_id=user.user_id,
                     post_transcription=True,  # Run batch transcription for uploads
                     client_id=client_id  # Pass client_id for UI tracking
@@ -217,45 +221,3 @@ async def upload_and_process_audio_files(
         return JSONResponse(
             status_code=500, content={"error": f"File upload failed: {str(e)}"}
         )
-
-
-async def get_conversation_audio_path(conversation_id: str, user: User) -> Path:
-    """
-    Get the file path for a conversation's audio file.
-
-    Args:
-        conversation_id: The conversation ID
-        user: The authenticated user
-
-    Returns:
-        Path object for the audio file
-
-    Raises:
-        ValueError: If conversation not found, access denied, or audio file not available
-    """
-    # Get conversation by conversation_id (UUID field, not _id)
-    conversation = await Conversation.find_one(Conversation.conversation_id == conversation_id)
-
-    if not conversation:
-        raise ValueError("Conversation not found")
-
-    # Check ownership (admins can access all files)
-    if not user.is_superuser and conversation.user_id != str(user.user_id):
-        raise ValueError("Access denied")
-
-    # Get the audio path
-    audio_path = conversation.audio_path
-
-    if not audio_path:
-        raise ValueError(f"No audio file available for this conversation")
-
-    # Build full file path
-    from advanced_omi_backend.app_config import get_audio_chunk_dir
-    audio_dir = get_audio_chunk_dir()
-    file_path = audio_dir / audio_path
-
-    # Check if file exists
-    if not file_path.exists() or not file_path.is_file():
-        raise ValueError("Audio file not found on disk")
-
-    return file_path
