@@ -249,6 +249,9 @@ def run_service_setup(service_name, selected_services, https_enabled=False, serv
 
         # For speaker-recognition, pass HF_TOKEN from centralized configuration
         if service_name == 'speaker-recognition':
+            # Define the speaker env path
+            speaker_env_path = 'extras/speaker-recognition/.env'
+
             # HF Token should have been provided via setup_hf_token_if_needed()
             if hf_token:
                 cmd.extend(['--hf-token', hf_token])

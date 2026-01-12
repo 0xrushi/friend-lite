@@ -43,8 +43,8 @@ def get_container_status(service_name: str) -> Dict[str, Any]:
 
     try:
         # Get container status using docker compose ps
-        # Use 'ps -a' to get all containers regardless of profile
-        cmd = ['docker', 'compose', 'ps', '-a', '--format', 'json']
+        # Only check containers from active profiles (excludes inactive profile services)
+        cmd = ['docker', 'compose', 'ps', '--format', 'json']
 
         result = subprocess.run(
             cmd,

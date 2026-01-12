@@ -497,9 +497,8 @@ Session Starts
 └─────────────┬───────────────────┘
               ↓ (when conversation ends)
 ┌─────────────────────────────────┐
-│ Post-Conversation Pipeline      │ ← Parallel batch jobs
+│ Post-Conversation Pipeline      │
 ├─────────────────────────────────┤
-│ • transcribe_full_audio_job     │
 │ • recognize_speakers_job        │
 │ • memory_extraction_job         │
 │ • generate_title_summary_job    │
@@ -597,31 +596,15 @@ Session Starts
 
 ### Post-Conversation Pipeline
 
-All jobs run **in parallel** after conversation completes:
+**Streaming conversations**: Use streaming transcript saved during conversation. No batch re-transcription.
 
-#### 1. Transcribe Full Audio Job
+**File uploads**: Batch transcription job runs first, then post-conversation jobs depend on it.
 
-**File**: `backends/advanced/src/advanced_omi_backend/workers/transcription_jobs.py`
-
-**Function**: `transcribe_full_audio_job()`
-
-**Input**: Audio file from disk (`data/chunks/*.wav`)
-
-**Process**:
-- Batch transcribes entire conversation audio
-- Validates meaningful speech
-- Marks conversation `deleted` if no speech detected
-- Stores transcript, segments, words in MongoDB
-
-**Container**: `rq-worker`
-
-#### 2. Recognize Speakers Job
+#### 1. Recognize Speakers Job
 
 **File**: `backends/advanced/src/advanced_omi_backend/workers/transcription_jobs.py`
 
 **Function**: `recognize_speakers_job()`
-
-**Prerequisite**: `transcribe_full_audio_job` completes
 
 **Process**:
 - Sends audio + segments to speaker recognition service
@@ -634,13 +617,13 @@ All jobs run **in parallel** after conversation completes:
 
 **External Service**: `speaker-recognition` container (if enabled)
 
-#### 3. Memory Extraction Job
+#### 2. Memory Extraction Job
 
 **File**: `backends/advanced/src/advanced_omi_backend/workers/memory_jobs.py`
 
 **Function**: `memory_extraction_job()`
 
-**Prerequisite**: `transcribe_full_audio_job` completes
+**Prerequisite**: Speaker recognition job
 
 **Process**:
 - Uses LLM (OpenAI/Ollama) to extract semantic facts
@@ -654,24 +637,21 @@ All jobs run **in parallel** after conversation completes:
 - `ollama` or OpenAI API (LLM)
 - `qdrant` or OpenMemory MCP (vector storage)
 
-#### 4. Generate Title Summary Job
+#### 3. Generate Title Summary Job
 
 **File**: `backends/advanced/src/advanced_omi_backend/workers/conversation_jobs.py`
 
 **Function**: `generate_title_summary_job()`
 
-**Prerequisite**: `transcribe_full_audio_job` completes
+**Prerequisite**: Speaker recognition job
 
 **Process**:
-- Uses LLM to generate:
-  - Title (short summary)
-  - Summary (1-2 sentences)
-  - Detailed summary (paragraph)
+- Uses LLM to generate title, summary, detailed summary
 - Updates conversation document in MongoDB
 
 **Container**: `rq-worker`
 
-#### 5. Dispatch Conversation Complete Event
+#### 4. Dispatch Conversation Complete Event
 
 **File**: `backends/advanced/src/advanced_omi_backend/workers/conversation_jobs.py`
 
@@ -679,7 +659,24 @@ All jobs run **in parallel** after conversation completes:
 
 **Process**:
 - Triggers `conversation.complete` plugin event
-- Only runs for **file uploads** (not streaming sessions)
+
+**Container**: `rq-worker`
+
+#### Batch Transcription Job
+
+**File**: `backends/advanced/src/advanced_omi_backend/workers/transcription_jobs.py`
+
+**Function**: `transcribe_full_audio_job()`
+
+**When used**:
+- File uploads via `/api/process-audio-files`
+- Manual reprocessing via `/api/conversations/{id}/reprocess-transcript`
+- NOT used for streaming conversations
+
+**Process**:
+- Reconstructs audio from MongoDB chunks
+- Batch transcribes entire audio
+- Stores transcript with word-level timestamps
 
 **Container**: `rq-worker`
 
