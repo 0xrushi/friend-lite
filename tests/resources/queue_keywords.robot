@@ -72,7 +72,7 @@ Check job status
 
     # Fail fast if job is in failed state when we're expecting completed
     IF    '${actual_status}' == 'failed' and '${expected_status}' == 'completed'
-        ${error_msg}=    Evaluate    $job.get('exc_info') or $job.get('error', 'Unknown error')
+        ${error_msg}=    Evaluate    $job.get('error_message') or $job.get('exc_info') or $job.get('error', 'Unknown error')
         Fail    Job ${job_id} failed: ${error_msg}
     END
 

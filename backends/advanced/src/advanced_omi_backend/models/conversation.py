@@ -52,6 +52,13 @@ class Conversation(Document):
         UNKNOWN = "unknown"  # Unknown or legacy reason
 
     # Nested Models
+    class Word(BaseModel):
+        """Individual word with timestamp in a transcript."""
+        word: str = Field(description="Word text")
+        start: float = Field(description="Start time in seconds")
+        end: float = Field(description="End time in seconds")
+        confidence: Optional[float] = Field(None, description="Confidence score (0-1)")
+
     class SpeakerSegment(BaseModel):
         """Individual speaker segment in a transcript."""
         start: float = Field(description="Start time in seconds")
@@ -59,6 +66,7 @@ class Conversation(Document):
         text: str = Field(description="Transcript text for this segment")
         speaker: str = Field(description="Speaker identifier")
         confidence: Optional[float] = Field(None, description="Confidence score (0-1)")
+        words: List["Conversation.Word"] = Field(default_factory=list, description="Word-level timestamps for this segment")
 
     class TranscriptVersion(BaseModel):
         """Version of a transcript with processing metadata."""

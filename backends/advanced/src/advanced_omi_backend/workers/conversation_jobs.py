@@ -521,21 +521,88 @@ async def open_conversation_job(
 
     logger.info(f"📦 MongoDB audio chunks ready for conversation {conversation_id[:12]}")
 
-    # Enqueue post-conversation processing pipeline
+    # Get final streaming transcript and save to conversation
+    logger.info(f"📝 Retrieving final streaming transcript for conversation {conversation_id[:12]}")
+    final_transcript = await aggregator.get_combined_results(session_id)
+
+    # Fetch conversation from database to ensure we have latest state
+    conversation = await Conversation.find_one(Conversation.conversation_id == conversation_id)
+    if not conversation:
+        logger.error(f"❌ Conversation {conversation_id} not found in database")
+        raise ValueError(f"Conversation {conversation_id} not found")
+
+    # Create transcript version from streaming results
+    version_id = f"streaming_{session_id[:12]}"
+    transcript_text = final_transcript.get("text", "")
+    segments_data = final_transcript.get("segments", [])
+
+    # Convert segments to SpeakerSegment format with word-level timestamps
+    segments = [
+        Conversation.SpeakerSegment(
+            start=seg.get("start", 0.0),
+            end=seg.get("end", 0.0),
+            text=seg.get("text", ""),
+            speaker=seg.get("speaker", "SPEAKER_00"),
+            confidence=seg.get("confidence"),
+            words=[
+                Conversation.Word(
+                    word=w.get("word", ""),
+                    start=w.get("start", 0.0),
+                    end=w.get("end", 0.0),
+                    confidence=w.get("confidence")
+                )
+                for w in seg.get("words", [])
+            ]
+        )
+        for seg in segments_data
+    ]
+
+    # Determine provider from streaming results
+    provider_str = final_transcript.get("provider", "deepgram")
+    try:
+        provider = Conversation.TranscriptProvider(provider_str)
+    except ValueError:
+        logger.warning(f"⚠️ Unknown provider '{provider_str}', using DEEPGRAM")
+        provider = Conversation.TranscriptProvider.DEEPGRAM
+
+    # Add streaming transcript as the initial version
+    conversation.add_transcript_version(
+        version_id=version_id,
+        transcript=transcript_text,
+        segments=segments,
+        provider=provider,
+        model=provider_str,  # Provider name as model
+        processing_time_seconds=None,  # Not applicable for streaming
+        metadata={
+            "source": "streaming",
+            "chunk_count": final_transcript.get("chunk_count", 0),
+            "word_count": len(final_transcript.get("words", []))
+        },
+        set_as_active=True
+    )
+
+    # Save conversation with streaming transcript
+    await conversation.save()
+    logger.info(
+        f"✅ Saved streaming transcript: {len(transcript_text)} chars, "
+        f"{len(segments)} segments, {len(final_transcript.get('words', []))} words "
+        f"for conversation {conversation_id[:12]}"
+    )
+
+    # Enqueue post-conversation processing pipeline (no batch transcription needed - using streaming transcript)
     client_id = conversation.client_id if conversation else None
 
     job_ids = start_post_conversation_jobs(
         conversation_id=conversation_id,
         audio_uuid=session_id,
         user_id=user_id,
-        post_transcription=True,  # Run batch transcription for streaming audio
         client_id=client_id  # Pass client_id for UI tracking
     )
 
     logger.info(
-        f"📥 Pipeline: transcribe({job_ids['transcription']}) → "
-        f"speaker({job_ids['speaker_recognition']}) → "
-        f"[memory({job_ids['memory']}) + title({job_ids['title_summary']})]"
+        f"📥 Pipeline: speaker({job_ids['speaker_recognition']}) → "
+        f"[memory({job_ids['memory']}) + title({job_ids['title_summary']})] → "
+        f"event({job_ids['event_dispatch']})"
     )
 
     # Wait a moment to ensure jobs are registered in RQ

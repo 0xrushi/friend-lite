@@ -890,20 +890,44 @@ async def _process_batch_audio_complete(
             )
             # Continue anyway - transcription job will handle it
 
-        # Enqueue post-conversation processing job chain
-        from advanced_omi_backend.controllers.queue_controller import start_post_conversation_jobs
+        # Enqueue batch transcription job first (file uploads need transcription)
+        from advanced_omi_backend.controllers.queue_controller import (
+            start_post_conversation_jobs,
+            transcription_queue,
+            JOB_RESULT_TTL
+        )
+        from advanced_omi_backend.workers.transcription_jobs import transcribe_full_audio_job
 
+        version_id = str(uuid.uuid4())
+        transcribe_job_id = f"transcribe_{conversation_id[:12]}"
+
+        transcription_job = transcription_queue.enqueue(
+            transcribe_full_audio_job,
+            conversation_id,
+            audio_uuid,
+            version_id,
+            "batch",  # trigger
+            job_timeout=1800,  # 30 minutes
+            result_ttl=JOB_RESULT_TTL,
+            job_id=transcribe_job_id,
+            description=f"Transcribe batch audio {conversation_id[:8]}",
+            meta={'audio_uuid': audio_uuid, 'conversation_id': conversation_id, 'client_id': client_id}
+        )
+
+        application_logger.info(f"📥 Batch mode: Enqueued transcription job {transcription_job.id}")
+
+        # Enqueue post-conversation processing job chain (depends on transcription)
         job_ids = start_post_conversation_jobs(
             conversation_id=conversation_id,
             audio_uuid=audio_uuid,
             user_id=None,  # Will be read from conversation in DB by jobs
-            post_transcription=True,  # Run batch transcription for uploads
+            depends_on_job=transcription_job,  # Wait for transcription to complete
             client_id=client_id  # Pass client_id for UI tracking
         )
 
         application_logger.info(
             f"✅ Batch mode: Enqueued job chain for {conversation_id} - "
-            f"transcription ({job_ids['transcription']}) → "
+            f"transcription ({transcription_job.id}) → "
             f"speaker ({job_ids['speaker_recognition']}) → "
             f"memory ({job_ids['memory']})"
         )

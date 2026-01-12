@@ -367,7 +367,6 @@ def start_post_conversation_jobs(
     conversation_id: str,
     audio_uuid: str,
     user_id: str,
-    post_transcription: bool = True,
     transcript_version_id: Optional[str] = None,
     depends_on_job = None,
     client_id: Optional[str] = None
@@ -376,27 +375,25 @@ def start_post_conversation_jobs(
     Start post-conversation processing jobs after conversation is created.
 
     This creates the standard processing chain after a conversation is created:
-    1. [Optional] Transcription job - Batch transcription (if post_transcription=True)
-    2. Speaker recognition job - Identifies speakers in audio
-    3. Memory extraction job - Extracts memories from conversation (parallel)
-    4. Title/summary generation job - Generates title and summary (parallel)
+    1. Speaker recognition job - Identifies speakers in audio segments
+    2. Memory extraction job - Extracts memories from conversation
+    3. Title/summary generation job - Generates title and summary
+    4. Event dispatch job - Triggers conversation.complete plugins
 
-    Note: Audio is reconstructed from MongoDB chunks, not files.
+    Note: Batch transcription removed - streaming conversations use streaming transcript.
+    For file uploads, batch transcription must be enqueued separately before calling this function.
 
     Args:
         conversation_id: Conversation identifier
         audio_uuid: Audio UUID for job tracking
         user_id: User identifier
-        post_transcription: If True, run batch transcription step (for uploads)
-                           If False, skip transcription (streaming already has it)
         transcript_version_id: Transcript version ID (auto-generated if None)
-        depends_on_job: Optional job dependency for first job
+        depends_on_job: Optional job dependency for first job (e.g., transcription for file uploads)
         client_id: Client ID for UI tracking
 
     Returns:
-        Dict with job IDs (transcription will be None if post_transcription=False)
+        Dict with job IDs for speaker_recognition, memory, title_summary, event_dispatch
     """
-    from advanced_omi_backend.workers.transcription_jobs import transcribe_full_audio_job
     from advanced_omi_backend.workers.speaker_jobs import recognise_speakers_job
     from advanced_omi_backend.workers.memory_jobs import process_memory_job
     from advanced_omi_backend.workers.conversation_jobs import generate_title_summary_job, dispatch_conversation_complete_event_job
@@ -408,30 +405,7 @@ def start_post_conversation_jobs(
     if client_id:
         job_meta['client_id'] = client_id
 
-    # Step 1: Batch transcription job (ALWAYS run to get correct conversation-relative timestamps)
-    # Even for streaming, we need batch transcription before cropping to fix cumulative timestamps
-    transcribe_job_id = f"transcribe_{conversation_id[:12]}"
-    logger.info(f"🔍 DEBUG: Creating transcribe job with job_id={transcribe_job_id}, conversation_id={conversation_id[:12]}, audio_uuid={audio_uuid[:12]}")
-
-    transcription_job = transcription_queue.enqueue(
-        transcribe_full_audio_job,
-        conversation_id,
-        audio_uuid,
-        version_id,
-        "batch",  # trigger
-        job_timeout=1800,  # 30 minutes
-        result_ttl=JOB_RESULT_TTL,
-        depends_on=depends_on_job,
-        job_id=transcribe_job_id,
-        description=f"Transcribe conversation {conversation_id[:8]}",
-        meta=job_meta
-    )
-    logger.info(f"📥 RQ: Enqueued transcription job {transcription_job.id}, meta={transcription_job.meta}")
-
-    # Speaker recognition depends on transcription (no cropping step)
-    speaker_depends_on = transcription_job
-
-    # Step 2: Speaker recognition job
+    # Step 1: Speaker recognition job (uses streaming transcript from conversation document)
     speaker_job_id = f"speaker_{conversation_id[:12]}"
     logger.info(f"🔍 DEBUG: Creating speaker job with job_id={speaker_job_id}, conversation_id={conversation_id[:12]}, audio_uuid={audio_uuid[:12]}")
 
@@ -441,12 +415,15 @@ def start_post_conversation_jobs(
         version_id,
         job_timeout=1200,  # 20 minutes
         result_ttl=JOB_RESULT_TTL,
-        depends_on=speaker_depends_on,
+        depends_on=depends_on_job,  # Direct dependency (no transcription job)
         job_id=speaker_job_id,
         description=f"Speaker recognition for conversation {conversation_id[:8]}",
         meta=job_meta
     )
-    logger.info(f"📥 RQ: Enqueued speaker recognition job {speaker_job.id}, meta={speaker_job.meta} (depends on {speaker_depends_on.id})")
+    if depends_on_job:
+        logger.info(f"📥 RQ: Enqueued speaker recognition job {speaker_job.id}, meta={speaker_job.meta} (depends on {depends_on_job.id})")
+    else:
+        logger.info(f"📥 RQ: Enqueued speaker recognition job {speaker_job.id}, meta={speaker_job.meta} (no dependencies, starts immediately)")
 
     # Step 3: Memory extraction job (parallel with title/summary)
     memory_job_id = f"memory_{conversation_id[:12]}"
@@ -504,7 +481,6 @@ def start_post_conversation_jobs(
     logger.info(f"📥 RQ: Enqueued conversation complete event job {event_dispatch_job.id}, meta={event_dispatch_job.meta} (depends on {memory_job.id} and {title_summary_job.id})")
 
     return {
-        'transcription': transcription_job.id if transcription_job else None,
         'speaker_recognition': speaker_job.id,
         'memory': memory_job.id,
         'title_summary': title_summary_job.id,

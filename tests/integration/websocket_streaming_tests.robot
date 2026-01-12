@@ -102,7 +102,8 @@ Conversation Closes On Inactivity Timeout And Restarts Speech Detection
     [Documentation]    Verify that after SPEECH_INACTIVITY_THRESHOLD_SECONDS of silence,
     ...                the open_conversation job closes with timeout_triggered=True,
     ...                a new speech_detection job is created for the next conversation,
-    ...                and post-conversation jobs are enqueued (transcription, speaker, memory, title).
+    ...                and post-conversation jobs are enqueued (speaker, memory, title).
+    ...                Note: Streaming conversations use streaming transcript (no batch transcription).
     ...
     ...                Test environment sets SPEECH_INACTIVITY_THRESHOLD_SECONDS=5 in docker-compose-test.yml.
     [Tags]    audio-streaming	queue	conversation
@@ -147,12 +148,11 @@ Conversation Closes On Inactivity Timeout And Restarts Speech Detection
     Log To Console    New speech detection job created for next conversation
 
     # Verify post-conversation jobs were enqueued (linked by conversation_id, not client_id)
-    # These jobs process the completed conversation: transcription, speaker recognition, memory, title
-    ${transcription_jobs}=    Wait Until Keyword Succeeds    30s    2s
-    ...    Job Type Exists For Conversation    transcribe_full_audio_job    ${conversation_id}
-    Log To Console    Post-conversation transcription job enqueued
+    # These jobs process the completed conversation: speaker recognition, memory, title
+    # Note: Streaming conversations no longer have batch transcription - transcript comes from streaming
+    Log To Console    Verifying post-conversation jobs (speaker, memory, title)...
 
-    # Speaker recognition job should also be created
+    # Speaker recognition job should be created
     ${speaker_jobs}=    Get Jobs By Type And Conversation    recognise_speakers_job    ${conversation_id}
     Log To Console    Speaker recognition jobs found: ${speaker_jobs.__len__()}
 

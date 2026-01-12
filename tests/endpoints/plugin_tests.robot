@@ -95,7 +95,7 @@ Event Subscription Matching
 
 Batch Transcription Should Trigger Batch Event
     [Documentation]    Verify batch transcription triggers transcript.batch event
-    [Tags]    audio-upload
+    [Tags]    audio-upload	requires-api-keys
 
     # Upload audio file for batch processing
     ${result}=    Upload Single Audio File
@@ -113,7 +113,7 @@ Batch Transcription Should Trigger Batch Event
 
 Streaming Transcription Should Trigger Streaming Event
     [Documentation]    Verify streaming transcription triggers transcript.streaming event
-    [Tags]    audio-streaming
+    [Tags]    audio-streaming	requires-api-keys
 
     # Note: This would require WebSocket streaming test infrastructure
     # The event dispatch happens in deepgram_stream_consumer.py:309

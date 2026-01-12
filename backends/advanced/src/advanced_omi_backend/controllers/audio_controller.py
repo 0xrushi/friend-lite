@@ -150,14 +150,38 @@ async def upload_and_process_audio_files(
                         exc_info=True
                     )
 
-                # Enqueue post-conversation processing job chain
-                from advanced_omi_backend.controllers.queue_controller import start_post_conversation_jobs
+                # Enqueue batch transcription job first (file uploads need transcription)
+                from advanced_omi_backend.controllers.queue_controller import (
+                    start_post_conversation_jobs,
+                    transcription_queue,
+                    JOB_RESULT_TTL
+                )
+                from advanced_omi_backend.workers.transcription_jobs import transcribe_full_audio_job
 
+                version_id = str(uuid.uuid4())
+                transcribe_job_id = f"transcribe_{conversation_id[:12]}"
+
+                transcription_job = transcription_queue.enqueue(
+                    transcribe_full_audio_job,
+                    conversation_id,
+                    audio_uuid,
+                    version_id,
+                    "batch",  # trigger
+                    job_timeout=1800,  # 30 minutes
+                    result_ttl=JOB_RESULT_TTL,
+                    job_id=transcribe_job_id,
+                    description=f"Transcribe uploaded file {conversation_id[:8]}",
+                    meta={'audio_uuid': audio_uuid, 'conversation_id': conversation_id, 'client_id': client_id}
+                )
+
+                audio_logger.info(f"📥 Enqueued transcription job {transcription_job.id} for uploaded file")
+
+                # Enqueue post-conversation processing job chain (depends on transcription)
                 job_ids = start_post_conversation_jobs(
                     conversation_id=conversation_id,
                     audio_uuid=audio_uuid,
                     user_id=user.user_id,
-                    post_transcription=True,  # Run batch transcription for uploads
+                    depends_on_job=transcription_job,  # Wait for transcription to complete
                     client_id=client_id  # Pass client_id for UI tracking
                 )
 
@@ -166,7 +190,7 @@ async def upload_and_process_audio_files(
                     "status": "processing",
                     "audio_uuid": audio_uuid,
                     "conversation_id": conversation_id,
-                    "transcript_job_id": job_ids['transcription'],
+                    "transcript_job_id": transcription_job.id,
                     "speaker_job_id": job_ids['speaker_recognition'],
                     "memory_job_id": job_ids['memory'],
                     "duration_seconds": round(duration, 2),
@@ -174,7 +198,7 @@ async def upload_and_process_audio_files(
 
                 audio_logger.info(
                     f"✅ Processed {file.filename} → conversation {conversation_id}, "
-                    f"jobs: {job_ids['transcription']} → {job_ids['speaker_recognition']} → {job_ids['memory']}"
+                    f"jobs: {transcription_job.id} → {job_ids['speaker_recognition']} → {job_ids['memory']}"
                 )
 
             except (OSError, IOError) as e:
