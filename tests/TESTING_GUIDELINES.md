@@ -214,6 +214,186 @@ ${jobs}=    Wait Until Keyword Succeeds    30s    2s
 - Use consistent variable naming across tests
 - Document required environment variables and their purposes
 
+## API Key Separation and Test Organization
+
+### Overview
+
+Chronicle tests are separated into two execution paths based on external API dependencies:
+
+1. **No API Keys Required (~70% of tests)** - Run on all PRs by default
+2. **API Keys Required (~30% of tests)** - Run on dev/main branches only
+
+This separation enables:
+- Fast PR validation without external API dependencies
+- External contributors can run full CI without secret access
+- Reduced API costs (only charged on dev/main pushes)
+- Comprehensive testing still happens on protected branches
+
+### The `requires-api-keys` Tag
+
+**Purpose**: Mark tests that require external API services (Deepgram, OpenAI, etc.)
+
+**Usage**: Add to test files that make external API calls for transcription or memory extraction:
+
+```robot
+*** Test Cases ***
+Full Pipeline Integration Test
+    [Documentation]    Complete end-to-end test with transcription and memory extraction
+    [Tags]    e2e	requires-api-keys
+    [Timeout]    600s
+
+    # This test will be excluded from PR runs
+    # It will run on dev/main branches with API keys
+```
+
+### When to Use `requires-api-keys`
+
+**Add this tag when tests:**
+- Require actual transcription (Deepgram or other STT providers)
+- Require memory extraction with LLM (OpenAI, Ollama with real inference)
+- Verify transcript quality against ground truth
+- Test end-to-end pipeline with real API integration
+
+**Do NOT add this tag when tests:**
+- Test API endpoints (CRUD operations, permissions, etc.)
+- Test infrastructure (worker management, queue operations)
+- Test system health and readiness
+- Can work with mock/stub services
+
+### Test Execution Modes
+
+**1. No-API Tests (PR runs)**
+```bash
+# Excludes tests tagged with requires-api-keys
+cd tests
+./run-no-api-tests.sh
+```
+- Uses `configs/mock-services.yml`
+- No external API calls
+- Fast feedback (~10-15 minutes)
+- Runs ~70% of test suite
+
+**2. Full Tests with API Keys (dev/main runs)**
+```bash
+# Runs all tests including API-dependent ones
+cd tests
+./run-robot-tests.sh
+```
+- Uses `configs/deepgram-openai.yml`
+- Requires DEEPGRAM_API_KEY and OPENAI_API_KEY
+- Comprehensive validation (~20-30 minutes)
+- Runs 100% of test suite
+
+**3. Label-Triggered PR Tests**
+- Add label `test-with-api-keys` to PR
+- Triggers full test suite before merge
+- Useful for testing API integration changes
+
+### Mock Services Configuration
+
+For tests that don't require API keys, use the mock services config:
+
+**File**: `tests/configs/mock-services.yml`
+
+**Features**:
+- Disables external transcription and LLM services
+- Keeps core services operational (MongoDB, Redis, Qdrant)
+- No API keys required
+- Fast test execution
+
+**Use Cases**:
+- Endpoint testing (auth, permissions, CRUD)
+- Infrastructure testing (workers, queues)
+- System health monitoring
+- Local development without API keys
+
+### Writing Tests for API Separation
+
+**Good Example - Endpoint Test (No API Keys)**:
+```robot
+*** Test Cases ***
+User Can Create and Delete Conversations
+    [Documentation]    Test conversation CRUD without transcription
+    [Tags]    conversation
+
+    ${session}=    Get Admin API Session
+    ${conversation}=    Create Test Conversation    ${session}
+    ${deleted}=    Delete Conversation    ${session}    ${conversation}[id]
+    Should Be True    ${deleted}
+```
+
+**Good Example - Integration Test (Requires API Keys)**:
+```robot
+*** Test Cases ***
+Audio Upload Produces Quality Transcript
+    [Documentation]    Verify transcription quality with ground truth
+    [Tags]    e2e	requires-api-keys
+
+    ${conversation}=    Upload Audio File    ${TEST_AUDIO_FILE}
+    Verify Transcription Quality    ${conversation}    ${EXPECTED_TRANSCRIPT}
+    Verify Memory Extraction    ${conversation}
+```
+
+### GitHub Workflows
+
+**Three workflows handle test execution:**
+
+1. **`robot-tests.yml`** (PR - No API Keys)
+   - Triggers: All pull requests
+   - Execution: Excludes `requires-api-keys` tests
+   - No secrets required
+
+2. **`full-tests-with-api.yml`** (Dev/Main - Full Suite)
+   - Triggers: Push to dev/main branches
+   - Execution: All tests including API-dependent
+   - Requires: DEEPGRAM_API_KEY, OPENAI_API_KEY
+
+3. **`pr-tests-with-api.yml`** (PR - Label Triggered)
+   - Triggers: PR with `test-with-api-keys` label
+   - Execution: Full test suite before merge
+   - Requires: DEEPGRAM_API_KEY, OPENAI_API_KEY
+
+### Tag Guidelines for API Separation
+
+**File-Level Tagging**:
+- Tag entire test files that require API keys
+- If ANY test in the file needs APIs, mark the whole file
+- Simpler maintenance than per-test tagging
+
+**Multiple Tags**:
+- Use tab-separated tags (see `tags.md`)
+- Example: `[Tags]    e2e	requires-api-keys`
+- Always include primary component tag (e2e, conversation, memory)
+
+**Tag Statistics**:
+- `requires-api-keys`: ~1-2 test files (integration_test.robot)
+- Most tests: No API requirements
+- See `tests/tags.md` for complete tag list
+
+### Local Development
+
+**Running Tests Locally Without API Keys**:
+```bash
+cd tests
+./run-no-api-tests.sh
+```
+- Works without any API key configuration
+- Fast feedback for most development
+- Tests endpoint logic and infrastructure
+
+**Running Full Tests Locally**:
+```bash
+# Set API keys
+export DEEPGRAM_API_KEY=xxx
+export OPENAI_API_KEY=yyy
+
+cd tests
+./run-robot-tests.sh
+```
+- Validates full pipeline integration
+- Tests transcription and memory extraction
+- Use before pushing to dev/main
+
 ## Future Additions
 
 As we develop more conventions and encounter new patterns, we will add them to this file:

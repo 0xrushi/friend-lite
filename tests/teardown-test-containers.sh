@@ -16,10 +16,18 @@ print_success() { echo -e "${GREEN}[SUCCESS]${NC} $1"; }
 print_warning() { echo -e "${YELLOW}[WARNING]${NC} $1"; }
 
 # Navigate to backend directory
-cd "$(dirname "$0")/../backends/advanced" || exit 1
+SCRIPT_DIR="$(dirname "$0")"
+cd "$SCRIPT_DIR/../backends/advanced" || exit 1
 
-# Use unique project name
-export COMPOSE_PROJECT_NAME="advanced-backend-test"
+# Set default COMPOSE_PROJECT_NAME (can be overridden by .env.test)
+export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-advanced-backend-test}"
+
+# Load .env.test if available to get consistent project name
+if [ -f "$SCRIPT_DIR/setup/.env.test" ]; then
+    set -a
+    source "$SCRIPT_DIR/setup/.env.test"
+    set +a
+fi
 
 if [ "${REMOVE_VOLUMES:-false}" = "true" ]; then
     print_info "Stopping containers and removing volumes..."

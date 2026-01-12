@@ -71,6 +71,10 @@ fi
 if [ ! -f "setup/.env.test" ]; then
     print_info "Creating test environment file..."
     mkdir -p setup
+
+    # Set COMPOSE_PROJECT_NAME with fallback
+    COMPOSE_PROJECT_NAME_VALUE="${COMPOSE_PROJECT_NAME:-advanced-backend-test}"
+
     cat > setup/.env.test << EOF
 # API URLs
 API_URL=http://localhost:8001
@@ -86,7 +90,7 @@ TEST_TIMEOUT=120
 TEST_DEVICE_NAME=robot-test
 
 # Docker Compose Project Name
-COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME:-advanced-backend-test}
+COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME_VALUE}
 
 # Note: No API keys required for this test mode
 # OPENAI_API_KEY and DEEPGRAM_API_KEY are not needed

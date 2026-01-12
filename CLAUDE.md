@@ -106,25 +106,68 @@ The project includes simplified test scripts that mirror CI workflows:
 ```
 
 #### Advanced Backend Integration Tests
+
+**Three Test Execution Modes:**
+
+1. **No-API Tests** (Fast, No External Dependencies)
 ```bash
-cd backends/advanced
+cd tests
 
-# Requires .env file with DEEPGRAM_API_KEY and OPENAI_API_KEY
-cp .env.template .env  # Configure API keys
+# Run tests without API keys (excludes requires-api-keys tag)
+./run-no-api-tests.sh
 
-# Run full integration test suite
-./run-test.sh
-
-# Leave test containers running for debugging (don't auto-cleanup)
-CLEANUP_CONTAINERS=false ./run-test.sh
+# ~70% of test suite
+# Uses mock services config
+# No DEEPGRAM_API_KEY or OPENAI_API_KEY required
+# Fast feedback (~10-15 minutes)
 ```
 
+2. **Full Tests with API Keys** (Comprehensive)
+```bash
+cd tests
+
+# Requires .env file with DEEPGRAM_API_KEY and OPENAI_API_KEY
+cp setup/.env.test.template setup/.env.test  # Configure API keys
+
+# Run full integration test suite (100% of tests)
+./run-robot-tests.sh
+
+# Leave test containers running for debugging
+CLEANUP_CONTAINERS=false ./run-robot-tests.sh
+```
+
+3. **API-Only Tests** (Optional)
+```bash
+cd tests
+
+# Run only tests that require API keys
+./run-api-tests.sh
+
+# ~30% of test suite
+# Only E2E tests with transcription/memory extraction
+```
+
+#### Test Separation by API Requirements
+
+Tests are separated into two categories:
+
+- **No API Keys Required** (~70%): Endpoint tests, infrastructure tests, basic integration
+  - Uses `configs/mock-services.yml`
+  - Runs on all PRs by default
+  - Fast CI feedback
+
+- **API Keys Required** (~30%): Full E2E tests with transcription and memory extraction
+  - Uses `configs/deepgram-openai.yml`
+  - Tagged with `requires-api-keys`
+  - Runs on dev/main branches or when PR labeled with `test-with-api-keys`
+
 #### Test Configuration Flags
-- **CLEANUP_CONTAINERS** (default: true): Automatically stop and remove test containers after test completion
-  - Set to `false` for debugging: `CLEANUP_CONTAINERS=false ./run-test.sh`
-- **REBUILD** (default: true): Force rebuild containers with latest code changes
-- **FRESH_RUN** (default: true): Start with clean database and fresh containers
-- **TRANSCRIPTION_PROVIDER** (default: deepgram): Choose transcription provider (deepgram or parakeet)
+- **CLEANUP_CONTAINERS** (default: false): Automatically stop and remove test containers after test completion
+  - Set to `true` for cleanup: `CLEANUP_CONTAINERS=true ./run-robot-tests.sh`
+- **CONFIG_FILE**: Choose test configuration
+  - `configs/mock-services.yml` - No API keys (default for run-no-api-tests.sh)
+  - `configs/deepgram-openai.yml` - With API keys (default for run-robot-tests.sh)
+  - `configs/parakeet-ollama.yml` - Fully local (no external APIs)
 
 #### Test Environment Variables
 Tests use isolated test environment with overridden credentials:
@@ -140,10 +183,33 @@ Tests use isolated test environment with overridden credentials:
 #### Test Script Features
 - **Environment Compatibility**: Works with both local .env files and CI environment variables
 - **Isolated Test Environment**: Separate ports and database prevent conflicts with running services
-- **Automatic Cleanup**: Configurable via CLEANUP_CONTAINERS flag (default: true)
+- **Automatic Cleanup**: Configurable via CLEANUP_CONTAINERS flag (default: false for faster re-runs)
 - **Colored Output**: Clear progress indicators and error reporting
-- **Timeout Protection**: 15-minute timeout for advanced backend, 30-minute for speaker recognition
+- **Timeout Protection**: 30-minute timeout for test execution
 - **Fresh Testing**: Clean database and containers for each test run
+- **API Key Separation**: Ability to run tests with or without external API dependencies
+
+#### GitHub Workflows
+
+**Three workflows handle test execution:**
+
+1. **`robot-tests.yml`** - PR Tests (No API Keys)
+   - Triggers: All pull requests
+   - Execution: Excludes `requires-api-keys` tests (~70% of suite)
+   - No secrets required
+   - Fast feedback for contributors
+
+2. **`full-tests-with-api.yml`** - Dev/Main Tests (Full Suite)
+   - Triggers: Push to dev/main branches
+   - Execution: All tests including API-dependent (~100% of suite)
+   - Requires: DEEPGRAM_API_KEY, OPENAI_API_KEY
+   - Comprehensive validation before deployment
+
+3. **`pr-tests-with-api.yml`** - Label-Triggered PR Tests
+   - Triggers: PR with `test-with-api-keys` label
+   - Execution: Full test suite before merge
+   - Requires: DEEPGRAM_API_KEY, OPENAI_API_KEY
+   - Useful for testing API integration changes
 
 ### Mobile App Development
 ```bash

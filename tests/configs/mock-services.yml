@@ -14,8 +14,8 @@ chat:
 
 defaults:
   # No default STT provider (transcription disabled)
-  # No default LLM provider (memory extraction disabled)
-  # No default embedding provider
+  llm: mock-llm  # Mock LLM (not actually used since extraction disabled)
+  embedding: mock-embed  # Mock embeddings (not actually used)
   vector_store: vs-qdrant  # Keep Qdrant for memory storage tests
 
 memory:
@@ -26,6 +26,33 @@ memory:
   timeout_seconds: 1200
 
 models:
+  # Dummy LLM - not actually used (memory extraction disabled)
+  # Using openai type with dummy key to satisfy config requirements
+  - api_family: openai
+    api_key: "dummy-key-not-used"
+    description: Dummy LLM for testing (not called)
+    model_name: gpt-4o-mini
+    model_output: json
+    model_params:
+      max_tokens: 2000
+      temperature: 0.2
+    model_provider: openai
+    model_type: llm
+    model_url: https://api.openai.com/v1
+    name: mock-llm
+
+  # Dummy embeddings - not actually used (memory extraction disabled)
+  - api_family: openai
+    api_key: "dummy-key-not-used"
+    description: Dummy embeddings for testing (not called)
+    embedding_dimensions: 384
+    model_name: text-embedding-3-small
+    model_output: vector
+    model_provider: openai
+    model_type: embedding
+    model_url: https://api.openai.com/v1
+    name: mock-embed
+
   # Qdrant vector store - no API key required, local service
   - api_family: qdrant
     description: Qdrant vector database (local)

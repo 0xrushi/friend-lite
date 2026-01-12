@@ -20,7 +20,10 @@ print_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 SCRIPT_DIR="$(dirname "$0")"
 cd "$SCRIPT_DIR/../backends/advanced" || exit 1
 
-# Load environment variables for tests
+# Set default COMPOSE_PROJECT_NAME (can be overridden by .env.test)
+export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-advanced-backend-test}"
+
+# Load environment variables for tests (may override COMPOSE_PROJECT_NAME)
 if [ -f "$SCRIPT_DIR/setup/.env.test" ]; then
     print_info "Loading test environment..."
     set -a
@@ -36,9 +39,6 @@ if [ -f "$SPEAKER_ENV" ] && [ -z "$HF_TOKEN" ]; then
     source "$SPEAKER_ENV"
     set +a
 fi
-
-# Use unique project name
-export COMPOSE_PROJECT_NAME="advanced-backend-test"
 
 # Configuration
 FRESH_BUILD="${FRESH_BUILD:-false}"  # Set to true for clean rebuild with volume removal
