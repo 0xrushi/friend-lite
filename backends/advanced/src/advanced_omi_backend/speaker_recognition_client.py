@@ -67,14 +67,14 @@ class SpeakerRecognitionClient:
             logger.info("Speaker recognition client disabled (no service URL configured)")
 
     async def diarize_identify_match(
-        self, audio_path: str, transcript_data: Dict, user_id: Optional[str] = None
+        self, audio_data: bytes, transcript_data: Dict, user_id: Optional[str] = None
     ) -> Dict:
         """
         Perform diarization, speaker identification, and word-to-speaker matching.
         Routes to appropriate endpoint based on diarization source configuration.
 
         Args:
-            audio_path: Path to the audio file
+            audio_data: WAV audio data as bytes (in-memory)
             transcript_data: Dict containing words array and text from transcription
             user_id: Optional user ID for speaker identification
 
@@ -86,7 +86,7 @@ class SpeakerRecognitionClient:
             return {}
 
         try:
-            logger.info(f"🎤 Identifying speakers for {audio_path}")
+            logger.info(f"🎤 Identifying speakers from in-memory audio ({len(audio_data) / 1024 / 1024:.2f} MB)")
 
             # Read diarization source from existing config system
             from advanced_omi_backend.config import load_diarization_settings_from_file
@@ -94,76 +94,75 @@ class SpeakerRecognitionClient:
             diarization_source = config.get("diarization_source", "pyannote")
 
             async with aiohttp.ClientSession() as session:
-                # Prepare the audio file for upload
-                with open(audio_path, "rb") as audio_file:
-                    form_data = aiohttp.FormData()
-                    form_data.add_field(
-                        "file", audio_file, filename=Path(audio_path).name, content_type="audio/wav"
-                    )
-                    
-                    if diarization_source == "deepgram":
-                        # DEEPGRAM DIARIZATION PATH: We EXPECT transcript has speaker info from Deepgram
-                        # Only need speaker identification of existing segments
-                        logger.info("Using Deepgram diarization path - transcript should have speaker segments, identifying speakers")
-                        
-                        # TODO: Implement proper speaker identification for Deepgram segments
-                        # For now, use diarize-identify-match as fallback until we implement segment identification
-                        logger.warning("Deepgram segment identification not yet implemented, using diarize-identify-match as fallback")
-                        
-                        form_data.add_field("transcript_data", json.dumps(transcript_data))
-                        form_data.add_field("user_id", "1")  # TODO: Implement proper user mapping
-                        form_data.add_field("similarity_threshold", str(config.get("similarity_threshold", 0.15)))
-                        form_data.add_field("min_duration", str(config.get("min_duration", 0.5)))
-                        
-                        # Use /v1/diarize-identify-match endpoint as fallback
-                        endpoint = "/v1/diarize-identify-match"
-                        
-                    else:  # pyannote (default)
-                        # PYANNOTE PATH: Backend has transcript, need diarization + speaker identification
-                        logger.info("Using Pyannote path - diarizing backend transcript and identifying speakers")
-                        
-                        # Send existing transcript for diarization and speaker matching
-                        form_data.add_field("transcript_data", json.dumps(transcript_data))
-                        form_data.add_field("user_id", "1")  # TODO: Implement proper user mapping
-                        form_data.add_field("similarity_threshold", str(config.get("similarity_threshold", 0.15)))
-                        
-                        # Add pyannote diarization parameters
-                        form_data.add_field("min_duration", str(config.get("min_duration", 0.5)))
-                        form_data.add_field("collar", str(config.get("collar", 2.0)))
-                        form_data.add_field("min_duration_off", str(config.get("min_duration_off", 1.5)))
-                        if config.get("min_speakers"):
-                            form_data.add_field("min_speakers", str(config.get("min_speakers")))
-                        if config.get("max_speakers"):
-                            form_data.add_field("max_speakers", str(config.get("max_speakers")))
-                        
-                        # Use /v1/diarize-identify-match endpoint for backend integration
-                        endpoint = "/v1/diarize-identify-match"
+                # Prepare the audio data for upload (no disk I/O!)
+                form_data = aiohttp.FormData()
+                form_data.add_field(
+                    "file", audio_data, filename="audio.wav", content_type="audio/wav"
+                )
 
-                    # Make the request to the consolidated endpoint
-                    request_url = f"{self.service_url}{endpoint}"
-                    logger.info(f"🎤 DEBUG: Making request to speaker service URL: {request_url}")
+                if diarization_source == "deepgram":
+                    # DEEPGRAM DIARIZATION PATH: We EXPECT transcript has speaker info from Deepgram
+                    # Only need speaker identification of existing segments
+                    logger.info("Using Deepgram diarization path - transcript should have speaker segments, identifying speakers")
 
-                    async with session.post(
-                        request_url,
-                        data=form_data,
-                        timeout=aiohttp.ClientTimeout(total=120),
-                    ) as response:
-                        logger.info(f"🎤 Speaker service response status: {response.status}")
+                    # TODO: Implement proper speaker identification for Deepgram segments
+                    # For now, use diarize-identify-match as fallback until we implement segment identification
+                    logger.warning("Deepgram segment identification not yet implemented, using diarize-identify-match as fallback")
 
-                        if response.status != 200:
-                            response_text = await response.text()
-                            logger.error(
-                                f"🎤 ❌ Speaker service returned status {response.status}: {response_text}"
-                            )
-                            return {}
+                    form_data.add_field("transcript_data", json.dumps(transcript_data))
+                    form_data.add_field("user_id", "1")  # TODO: Implement proper user mapping
+                    form_data.add_field("similarity_threshold", str(config.get("similarity_threshold", 0.15)))
+                    form_data.add_field("min_duration", str(config.get("min_duration", 0.5)))
 
-                        result = await response.json()
+                    # Use /v1/diarize-identify-match endpoint as fallback
+                    endpoint = "/v1/diarize-identify-match"
 
-                        # Log basic result info
-                        num_segments = len(result.get("segments", []))
-                        logger.info(f"🎤 Speaker recognition returned {num_segments} segments")
+                else:  # pyannote (default)
+                    # PYANNOTE PATH: Backend has transcript, need diarization + speaker identification
+                    logger.info("Using Pyannote path - diarizing backend transcript and identifying speakers")
 
-                        return result
+                    # Send existing transcript for diarization and speaker matching
+                    form_data.add_field("transcript_data", json.dumps(transcript_data))
+                    form_data.add_field("user_id", "1")  # TODO: Implement proper user mapping
+                    form_data.add_field("similarity_threshold", str(config.get("similarity_threshold", 0.15)))
+
+                    # Add pyannote diarization parameters
+                    form_data.add_field("min_duration", str(config.get("min_duration", 0.5)))
+                    form_data.add_field("collar", str(config.get("collar", 2.0)))
+                    form_data.add_field("min_duration_off", str(config.get("min_duration_off", 1.5)))
+                    if config.get("min_speakers"):
+                        form_data.add_field("min_speakers", str(config.get("min_speakers")))
+                    if config.get("max_speakers"):
+                        form_data.add_field("max_speakers", str(config.get("max_speakers")))
+
+                    # Use /v1/diarize-identify-match endpoint for backend integration
+                    endpoint = "/v1/diarize-identify-match"
+
+                # Make the request to the consolidated endpoint
+                request_url = f"{self.service_url}{endpoint}"
+                logger.info(f"🎤 DEBUG: Making request to speaker service URL: {request_url}")
+
+                async with session.post(
+                    request_url,
+                    data=form_data,
+                    timeout=aiohttp.ClientTimeout(total=120),
+                ) as response:
+                    logger.info(f"🎤 Speaker service response status: {response.status}")
+
+                    if response.status != 200:
+                        response_text = await response.text()
+                        logger.error(
+                            f"🎤 ❌ Speaker service returned status {response.status}: {response_text}"
+                        )
+                        return {}
+
+                    result = await response.json()
+
+                    # Log basic result info
+                    num_segments = len(result.get("segments", []))
+                    logger.info(f"🎤 Speaker recognition returned {num_segments} segments")
+
+                    return result
 
         except ClientConnectorError as e:
             logger.error(f"🎤 Failed to connect to speaker recognition service: {e}")
@@ -179,13 +178,13 @@ class SpeakerRecognitionClient:
             return {"error": "unknown_error", "message": str(e), "segments": []}
 
     async def diarize_and_identify(
-        self, audio_path: str, words: None, user_id: Optional[str] = None  # NOT IMPLEMENTED
+        self, audio_data: bytes, words: None, user_id: Optional[str] = None  # NOT IMPLEMENTED
     ) -> Dict:
         """
         Perform diarization and speaker identification using the speaker recognition service.
 
         Args:
-            audio_path: Path to the audio file
+            audio_data: WAV audio data as bytes (in-memory)
             words: Optional word-level data from transcription provider (for hints)
             user_id: Optional user ID for speaker identification
 
@@ -200,91 +199,86 @@ class SpeakerRecognitionClient:
             return {}
 
         try:
-            logger.info(f"🎤 [DIARIZE] Starting diarization and identification for {audio_path}")
-
-            # Verify file exists and get info
-            if not os.path.exists(audio_path):
-                logger.error(f"🎤 [DIARIZE] ❌ Audio file does not exist: {audio_path}")
-                return {}
-
-            file_size = os.path.getsize(audio_path)
-            logger.info(f"🎤 [DIARIZE] Audio file size: {file_size} bytes")
+            logger.info(
+                f"🎤 [DIARIZE] Starting diarization and identification from in-memory audio "
+                f"({len(audio_data) / 1024 / 1024:.2f} MB)"
+            )
 
             # Call the speaker recognition service
             async with aiohttp.ClientSession() as session:
-                # Prepare the audio file for upload
-                with open(audio_path, "rb") as audio_file:
-                    form_data = aiohttp.FormData()
-                    form_data.add_field(
-                        "file", audio_file, filename=Path(audio_path).name, content_type="audio/wav"
-                    )
-                    # Get current diarization settings from config
-                    from advanced_omi_backend.config import load_diarization_settings_from_file
+                # Prepare the audio data for upload (no disk I/O!)
+                form_data = aiohttp.FormData()
+                form_data.add_field(
+                    "file", audio_data, filename="audio.wav", content_type="audio/wav"
+                )
 
-                    diarization_settings = load_diarization_settings_from_file()
+                # Get current diarization settings from config
+                from advanced_omi_backend.config import load_diarization_settings_from_file
 
-                    # Add all diarization parameters for the diarize-and-identify endpoint
-                    min_duration = diarization_settings.get("min_duration", 0.5)
-                    similarity_threshold = diarization_settings.get("similarity_threshold", 0.15)
-                    collar = diarization_settings.get("collar", 2.0)
-                    min_duration_off = diarization_settings.get("min_duration_off", 1.5)
+                diarization_settings = load_diarization_settings_from_file()
 
-                    form_data.add_field("min_duration", str(min_duration))
-                    form_data.add_field("similarity_threshold", str(similarity_threshold))
-                    form_data.add_field("collar", str(collar))
-                    form_data.add_field("min_duration_off", str(min_duration_off))
+                # Add all diarization parameters for the diarize-and-identify endpoint
+                min_duration = diarization_settings.get("min_duration", 0.5)
+                similarity_threshold = diarization_settings.get("similarity_threshold", 0.15)
+                collar = diarization_settings.get("collar", 2.0)
+                min_duration_off = diarization_settings.get("min_duration_off", 1.5)
 
-                    if diarization_settings.get("min_speakers"):
-                        form_data.add_field("min_speakers", str(diarization_settings["min_speakers"]))
-                    if diarization_settings.get("max_speakers"):
-                        form_data.add_field("max_speakers", str(diarization_settings["max_speakers"]))
+                form_data.add_field("min_duration", str(min_duration))
+                form_data.add_field("similarity_threshold", str(similarity_threshold))
+                form_data.add_field("collar", str(collar))
+                form_data.add_field("min_duration_off", str(min_duration_off))
 
-                    form_data.add_field("identify_only_enrolled", "false")
-                    # TODO: Implement proper user mapping between MongoDB ObjectIds and speaker service integer IDs
-                    # For now, hardcode to admin user (ID=1) since speaker service expects integer user_id
-                    form_data.add_field("user_id", "1")
+                if diarization_settings.get("min_speakers"):
+                    form_data.add_field("min_speakers", str(diarization_settings["min_speakers"]))
+                if diarization_settings.get("max_speakers"):
+                    form_data.add_field("max_speakers", str(diarization_settings["max_speakers"]))
 
-                    endpoint_url = f"{self.service_url}/diarize-and-identify"
-                    logger.info(f"🎤 [DIARIZE] Calling speaker service: {endpoint_url}")
-                    logger.info(
-                        f"🎤 [DIARIZE] Parameters: min_duration={min_duration}, "
-                        f"similarity_threshold={similarity_threshold}, collar={collar}, "
-                        f"min_duration_off={min_duration_off}, user_id=1"
-                    )
+                form_data.add_field("identify_only_enrolled", "false")
+                # TODO: Implement proper user mapping between MongoDB ObjectIds and speaker service integer IDs
+                # For now, hardcode to admin user (ID=1) since speaker service expects integer user_id
+                form_data.add_field("user_id", "1")
 
-                    # Make the request
-                    async with session.post(
-                        endpoint_url,
-                        data=form_data,
-                        timeout=aiohttp.ClientTimeout(total=120),
-                    ) as response:
-                        logger.info(f"🎤 [DIARIZE] Response status: {response.status}")
+                endpoint_url = f"{self.service_url}/diarize-and-identify"
+                logger.info(f"🎤 [DIARIZE] Calling speaker service: {endpoint_url}")
+                logger.info(
+                    f"🎤 [DIARIZE] Parameters: min_duration={min_duration}, "
+                    f"similarity_threshold={similarity_threshold}, collar={collar}, "
+                    f"min_duration_off={min_duration_off}, user_id=1"
+                )
 
-                        if response.status != 200:
-                            response_text = await response.text()
-                            logger.warning(
-                                f"🎤 [DIARIZE] ❌ Speaker recognition service returned status {response.status}: {response_text}"
-                            )
-                            return {}
+                # Make the request
+                async with session.post(
+                    endpoint_url,
+                    data=form_data,
+                    timeout=aiohttp.ClientTimeout(total=120),
+                ) as response:
+                    logger.info(f"🎤 [DIARIZE] Response status: {response.status}")
 
-                        result = await response.json()
-                        segments_count = len(result.get('segments', []))
-                        logger.info(f"🎤 [DIARIZE] ✅ Speaker service returned {segments_count} segments")
+                    if response.status != 200:
+                        response_text = await response.text()
+                        logger.warning(
+                            f"🎤 [DIARIZE] ❌ Speaker recognition service returned status {response.status}: {response_text}"
+                        )
+                        return {}
 
-                        # Log details about identified speakers
-                        if segments_count > 0:
-                            identified_names = set()
-                            for seg in result.get('segments', []):
-                                identified_as = seg.get('identified_as')
-                                if identified_as and identified_as != 'Unknown':
-                                    identified_names.add(identified_as)
+                    result = await response.json()
+                    segments_count = len(result.get('segments', []))
+                    logger.info(f"🎤 [DIARIZE] ✅ Speaker service returned {segments_count} segments")
 
-                            if identified_names:
-                                logger.info(f"🎤 [DIARIZE] Identified speakers in segments: {identified_names}")
-                            else:
-                                logger.warning(f"🎤 [DIARIZE] No identified speakers found in {segments_count} segments")
+                    # Log details about identified speakers
+                    if segments_count > 0:
+                        identified_names = set()
+                        for seg in result.get('segments', []):
+                            identified_as = seg.get('identified_as')
+                            if identified_as and identified_as != 'Unknown':
+                                identified_names.add(identified_as)
 
-                        return result
+                        if identified_names:
+                            logger.info(f"🎤 [DIARIZE] Identified speakers in segments: {identified_names}")
+                        else:
+                            logger.warning(f"🎤 [DIARIZE] No identified speakers found in {segments_count} segments")
+
+                    return result
 
         except ClientConnectorError as e:
             logger.error(f"🎤 [DIARIZE] ❌ Failed to connect to speaker recognition service at {self.service_url}: {e}")
@@ -495,11 +489,7 @@ class SpeakerRecognitionClient:
             - enrolled_present: True if enrolled speaker detected, False otherwise
             - speaker_result: Full speaker recognition result dict with segments
         """
-        import tempfile
-        import uuid
-        from pathlib import Path
         from advanced_omi_backend.utils.audio_extraction import extract_audio_for_results
-        from advanced_omi_backend.utils.audio_utils import write_pcm_to_wav
 
         logger.info(f"🎤 [SPEAKER CHECK] Starting speaker check for session {session_id}")
         logger.info(f"🎤 [SPEAKER CHECK] Client: {client_id}, User: {user_id}")
@@ -516,44 +506,38 @@ class SpeakerRecognitionClient:
             logger.warning("🎤 [SPEAKER CHECK] No enrolled speakers found, allowing conversation")
             return (True, {})  # If no enrolled speakers, allow all conversations
 
-        # Extract audio chunks
+        # Extract audio chunks (PCM format)
         logger.info(f"🎤 [SPEAKER CHECK] Extracting audio chunks from Redis...")
-        audio_data = await extract_audio_for_results(
+        pcm_data = await extract_audio_for_results(
             redis_client=redis_client,
             client_id=client_id,
             session_id=session_id,
             transcription_results=transcription_results
         )
 
-        if not audio_data:
+        if not pcm_data:
             logger.warning("🎤 [SPEAKER CHECK] No audio data extracted, skipping speaker check")
             return (False, {})
 
-        audio_size_kb = len(audio_data) / 1024
-        audio_duration_sec = len(audio_data) / (16000 * 2)  # 16kHz, 16-bit
+        audio_size_kb = len(pcm_data) / 1024
+        audio_duration_sec = len(pcm_data) / (16000 * 2)  # 16kHz, 16-bit
         logger.info(
             f"🎤 [SPEAKER CHECK] Extracted audio: {audio_size_kb:.1f} KB, ~{audio_duration_sec:.1f}s"
         )
 
-        # Write to temporary WAV file
-        temp_path = Path(tempfile.gettempdir()) / f"speech_check_{uuid.uuid4()}.wav"
-        logger.info(f"🎤 [SPEAKER CHECK] Writing audio to temp file: {temp_path}")
+        # Convert PCM to WAV in memory (no disk I/O!)
+        from advanced_omi_backend.utils.audio_utils import pcm_to_wav_bytes
+
+        logger.info(f"🎤 [SPEAKER CHECK] Converting PCM to WAV in memory...")
+        wav_data = pcm_to_wav_bytes(pcm_data, sample_rate=16000, channels=1, sample_width=2)
+
+        logger.info(f"🎤 [SPEAKER CHECK] WAV created in memory: {len(wav_data) / 1024 / 1024:.2f} MB")
 
         try:
-            write_pcm_to_wav(audio_data, str(temp_path), sample_rate=16000, channels=1, sample_width=2)
-
-            # Verify file was created
-            if temp_path.exists():
-                file_size = temp_path.stat().st_size
-                logger.info(f"🎤 [SPEAKER CHECK] Temp WAV file created: {file_size} bytes")
-            else:
-                logger.error(f"🎤 [SPEAKER CHECK] ❌ Temp WAV file was not created!")
-                return (False, {})
-
-            # Run speaker recognition (diarize and identify)
-            logger.info(f"🎤 [SPEAKER CHECK] Calling diarize_and_identify with audio file...")
+            # Run speaker recognition (diarize and identify) with in-memory audio
+            logger.info(f"🎤 [SPEAKER CHECK] Calling diarize_and_identify with in-memory audio...")
             result = await self.diarize_and_identify(
-                audio_path=str(temp_path),
+                audio_data=wav_data,  # Pass bytes directly, no temp file!
                 words=None,
                 user_id=user_id
             )
@@ -599,15 +583,6 @@ class SpeakerRecognitionClient:
         except Exception as e:
             logger.error(f"🎤 [SPEAKER CHECK] ❌ Speaker recognition check failed: {e}", exc_info=True)
             return (False, {})  # Fail closed - don't create conversation on error
-
-        finally:
-            # Clean up temp file
-            try:
-                if temp_path.exists():
-                    temp_path.unlink()
-                    logger.debug(f"🎤 [SPEAKER CHECK] Cleaned up temp file: {temp_path}")
-            except Exception as cleanup_error:
-                logger.warning(f"🎤 [SPEAKER CHECK] Failed to remove temp file {temp_path}: {cleanup_error}")
 
     async def health_check(self) -> bool:
         """
