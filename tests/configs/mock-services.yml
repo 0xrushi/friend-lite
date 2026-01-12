@@ -1,0 +1,52 @@
+# Mock Services Configuration for Testing Without API Keys
+# ========================================================
+#
+# This configuration disables external API-dependent services
+# (transcription, LLM, embeddings) while keeping core services
+# (MongoDB, Redis, Qdrant) operational.
+#
+# Use this config for endpoint and infrastructure tests that don't
+# require actual transcription or memory extraction.
+
+chat:
+  system_prompt: You are a helpful AI assistant with access to the user's personal
+    memories and conversation history.
+
+defaults:
+  # No default STT provider (transcription disabled)
+  # No default LLM provider (memory extraction disabled)
+  # No default embedding provider
+  vector_store: vs-qdrant  # Keep Qdrant for memory storage tests
+
+memory:
+  extraction:
+    enabled: false  # Disable memory extraction (no LLM needed)
+    prompt: ''
+  provider: chronicle  # Use Chronicle provider (local, no API needed)
+  timeout_seconds: 1200
+
+models:
+  # Qdrant vector store - no API key required, local service
+  - api_family: qdrant
+    description: Qdrant vector database (local)
+    model_params:
+      collection_name: omi_memories
+      host: ${QDRANT_BASE_URL:-qdrant}
+      port: ${QDRANT_PORT:-6333}
+    model_provider: qdrant
+    model_type: vector_store
+    model_url: http://${QDRANT_BASE_URL:-qdrant}:${QDRANT_PORT:-6333}
+    name: vs-qdrant
+
+# Speaker recognition disabled (no HF_TOKEN needed)
+speaker_recognition:
+  enabled: false
+  timeout: 60
+
+# Note: This configuration is designed for tests that:
+# - Test API endpoints (CRUD operations, auth, permissions)
+# - Test infrastructure (worker management, queue operations)
+# - Test system health and readiness
+#
+# Tests requiring transcription or memory extraction should use
+# deepgram-openai.yml or parakeet-ollama.yml configs instead.

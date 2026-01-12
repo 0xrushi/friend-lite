@@ -1,12 +1,16 @@
-name: Robot Framework Tests (No API Keys)
+name: Robot Framework Tests (Full - With API Keys)
 
 on:
-  pull_request:
+  push:
+    branches:
+      - dev
+      - main
     paths:
       - 'tests/**/*.robot'
       - 'tests/**/*.py'
       - 'backends/advanced/src/**'
-      - '.github/workflows/robot-tests.yml'
+      - '.github/workflows/full-tests-with-api.yml'
+  workflow_dispatch:  # Allow manual triggering
 
 permissions:
   contents: read
@@ -16,13 +20,37 @@ permissions:
   id-token: write
 
 jobs:
-  robot-tests:
+  full-robot-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+
+    - name: Verify required secrets
+      env:
+        DEEPGRAM_API_KEY: ${{ secrets.DEEPGRAM_API_KEY }}
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      run: |
+        echo "Verifying required secrets..."
+        if [ -z "$DEEPGRAM_API_KEY" ]; then
+          echo "❌ ERROR: DEEPGRAM_API_KEY secret is not set"
+          exit 1
+        fi
+        if [ -z "$OPENAI_API_KEY" ]; then
+          echo "❌ ERROR: OPENAI_API_KEY secret is not set"
+          exit 1
+        fi
+        if [ -z "$HF_TOKEN" ]; then
+          echo "⚠️ WARNING: HF_TOKEN secret is not set (speaker recognition will be disabled)"
+        else
+          echo "✓ HF_TOKEN is set (length: ${#HF_TOKEN})"
+        fi
+        echo "✓ DEEPGRAM_API_KEY is set (length: ${#DEEPGRAM_API_KEY})"
+        echo "✓ OPENAI_API_KEY is set (length: ${#OPENAI_API_KEY})"
+        echo "✓ Required secrets verified"
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
@@ -55,11 +83,10 @@ jobs:
 
     - name: Create test config.yml
       run: |
-        echo "Copying mock services configuration file..."
+        echo "Copying test configuration file..."
         mkdir -p config
-        cp tests/configs/mock-services.yml config/config.yml
-        echo "✓ Test config.yml created from tests/configs/mock-services.yml"
-        echo "ℹ️  This config disables external API dependencies (transcription, LLM)"
+        cp tests/configs/deepgram-openai.yml config/config.yml
+        echo "✓ Test config.yml created from tests/configs/deepgram-openai.yml"
         ls -lh config/config.yml
 
     - name: Create plugins.yml from template
@@ -74,13 +101,17 @@ jobs:
           exit 1
         fi
 
-    - name: Run Robot Framework tests (No API Keys)
+    - name: Run Full Robot Framework tests
       working-directory: tests
       env:
+        # Required for test runner script
+        DEEPGRAM_API_KEY: ${{ secrets.DEEPGRAM_API_KEY }}
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        HF_TOKEN: ${{ secrets.HF_TOKEN }}
         CLEANUP_CONTAINERS: "false"  # Don't cleanup in CI - handled by workflow
       run: |
-        # Use the no-API test script (excludes tests tagged with requires-api-keys)
-        ./run-no-api-tests.sh
+        # Use the full test script (includes all tests with API keys)
+        ./run-robot-tests.sh
         TEST_EXIT_CODE=$?
         echo "test_exit_code=$TEST_EXIT_CODE" >> $GITHUB_ENV
         exit 0  # Don't fail here, we'll fail at the end after uploading artifacts
@@ -99,29 +130,29 @@ jobs:
       if: always()
       id: check_results
       run: |
-        if [ -f tests/results-no-api/output.xml ]; then
+        if [ -f tests/results/output.xml ]; then
           echo "results_exist=true" >> $GITHUB_OUTPUT
         else
           echo "results_exist=false" >> $GITHUB_OUTPUT
-          echo "⚠️ No test results found in tests/results-no-api/"
-          ls -la tests/results-no-api/ || echo "Results directory doesn't exist"
+          echo "⚠️ No test results found in tests/results/"
+          ls -la tests/results/ || echo "Results directory doesn't exist"
         fi
 
     - name: Upload Robot Framework HTML reports
       if: always() && steps.check_results.outputs.results_exist == 'true'
       uses: actions/upload-artifact@v4
       with:
-        name: robot-test-reports-html-no-api
+        name: robot-test-reports-html-full
         path: |
-          tests/results-no-api/report.html
-          tests/results-no-api/log.html
+          tests/results/report.html
+          tests/results/log.html
         retention-days: 30
 
     - name: Publish HTML Report as GitHub Pages artifact
       if: always() && steps.check_results.outputs.results_exist == 'true'
       uses: actions/upload-pages-artifact@v3
       with:
-        path: tests/results-no-api
+        path: tests/results
 
     - name: Deploy to GitHub Pages
       if: always() && steps.check_results.outputs.results_exist == 'true'
@@ -135,7 +166,7 @@ jobs:
         # Parse test results
         python3 << 'PYTHON_SCRIPT' > test_summary.txt
         import xml.etree.ElementTree as ET
-        tree = ET.parse('tests/results-no-api/output.xml')
+        tree = ET.parse('tests/results/output.xml')
         root = tree.getroot()
         stats = root.find('.//total/stat')
         if stats is not None:
@@ -155,67 +186,19 @@ jobs:
         echo "failed=$FAILED" >> $GITHUB_OUTPUT
         echo "total=$TOTAL" >> $GITHUB_OUTPUT
 
-    - name: Post PR comment with test results
-      if: always() && steps.check_results.outputs.results_exist == 'true'
-      uses: actions/github-script@v7
-      with:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
-        script: |
-          const passed = '${{ steps.test_summary.outputs.passed }}';
-          const failed = '${{ steps.test_summary.outputs.failed }}';
-          const total = '${{ steps.test_summary.outputs.total }}';
-          const runUrl = `https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}`;
-          const pagesUrl = '${{ steps.deployment.outputs.page_url }}';
-
-          const status = failed === '0' ? '✅ All tests passed!' : '❌ Some tests failed';
-          const emoji = failed === '0' ? '🎉' : '⚠️';
-
-          const comment = `## ${emoji} Robot Framework Test Results (No API Keys)
-
-          **Status**: ${status}
-
-          ℹ️ **Note**: This run excludes tests requiring external API keys (Deepgram, OpenAI).
-          Tests tagged with \`requires-api-keys\` will run on dev/main branches.
-
-          | Metric | Count |
-          |--------|-------|
-          | ✅ Passed | ${passed} |
-          | ❌ Failed | ${failed} |
-          | 📊 Total | ${total} |
-
-          ### 📊 View Reports
-
-          **GitHub Pages (Live Reports):**
-          - [📋 Test Report](${pagesUrl}report.html)
-          - [📝 Detailed Log](${pagesUrl}log.html)
-
-          **Download Artifacts:**
-          - [robot-test-reports-html-no-api](${runUrl}) - HTML reports
-          - [robot-test-results-xml-no-api](${runUrl}) - XML output
-
-          ---
-          *[View full workflow run](${runUrl})*`;
-
-          github.rest.issues.createComment({
-            issue_number: context.issue.number,
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            body: comment
-          });
-
     - name: Upload Robot Framework XML output
       if: always() && steps.check_results.outputs.results_exist == 'true'
       uses: actions/upload-artifact@v4
       with:
-        name: robot-test-results-xml-no-api
-        path: tests/results-no-api/output.xml
+        name: robot-test-results-xml-full
+        path: tests/results/output.xml
         retention-days: 30
 
     - name: Upload logs on failure
       if: failure()
       uses: actions/upload-artifact@v4
       with:
-        name: robot-test-logs
+        name: robot-test-logs-full
         path: |
           backends/advanced/.env
           tests/setup/.env.test
@@ -224,12 +207,12 @@ jobs:
     - name: Display test results summary
       if: always()
       run: |
-        if [ -f tests/results-no-api/output.xml ]; then
-          echo "Test results generated successfully (No API Keys mode)"
+        if [ -f tests/results/output.xml ]; then
+          echo "Full test results generated successfully (With API Keys)"
           echo "========================================"
           python3 << 'PYTHON_SCRIPT'
         import xml.etree.ElementTree as ET
-        tree = ET.parse('tests/results-no-api/output.xml')
+        tree = ET.parse('tests/results/output.xml')
         root = tree.getroot()
         stats = root.find('.//total/stat')
         if stats is not None:
@@ -241,12 +224,12 @@ jobs:
         PYTHON_SCRIPT
           echo "========================================"
           echo ""
-          echo "ℹ️  Tests excluded: requires-api-keys (run on dev/main branches)"
+          echo "ℹ️  Full test suite including API-dependent tests"
           echo ""
           echo "📊 FULL TEST REPORTS AVAILABLE:"
           echo "  1. Go to the 'Summary' tab at the top of this page"
           echo "  2. Scroll down to 'Artifacts' section"
-          echo "  3. Download 'robot-test-reports-html-no-api'"
+          echo "  3. Download 'robot-test-reports-html-full'"
           echo "  4. Extract and open report.html or log.html in your browser"
           echo ""
           echo "The HTML reports provide:"

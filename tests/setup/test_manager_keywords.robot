@@ -122,6 +122,30 @@ Create Fixture Conversation
     ...                Returns the conversation ID
     [Arguments]    ${device_name}=fixture-device
 
+    # Check if a fixture already exists via API
+    ${conversations}=    Get User Conversations
+    ${fixtures}=    Evaluate    [c for c in $conversations if c.get('is_fixture', False)]
+    ${fixture_count}=    Get Length    ${fixtures}
+
+    # If fixture exists, reuse it
+    IF    ${fixture_count} > 0
+        ${conversation_id}=    Set Variable    ${fixtures}[0][conversation_id]
+        Log To Console    \n✓ Reusing existing fixture conversation: ${conversation_id}
+
+        # Verify it still has transcript (sanity check)
+        Dictionary Should Contain Key    ${fixtures}[0]    transcript
+        ${transcript}=    Set Variable    ${fixtures}[0][transcript]
+        Should Not Be Empty    ${transcript}    Fixture conversation has no transcript
+        ${transcript_len}=    Get Length    ${transcript}
+        Log To Console    ✓ Fixture transcript length: ${transcript_len} chars
+
+        # Set global variable for other tests to use
+        Set Global Variable    ${FIXTURE_CONVERSATION_ID}    ${conversation_id}
+
+        RETURN    ${conversation_id}
+    END
+
+    # No fixture exists, create new one
     Log To Console    \nCreating fixture conversation...
 
     # Upload test audio to fixtures folder

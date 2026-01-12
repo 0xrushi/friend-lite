@@ -23,7 +23,7 @@ Test Setup       Clear Test Databases
 *** Test Cases ***
 Full Pipeline Integration Test
     [Documentation]    Complete end-to-end test of audio processing pipeline
-    [Tags]    e2e
+    [Tags]    e2e	requires-api-keys
     [Timeout]          600s
 
     Log    Starting Full Pipeline Integration Test    INFO
