@@ -424,7 +424,7 @@ async def transcribe_full_audio_job(
         version_id=version_id,
         transcript=transcript_text,
         segments=speaker_segments,
-        provider=Conversation.TranscriptProvider(provider_normalized),
+        provider=provider_normalized,  # Now just a string, no enum constructor needed
         model=provider.name,
         processing_time_seconds=processing_time,
         metadata=metadata,

@@ -558,12 +558,7 @@ async def open_conversation_job(
     ]
 
     # Determine provider from streaming results
-    provider_str = final_transcript.get("provider", "deepgram")
-    try:
-        provider = Conversation.TranscriptProvider(provider_str)
-    except ValueError:
-        logger.warning(f"⚠️ Unknown provider '{provider_str}', using DEEPGRAM")
-        provider = Conversation.TranscriptProvider.DEEPGRAM
+    provider = final_transcript.get("provider", "deepgram")
 
     # Add streaming transcript as the initial version
     conversation.add_transcript_version(

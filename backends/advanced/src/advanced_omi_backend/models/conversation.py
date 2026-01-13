@@ -7,7 +7,7 @@ transcript versions, and memory versions.
 
 from datetime import datetime
 from typing import Dict, List, Optional, Any, Union
-from pydantic import BaseModel, Field, model_validator, computed_field
+from pydantic import BaseModel, Field, model_validator, computed_field, field_validator
 from enum import Enum
 import uuid
 
@@ -17,17 +17,7 @@ from beanie import Document, Indexed
 class Conversation(Document):
     """Complete conversation model with versioned processing."""
 
-    # Nested Enums
-    class TranscriptProvider(str, Enum):
-        """
-        Transcription provider identifiers.
-
-        Note: Actual providers are configured in config.yml.
-        Any provider name from config.yml is valid - this enum is for common values only.
-        """
-        DEEPGRAM = "deepgram"
-        SPEECH_DETECTION = "speech_detection"
-        UNKNOWN = "unknown"
+    # Nested Enums - Note: TranscriptProvider accepts any string value for flexibility
 
     class MemoryProvider(str, Enum):
         """Supported memory providers."""
@@ -73,7 +63,7 @@ class Conversation(Document):
         version_id: str = Field(description="Unique version identifier")
         transcript: Optional[str] = Field(None, description="Full transcript text")
         segments: List["Conversation.SpeakerSegment"] = Field(default_factory=list, description="Speaker segments")
-        provider: Optional["Conversation.TranscriptProvider"] = Field(None, description="Transcription provider used")
+        provider: Optional[str] = Field(None, description="Transcription provider used (deepgram, parakeet, etc.)")
         model: Optional[str] = Field(None, description="Model used (e.g., nova-3, parakeet)")
         created_at: datetime = Field(description="When this version was created")
         processing_time_seconds: Optional[float] = Field(None, description="Time taken to process")
@@ -257,7 +247,7 @@ class Conversation(Document):
         version_id: str,
         transcript: str,
         segments: List["Conversation.SpeakerSegment"],
-        provider: "Conversation.TranscriptProvider",
+        provider: str,  # Provider name from config.yml (deepgram, parakeet, etc.)
         model: Optional[str] = None,
         processing_time_seconds: Optional[float] = None,
         metadata: Optional[Dict[str, Any]] = None,
