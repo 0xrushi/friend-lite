@@ -90,14 +90,14 @@ async def preview_cleanup(
 ):
     """Preview what would be deleted by cleanup (admin only)."""
     try:
-        from advanced_omi_backend.config import load_cleanup_settings_from_file
+        from advanced_omi_backend.config import get_cleanup_settings
         from advanced_omi_backend.models.conversation import Conversation
         from datetime import datetime, timedelta
 
         # Use provided retention or default from config
         if retention_days is None:
-            settings = load_cleanup_settings_from_file()
-            retention_days = settings.retention_days
+            settings_dict = get_cleanup_settings()
+            retention_days = settings_dict['retention_days']
 
         cutoff_date = datetime.utcnow() - timedelta(days=retention_days)
 

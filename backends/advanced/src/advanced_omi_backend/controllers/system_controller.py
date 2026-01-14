@@ -13,8 +13,8 @@ import yaml
 from fastapi import HTTPException
 
 from advanced_omi_backend.config import (
-    load_diarization_settings_from_file,
-    save_diarization_settings_to_file,
+    get_diarization_settings as load_diarization_settings,
+    save_diarization_settings,
 )
 from advanced_omi_backend.model_registry import _find_config_path, load_models_config
 from advanced_omi_backend.models.user import User
@@ -65,8 +65,8 @@ async def get_auth_config():
 async def get_diarization_settings():
     """Get current diarization settings."""
     try:
-        # Reload from file to get latest settings
-        settings = load_diarization_settings_from_file()
+        # Get settings using OmegaConf
+        settings = load_diarization_settings()
         return {
             "settings": settings,
             "status": "success"
@@ -76,7 +76,7 @@ async def get_diarization_settings():
         raise e
 
 
-async def save_diarization_settings(settings: dict):
+async def save_diarization_settings_controller(settings: dict):
     """Save diarization settings."""
     try:
         # Validate settings
@@ -99,29 +99,28 @@ async def save_diarization_settings(settings: dict):
             else:
                 if not isinstance(value, (int, float)) or value < 0:
                     raise HTTPException(status_code=400, detail=f"Invalid value for {key}: must be positive number")
-        
+
         # Get current settings and merge with new values
-        current_settings = load_diarization_settings_from_file()
+        current_settings = load_diarization_settings()
         current_settings.update(settings)
-        
-        # Save to file
-        if save_diarization_settings_to_file(current_settings):
+
+        # Save using OmegaConf
+        if save_diarization_settings(current_settings):
             logger.info(f"Updated and saved diarization settings: {settings}")
-            
+
             return {
                 "message": "Diarization settings saved successfully",
                 "settings": current_settings,
                 "status": "success"
             }
         else:
-            # Even if file save fails, we've updated the in-memory settings
-            logger.warning("Settings updated in memory but file save failed")
+            logger.warning("Settings save failed")
             return {
-                "message": "Settings updated (file save failed)",
+                "message": "Settings save failed",
                 "settings": current_settings,
-                "status": "partial"
+                "status": "error"
             }
-        
+
     except Exception as e:
         logger.exception("Error saving diarization settings")
         raise e
@@ -161,7 +160,7 @@ async def save_cleanup_settings_controller(
     Raises:
         ValueError: If validation fails
     """
-    from advanced_omi_backend.config import CleanupSettings, save_cleanup_settings_to_file
+    from advanced_omi_backend.config import CleanupSettings, save_cleanup_settings
 
     # Validation
     if not isinstance(auto_cleanup_enabled, bool):
@@ -179,8 +178,8 @@ async def save_cleanup_settings_controller(
         retention_days=retention_days
     )
 
-    # Save to file (also updates in-memory cache)
-    save_cleanup_settings_to_file(settings)
+    # Save using OmegaConf
+    save_cleanup_settings(settings)
 
     logger.info(f"Admin {user.email} updated cleanup settings: auto_cleanup={auto_cleanup_enabled}, retention={retention_days}d")
 

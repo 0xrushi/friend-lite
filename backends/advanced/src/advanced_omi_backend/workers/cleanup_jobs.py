@@ -12,7 +12,7 @@ from advanced_omi_backend.models.conversation import Conversation
 from advanced_omi_backend.models.audio_chunk import AudioChunkDocument
 from advanced_omi_backend.models.waveform import WaveformData
 from advanced_omi_backend.models.job import async_job
-from advanced_omi_backend.config import load_cleanup_settings_from_file
+from advanced_omi_backend.config import get_cleanup_settings, CleanupSettings
 
 logger = logging.getLogger(__name__)
 
@@ -34,8 +34,8 @@ async def purge_old_deleted_conversations(
     """
     # Get retention period from config if not specified
     if retention_days is None:
-        settings = load_cleanup_settings_from_file()
-        retention_days = settings.retention_days
+        settings_dict = get_cleanup_settings()
+        retention_days = settings_dict['retention_days']
 
     cutoff_date = datetime.utcnow() - timedelta(days=retention_days)
 
@@ -128,8 +128,8 @@ def schedule_cleanup_job(retention_days: Optional[int] = None) -> Optional[str]:
         Job ID if scheduled successfully, None otherwise
     """
     # Check if auto-cleanup is enabled
-    settings = load_cleanup_settings_from_file()
-    if not settings.auto_cleanup_enabled:
+    settings_dict = get_cleanup_settings()
+    if not settings_dict['auto_cleanup_enabled']:
         logger.info("Auto-cleanup is disabled (auto_cleanup_enabled=false)")
         return None
 

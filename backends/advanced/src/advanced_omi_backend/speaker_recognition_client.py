@@ -95,9 +95,9 @@ class SpeakerRecognitionClient:
         try:
             logger.info(f"🎤 Calling speaker service with conversation_id: {conversation_id[:12]}...")
 
-            # Read diarization source from existing config system
-            from advanced_omi_backend.config import load_diarization_settings_from_file
-            config = load_diarization_settings_from_file()
+            # Read diarization source from config system
+            from advanced_omi_backend.config import get_diarization_settings
+            config = get_diarization_settings()
             diarization_source = config.get("diarization_source", "pyannote")
 
             async with aiohttp.ClientSession() as session:
@@ -219,9 +219,9 @@ class SpeakerRecognitionClient:
                 )
 
                 # Get current diarization settings from config
-                from advanced_omi_backend.config import load_diarization_settings_from_file
+                from advanced_omi_backend.config import get_diarization_settings
 
-                diarization_settings = load_diarization_settings_from_file()
+                diarization_settings = get_diarization_settings()
 
                 # Add all diarization parameters for the diarize-and-identify endpoint
                 min_duration = diarization_settings.get("min_duration", 0.5)

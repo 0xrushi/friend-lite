@@ -26,26 +26,38 @@ log = logging.getLogger("speaker_service")
 
 def load_speaker_config_from_root() -> dict:
     """
-    Load speaker_recognition section from root config.yml.
+    Load speaker_recognition section from root config.yml using OmegaConf.
 
     Returns:
         Dictionary with speaker_recognition config, or empty dict if not found
     """
-    config_dir = Path(os.getenv("CONFIG_DIR", "/app/config"))
-    config_path = config_dir / "config.yml"
-
-    if not config_path.exists():
-        log.warning(f"Root config.yml not found at {config_path}, using defaults")
-        return {}
-
     try:
-        with open(config_path, "r") as f:
-            config = yaml.safe_load(f) or {}
-            speaker_config = config.get("speaker_recognition", {})
-            log.info(f"Loaded speaker_recognition config from root config.yml: {speaker_config}")
-            return speaker_config
+        from omegaconf import OmegaConf
+
+        config_dir = Path(os.getenv("CONFIG_DIR", "/app/config"))
+        defaults_path = config_dir / "defaults.yml"
+        config_path = config_dir / "config.yml"
+
+        if not defaults_path.exists() and not config_path.exists():
+            log.warning(f"No config files found in {config_dir}, using defaults")
+            return {}
+
+        # Load and merge configs using OmegaConf
+        defaults = OmegaConf.load(defaults_path) if defaults_path.exists() else {}
+        user_config = OmegaConf.load(config_path) if config_path.exists() else {}
+        merged = OmegaConf.merge(defaults, user_config)
+
+        # Extract speaker_recognition section
+        speaker_config = merged.get('speaker_recognition', {})
+
+        # Resolve environment variables and convert to dict
+        resolved = OmegaConf.to_container(speaker_config, resolve=True)
+
+        log.info(f"Loaded speaker_recognition config: {resolved}")
+        return resolved
+
     except Exception as e:
-        log.warning(f"Failed to load root config.yml: {e}, using defaults")
+        log.warning(f"Failed to load root config: {e}, using defaults")
         return {}
 
 
