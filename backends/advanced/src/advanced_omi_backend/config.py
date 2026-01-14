@@ -15,9 +15,12 @@ from omegaconf import OmegaConf
 
 from advanced_omi_backend.config_loader import (
     get_backend_config,
-    save_config_section,
+    get_config_dir,
     load_config,
-    reload_config as reload_omegaconf_config,
+)
+from advanced_omi_backend.config_loader import reload_config as reload_omegaconf_config
+from advanced_omi_backend.config_loader import (
+    save_config_section,
 )
 
 logger = logging.getLogger(__name__)
@@ -30,6 +33,15 @@ CHUNK_DIR = Path("./audio_chunks")  # Mounted to ./data/audio_chunks by Docker
 # ============================================================================
 # Configuration Functions (OmegaConf-based)
 # ============================================================================
+
+def get_config_yml_path() -> Path:
+    """
+    Get path to config.yml file.
+
+    Returns:
+        Path to config.yml
+    """
+    return get_config_dir() / "config.yml"
 
 def get_config(force_reload: bool = False) -> dict:
     """

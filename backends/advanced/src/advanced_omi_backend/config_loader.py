@@ -30,7 +30,7 @@ def load_config(force_reload: bool = False) -> DictConfig:
     Merge priority (later overrides earlier):
     1. config/defaults.yml (shipped defaults)
     2. config/config.yml (user overrides)
-    3. Environment variables (via oc.env resolver)
+    3. Environment variables (via ${oc.env:VAR,default} syntax)
 
     Args:
         force_reload: If True, reload from disk even if cached
