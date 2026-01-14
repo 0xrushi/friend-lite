@@ -130,18 +130,26 @@ async def get_conversation(conversation_id: str, user: User):
         return JSONResponse(status_code=500, content={"error": "Error fetching conversation"})
 
 
-async def get_conversations(user: User):
+async def get_conversations(user: User, include_deleted: bool = False):
     """Get conversations with speech only (speech-driven architecture)."""
     try:
         # Build query based on user permissions using Beanie
         if not user.is_superuser:
             # Regular users can only see their own conversations
-            user_conversations = await Conversation.find(
-                Conversation.user_id == str(user.user_id)
-            ).sort(-Conversation.created_at).to_list()
+            # Filter by deleted status
+            query = Conversation.user_id == str(user.user_id)
+            if not include_deleted:
+                query = query & (Conversation.deleted == False)
+            user_conversations = await Conversation.find(query).sort(-Conversation.created_at).to_list()
         else:
             # Admins see all conversations
-            user_conversations = await Conversation.find_all().sort(-Conversation.created_at).to_list()
+            # Filter by deleted status
+            if not include_deleted:
+                user_conversations = await Conversation.find(
+                    Conversation.deleted == False
+                ).sort(-Conversation.created_at).to_list()
+            else:
+                user_conversations = await Conversation.find_all().sort(-Conversation.created_at).to_list()
 
         # Build response with explicit curated fields - minimal for list view
         conversations = []

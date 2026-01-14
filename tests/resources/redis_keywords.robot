@@ -73,3 +73,37 @@ Session Field Should Equal
     ${actual}=    Get Session Field Value    ${session_id}    ${field_name}
     Should Be Equal    ${actual}    ${expected_value}
     ...    Session field ${field_name} mismatch: expected ${expected_value}, got ${actual}
+
+
+Redis Command
+    [Documentation]    Execute a generic Redis command and return the result
+    ...                Useful for operations like XLEN, XRANGE, etc.
+    [Arguments]    ${command}    @{args}
+
+    # Execute redis-cli command
+    ${result}=    Run Process    docker    exec    ${REDIS_CONTAINER}
+    ...    redis-cli    ${command}    @{args}
+
+    Should Be Equal As Integers    ${result.rc}    0
+    ...    Redis command failed: ${result.stderr}
+
+    # Return stdout, stripping whitespace
+    ${output}=    Strip String    ${result.stdout}
+
+    # Try to convert to integer if it's a number (for commands like XLEN)
+    ${is_digit}=    Run Keyword And Return Status    Should Match Regexp    ${output}    ^\\d+$
+    ${return_value}=    Run Keyword If    ${is_digit}
+    ...    Convert To Integer    ${output}
+    ...    ELSE    Set Variable    ${output}
+
+    RETURN    ${return_value}
+
+
+Get Backend Logs
+    [Documentation]    Get backend container logs for debugging
+    [Arguments]    ${since}=5m
+
+    ${result}=    Run Process    docker    compose    logs    --since    ${since}    chronicle-backend
+    ...    shell=True    stderr=STDOUT
+
+    RETURN    ${result.stdout}

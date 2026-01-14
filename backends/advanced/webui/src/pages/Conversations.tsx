@@ -890,8 +890,6 @@ export default function Conversations() {
                   <h4 className="font-medium text-gray-900 dark:text-gray-100 mb-2">🔧 Debug Info:</h4>
                   <div className="text-xs text-gray-600 dark:text-gray-400 space-y-1">
                     <div>Conversation ID: {conversation.conversation_id || 'N/A'}</div>
-                    <div>Audio UUID: {conversation.audio_uuid}</div>
-                    <div>Audio Path: {conversation.audio_path || 'N/A'}</div>
                     <div>Transcript Version Count: {conversation.transcript_version_count || 0}</div>
                     <div>Memory Version Count: {conversation.memory_version_count || 0}</div>
                     <div>Segment Count: {conversation.segment_count || 0}</div>

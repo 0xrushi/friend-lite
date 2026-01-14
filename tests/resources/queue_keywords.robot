@@ -325,3 +325,18 @@ Job Should Be Complete
     ${job}=    Get Job status    ${job_id}
     ${status}=    Set Variable    ${job}[status]
     Should Be True    '${status}' in ['completed', 'finished', 'failed']    Job status: ${status}
+
+
+Get Job Result
+    [Documentation]    Get the result field of a completed job
+    ...                Useful for checking job output/return values
+    [Arguments]    ${job_id}
+
+    # Get full job details
+    ${response}=    GET On Session    api    /api/queue/job/${job_id}
+    ...    expected_status=200
+
+    ${job_data}=    Set Variable    ${response.json()}
+    ${result}=    Set Variable    ${job_data}[result]
+
+    RETURN    ${result}

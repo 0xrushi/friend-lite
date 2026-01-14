@@ -149,12 +149,6 @@ function ConversationCard({ conversation, formatDuration }: ConversationCardProp
                 <span className="text-gray-600 font-mono">{conversation.conversation_id.slice(0, 8)}...</span>
               </div>
             )}
-            {conversation.audio_uuid && (
-              <div>
-                <span className="font-medium text-gray-700">Audio UUID:</span>{' '}
-                <span className="text-gray-600 font-mono">{conversation.audio_uuid.slice(0, 8)}...</span>
-              </div>
-            )}
             {conversation.active_transcript_version && (
               <div>
                 <span className="font-medium text-gray-700">Transcript Version:</span>{' '}
@@ -168,14 +162,6 @@ function ConversationCard({ conversation, formatDuration }: ConversationCardProp
               </div>
             )}
           </div>
-
-          {/* Audio Path */}
-          {conversation.audio_path && (
-            <div className="text-xs">
-              <span className="font-medium text-gray-700">Audio:</span>{' '}
-              <span className="text-gray-600 font-mono">{conversation.audio_path}</span>
-            </div>
-          )}
         </div>
       )}
     </div>

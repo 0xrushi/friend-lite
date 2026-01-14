@@ -218,7 +218,7 @@ class AudioStreamProducer:
 
     async def finalize_session(self, session_id: str):
         """
-        Mark session as finalizing and clean up buffer.
+        Mark session as finalizing, send end marker, and clean up buffer.
 
         Args:
             session_id: Session identifier
@@ -230,8 +230,29 @@ class AudioStreamProducer:
             "finalized_at": str(time.time())
         })
 
-        # Clean up session buffer
+        # Send end_marker to Redis stream so streaming consumer can close the connection
         if session_id in self.session_buffers:
+            buffer = self.session_buffers[session_id]
+            stream_name = buffer["stream_name"]
+
+            # Send end_marker message to signal stream end
+            end_marker_data = {
+                b"end_marker": b"true",
+                b"session_id": session_id.encode(),
+                b"user_id": buffer["user_id"].encode(),
+                b"client_id": buffer["client_id"].encode(),
+                b"timestamp": str(time.time()).encode(),
+            }
+
+            await self.redis_client.xadd(
+                stream_name,
+                end_marker_data,
+                maxlen=25000,
+                approximate=True
+            )
+            logger.info(f"📡 Sent end_marker to {stream_name} for session {session_id}")
+
+            # Clean up session buffer
             del self.session_buffers[session_id]
             logger.debug(f"🧹 Cleaned up buffer for session {session_id}")
 

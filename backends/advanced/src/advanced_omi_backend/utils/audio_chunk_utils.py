@@ -395,6 +395,154 @@ async def reconstruct_wav_from_conversation(
     return wav_data
 
 
+async def reconstruct_audio_segments(
+    conversation_id: str,
+    segment_duration: float = 900.0,  # 15 minutes
+    overlap: float = 30.0,  # 30 seconds overlap for continuity
+):
+    """
+    Reconstruct audio from MongoDB chunks in time-bounded segments.
+
+    This function yields audio segments from a conversation, allowing
+    processing of large files without loading everything into memory.
+
+    Args:
+        conversation_id: Parent conversation ID
+        segment_duration: Duration of each segment in seconds (default: 900 = 15 minutes)
+        overlap: Overlap between segments in seconds (default: 30)
+
+    Yields:
+        Tuple of (wav_bytes, start_time, end_time) for each segment
+
+    Example:
+        >>> # Process 73-minute conversation in 15-minute chunks
+        >>> async for wav_data, start, end in reconstruct_audio_segments(conv_id):
+        ...     # Process segment (only ~27 MB in memory at a time)
+        ...     result = await process_segment(wav_data, start, end)
+
+    Note:
+        Overlap is added to all segments except the final one, to ensure
+        speaker continuity across segment boundaries. Overlapping regions
+        should be merged during post-processing.
+    """
+    from advanced_omi_backend.models.conversation import Conversation
+
+    # Get conversation metadata
+    conversation = await Conversation.get(conversation_id)
+
+    if not conversation:
+        raise ValueError(f"Conversation {conversation_id} not found")
+
+    total_duration = conversation.audio_total_duration or 0.0
+
+    if total_duration == 0:
+        logger.warning(f"Conversation {conversation_id} has zero duration, no segments to yield")
+        return
+
+    # Get audio format from first chunk
+    first_chunk = await AudioChunkDocument.find_one(
+        AudioChunkDocument.conversation_id == conversation_id
+    )
+
+    if not first_chunk:
+        raise ValueError(f"No audio chunks found for conversation {conversation_id}")
+
+    sample_rate = first_chunk.sample_rate
+    channels = first_chunk.channels
+
+    # Calculate segment boundaries
+    start_time = 0.0
+
+    while start_time < total_duration:
+        # Calculate segment end time with overlap
+        end_time = min(start_time + segment_duration + overlap, total_duration)
+
+        # Get chunks that overlap with this time range
+        # Note: Using start_time and end_time fields from chunks
+        chunks = await AudioChunkDocument.find(
+            AudioChunkDocument.conversation_id == conversation_id,
+            AudioChunkDocument.start_time < end_time,  # Chunk starts before segment ends
+            AudioChunkDocument.end_time > start_time,  # Chunk ends after segment starts
+        ).sort(+AudioChunkDocument.chunk_index).to_list()
+
+        if not chunks:
+            logger.warning(
+                f"No chunks found for time range {start_time:.1f}s - {end_time:.1f}s "
+                f"in conversation {conversation_id[:8]}..."
+            )
+            start_time += segment_duration
+            continue
+
+        # Decode and concatenate chunks
+        pcm_data = await concatenate_chunks_to_pcm(chunks)
+
+        # Build WAV file for this segment
+        wav_bytes = await build_wav_from_pcm(
+            pcm_data=pcm_data,
+            sample_rate=sample_rate,
+            channels=channels,
+        )
+
+        logger.info(
+            f"Yielding segment for {conversation_id[:8]}...: "
+            f"{start_time:.1f}s - {end_time:.1f}s "
+            f"({len(chunks)} chunks, {len(wav_bytes)} bytes)"
+        )
+
+        yield (wav_bytes, start_time, end_time)
+
+        # Move to next segment (no overlap on the starting edge)
+        start_time += segment_duration
+
+
+def filter_transcript_by_time(
+    transcript_data: dict,
+    start_time: float,
+    end_time: float
+) -> dict:
+    """
+    Filter transcript data to only include words within a time range.
+
+    Args:
+        transcript_data: Dict with 'text' and 'words' keys
+        start_time: Start time in seconds
+        end_time: End time in seconds
+
+    Returns:
+        Filtered transcript data with only words in time range
+
+    Example:
+        >>> transcript = {"text": "full text", "words": [...100 words...]}
+        >>> segment = filter_transcript_by_time(transcript, 0.0, 900.0)  # First 15 minutes
+        >>> # segment contains only words from 0-900 seconds
+    """
+    if not transcript_data or "words" not in transcript_data:
+        return transcript_data
+
+    words = transcript_data.get("words", [])
+
+    if not words:
+        return transcript_data
+
+    # Filter words by time range
+    filtered_words = []
+    for word in words:
+        word_start = word.get("start", 0)
+        word_end = word.get("end", 0)
+
+        # Include word if it overlaps with the time range
+        if word_start < end_time and word_end > start_time:
+            filtered_words.append(word)
+
+    # Rebuild text from filtered words
+    filtered_text = " ".join(word.get("word", "") for word in filtered_words)
+
+    return {
+        "text": filtered_text,
+        "words": filtered_words
+    }
+
+
 async def convert_audio_to_chunks(
     conversation_id: str,
     audio_data: bytes,

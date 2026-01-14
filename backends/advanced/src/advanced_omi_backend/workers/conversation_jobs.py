@@ -567,6 +567,36 @@ async def open_conversation_job(
     transcript_text = final_transcript.get("text", "")
     segments_data = final_transcript.get("segments", [])
 
+    # If streaming provider didn't provide segments (e.g., Deepgram streaming),
+    # create segments from individual final results with word-level data
+    if not segments_data:
+        logger.info(f"📝 No segments in streaming results, creating from word-level data")
+        results = await aggregator.get_session_results(session_id)
+
+        for result in results:
+            words = result.get("words", [])
+            text = result.get("text", "").strip()
+
+            # Skip empty results or results without timing data
+            # WARNING: We don't support results without word-level timing data.
+            # Ideally should error, but skipping for now to handle edge cases gracefully.
+            if not words or not text:
+                continue
+
+            # Create segment dict from this result chunk
+            # Each "final" result becomes one segment with generic speaker label
+            segment_dict = {
+                "start": words[0]["start"],
+                "end": words[-1]["end"],
+                "text": text,
+                "speaker": "SPEAKER_00",  # Generic label, updated by speaker recognition
+                "confidence": result.get("confidence"),
+                "words": words  # Already in correct format from aggregator
+            }
+            segments_data.append(segment_dict)
+
+        logger.info(f"✅ Created {len(segments_data)} segments from streaming results")
+
     # Convert segments to SpeakerSegment format with word-level timestamps
     segments = [
         Conversation.SpeakerSegment(
