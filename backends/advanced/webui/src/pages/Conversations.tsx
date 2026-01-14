@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { MessageSquare, RefreshCw, Calendar, User, Play, Pause, MoreVertical, RotateCcw, Zap, ChevronDown, ChevronUp, Trash2 } from 'lucide-react'
-import { conversationsApi, BACKEND_URL } from '../services/api'
+import { MessageSquare, RefreshCw, Calendar, User, Play, Pause, MoreVertical, RotateCcw, Zap, ChevronDown, ChevronUp, Trash2, Save, X } from 'lucide-react'
+import { conversationsApi, annotationsApi, BACKEND_URL } from '../services/api'
 import ConversationVersionHeader from '../components/ConversationVersionHeader'
 import { getStorageKey } from '../utils/storage'
 import { WaveformDisplay } from '../components/audio/WaveformDisplay'
@@ -72,6 +72,12 @@ export default function Conversations() {
   const [reprocessingTranscript, setReprocessingTranscript] = useState<Set<string>>(new Set())
   const [reprocessingMemory, setReprocessingMemory] = useState<Set<string>>(new Set())
   const [deletingConversation, setDeletingConversation] = useState<Set<string>>(new Set())
+
+  // Transcript segment editing state
+  const [editingSegment, setEditingSegment] = useState<string | null>(null) // Format: "conversationId-segmentIndex"
+  const [editedSegmentText, setEditedSegmentText] = useState<string>('')
+  const [savingSegment, setSavingSegment] = useState<boolean>(false)
+  const [segmentEditError, setSegmentEditError] = useState<string | null>(null)
 
   // Stable seek handler for waveform click-to-seek
   const handleSeek = useCallback((conversationId: string, time: number) => {
@@ -267,6 +273,78 @@ export default function Conversations() {
         newSet.delete(conversationId)
         return newSet
       })
+    }
+  }
+
+  // Transcript segment editing handlers
+  const handleStartSegmentEdit = (conversationId: string, segmentIndex: number, originalText: string) => {
+    const segmentKey = `${conversationId}-${segmentIndex}`
+    setEditingSegment(segmentKey)
+    setEditedSegmentText(originalText)
+    setSegmentEditError(null)
+  }
+
+  const handleSaveSegmentEdit = async (conversationId: string, segmentIndex: number, originalText: string) => {
+    if (!editedSegmentText.trim()) {
+      setSegmentEditError('Segment text cannot be empty')
+      return
+    }
+
+    if (editedSegmentText === originalText) {
+      // No changes, just cancel
+      handleCancelSegmentEdit()
+      return
+    }
+
+    try {
+      setSavingSegment(true)
+      setSegmentEditError(null)
+
+      // Create transcript annotation
+      await annotationsApi.createTranscriptAnnotation({
+        conversation_id: conversationId,
+        segment_index: segmentIndex,
+        original_text: originalText,
+        corrected_text: editedSegmentText
+      })
+
+      // Update local state - find the conversation and update the segment
+      setConversations(prev => prev.map(conv => {
+        if (conv.conversation_id === conversationId && conv.segments) {
+          const updatedSegments = [...conv.segments]
+          updatedSegments[segmentIndex] = {
+            ...updatedSegments[segmentIndex],
+            text: editedSegmentText
+          }
+          return { ...conv, segments: updatedSegments }
+        }
+        return conv
+      }))
+
+      // Clear editing state
+      setEditingSegment(null)
+      setEditedSegmentText('')
+    } catch (err: any) {
+      console.error('Error saving segment edit:', err)
+      setSegmentEditError(err.response?.data?.detail || err.message || 'Failed to save segment edit')
+    } finally {
+      setSavingSegment(false)
+    }
+  }
+
+  const handleCancelSegmentEdit = () => {
+    setEditingSegment(null)
+    setEditedSegmentText('')
+    setSegmentEditError(null)
+  }
+
+  const handleSegmentKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>, conversationId: string, segmentIndex: number, originalText: string) => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault()
+      handleSaveSegmentEdit(conversationId, segmentIndex, originalText)
+    } else if (e.key === 'Escape') {
+      e.preventDefault()
+      handleCancelSegmentEdit()
     }
   }
 
@@ -776,16 +854,17 @@ export default function Conversations() {
                           const segmentId = `${conversationKey}-${index}`
                           const isPlaying = playingSegment === segmentId
                           const hasAudio = !!conversation.audio_path
+                          const isEditing = editingSegment === segmentId
 
                           return (
                             <div
                               key={index}
                               className={`text-sm leading-relaxed flex items-start space-x-2 py-1 px-2 rounded transition-colors ${
-                                isPlaying ? 'bg-blue-50 dark:bg-blue-900/20' : 'hover:bg-gray-50 dark:hover:bg-gray-700'
+                                isPlaying ? 'bg-blue-50 dark:bg-blue-900/20' : isEditing ? 'bg-yellow-50 dark:bg-yellow-900/20' : 'hover:bg-gray-50 dark:hover:bg-gray-700'
                               }`}
                             >
                               {/* Play/Pause Button */}
-                              {hasAudio && (
+                              {hasAudio && !isEditing && (
                                 <button
                                   onClick={() => handleSegmentPlayPause(conversationKey, index, segment)}
                                   className={`flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center transition-colors mt-0.5 ${
@@ -812,9 +891,49 @@ export default function Conversations() {
                                 <span className={`font-medium ${speakerColor}`}>
                                   {speaker}:
                                 </span>
-                                <span className="text-gray-900 dark:text-gray-100 ml-1">
-                                  {segment.text}
-                                </span>
+
+                                {/* Segment Text - Editable */}
+                                {isEditing ? (
+                                  <div className="ml-1 space-y-2">
+                                    <textarea
+                                      value={editedSegmentText}
+                                      onChange={(e) => setEditedSegmentText(e.target.value)}
+                                      onKeyDown={(e) => handleSegmentKeyDown(e, conversationKey, index, segment.text)}
+                                      className="w-full min-h-[60px] px-3 py-2 text-sm border-2 border-blue-500 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                                      autoFocus
+                                      disabled={savingSegment}
+                                    />
+                                    <div className="flex items-center gap-2">
+                                      <button
+                                        onClick={() => handleSaveSegmentEdit(conversationKey, index, segment.text)}
+                                        disabled={savingSegment || editedSegmentText === segment.text}
+                                        className="inline-flex items-center gap-1 px-3 py-1 text-xs font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                      >
+                                        <Save className="w-3 h-3" />
+                                        {savingSegment ? 'Saving...' : 'Save'}
+                                      </button>
+                                      <button
+                                        onClick={handleCancelSegmentEdit}
+                                        disabled={savingSegment}
+                                        className="inline-flex items-center gap-1 px-3 py-1 text-xs font-medium text-gray-700 dark:text-gray-300 bg-gray-200 dark:bg-gray-600 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                      >
+                                        <X className="w-3 h-3" />
+                                        Cancel
+                                      </button>
+                                      {segmentEditError && (
+                                        <span className="text-xs text-red-600 dark:text-red-400">{segmentEditError}</span>
+                                      )}
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <span
+                                    onClick={() => conversation.conversation_id && handleStartSegmentEdit(conversationKey, index, segment.text)}
+                                    className="text-gray-900 dark:text-gray-100 ml-1 cursor-pointer hover:bg-yellow-100 dark:hover:bg-yellow-900/30 px-1 rounded transition-colors"
+                                    title="Click to edit segment"
+                                  >
+                                    {segment.text}
+                                  </span>
+                                )}
                               </div>
                             </div>
                           )

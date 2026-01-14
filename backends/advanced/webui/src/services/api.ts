@@ -146,6 +146,36 @@ export const memoriesApi = {
   deleteAll: () => api.delete('/api/admin/memory/delete-all'),
 }
 
+export const annotationsApi = {
+  // Create annotations
+  createMemoryAnnotation: (data: {
+    memory_id: string
+    original_text: string
+    corrected_text: string
+  }) => api.post('/api/annotations/memory', data),
+
+  createTranscriptAnnotation: (data: {
+    conversation_id: string
+    segment_index: number
+    original_text: string
+    corrected_text: string
+  }) => api.post('/api/annotations/transcript', data),
+
+  // Retrieve annotations
+  getMemoryAnnotations: (memory_id: string) =>
+    api.get(`/api/annotations/memory/${memory_id}`),
+
+  getTranscriptAnnotations: (conversation_id: string) =>
+    api.get(`/api/annotations/transcript/${conversation_id}`),
+
+  // Handle suggestions
+  acceptSuggestion: (annotation_id: string) =>
+    api.patch(`/api/annotations/${annotation_id}/status`, { status: 'accepted' }),
+
+  rejectSuggestion: (annotation_id: string) =>
+    api.patch(`/api/annotations/${annotation_id}/status`, { status: 'rejected' }),
+}
+
 export const usersApi = {
   getAll: () => api.get('/api/users'),
   create: (userData: any) => api.post('/api/users', userData),

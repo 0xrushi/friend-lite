@@ -200,6 +200,7 @@ async def upload_and_process_audio_files(
                     conversation_id=conversation_id,
                     audio_uuid=audio_uuid,
                     user_id=user.user_id,
+                    transcript_version_id=version_id,  # Pass the version_id from transcription job
                     depends_on_job=transcription_job,  # Wait for transcription to complete
                     client_id=client_id  # Pass client_id for UI tracking
                 )

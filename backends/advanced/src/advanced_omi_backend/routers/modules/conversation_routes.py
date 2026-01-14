@@ -7,11 +7,12 @@ Handles conversation CRUD operations, audio processing, and transcript managemen
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, HTTPException, Response
 
 from advanced_omi_backend.auth import current_active_user
 from advanced_omi_backend.controllers import conversation_controller, audio_controller
 from advanced_omi_backend.users import User
+from advanced_omi_backend.models.conversation import Conversation
 
 logger = logging.getLogger(__name__)
 
@@ -163,6 +164,118 @@ async def get_conversation_waveform(
         "sample_rate": waveform_dict["sample_rate"],
         "duration_seconds": waveform_dict["duration_seconds"]
     }
+
+
+@router.get("/{conversation_id}/metadata")
+async def get_conversation_metadata(
+    conversation_id: str,
+    current_user: User = Depends(current_active_user)
+) -> dict:
+    """
+    Get conversation metadata (duration, etc.) without loading audio.
+
+    This endpoint provides lightweight access to conversation metadata,
+    useful for the speaker service to check duration before deciding
+    whether to chunk audio processing.
+
+    Returns:
+        {
+            "conversation_id": str,
+            "duration": float,  # Total duration in seconds
+            "created_at": datetime,
+            "has_audio": bool
+        }
+    """
+    conversation = await Conversation.find_one(
+        Conversation.conversation_id == conversation_id
+    )
+
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    # Check ownership (admins can access all)
+    if not current_user.is_superuser and conversation.user_id != str(current_user.id):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    return {
+        "conversation_id": conversation_id,
+        "duration": conversation.audio_total_duration or 0.0,
+        "created_at": conversation.created_at,
+        "has_audio": (conversation.audio_total_duration or 0.0) > 0
+    }
+
+
+@router.get("/{conversation_id}/audio-segments")
+async def get_audio_segment(
+    conversation_id: str,
+    start: float = Query(0.0, description="Start time in seconds"),
+    duration: Optional[float] = Query(None, description="Duration in seconds (omit for full audio)"),
+    current_user: User = Depends(current_active_user)
+) -> Response:
+    """
+    Get audio segment from a conversation.
+
+    This endpoint enables the speaker service to fetch audio in time-bounded
+    segments without loading the entire file into memory. The speaker service
+    controls chunk size based on its own memory constraints.
+
+    Args:
+        conversation_id: Conversation identifier
+        start: Start time in seconds (default: 0.0)
+        duration: Duration in seconds (if None, returns all audio from start)
+
+    Returns:
+        WAV audio bytes (16kHz, mono) for the requested time range
+    """
+    from advanced_omi_backend.utils.audio_chunk_utils import reconstruct_audio_segment
+
+    # Verify conversation exists and user has access
+    conversation = await Conversation.find_one(
+        Conversation.conversation_id == conversation_id
+    )
+
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    # Check ownership (admins can access all)
+    if not current_user.is_superuser and conversation.user_id != str(current_user.id):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    # Calculate end time
+    total_duration = conversation.audio_total_duration or 0.0
+    if total_duration == 0:
+        raise HTTPException(status_code=404, detail="No audio available for this conversation")
+
+    if duration is None:
+        end = total_duration
+    else:
+        end = min(start + duration, total_duration)
+
+    # Validate time range
+    if start < 0 or start >= total_duration:
+        raise HTTPException(status_code=400, detail=f"Invalid start time: {start}s (max: {total_duration}s)")
+
+    # Get audio chunks for time range
+    try:
+        wav_bytes = await reconstruct_audio_segment(
+            conversation_id=conversation_id,
+            start_time=start,
+            end_time=end
+        )
+    except Exception as e:
+        logger.error(f"Failed to reconstruct audio segment for {conversation_id[:12]}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to reconstruct audio: {str(e)}")
+
+    return Response(
+        content=wav_bytes,
+        media_type="audio/wav",
+        headers={
+            "Content-Disposition": f"attachment; filename=segment_{start}_{end}.wav",
+            "X-Audio-Start": str(start),
+            "X-Audio-End": str(end),
+            "X-Audio-Duration": str(end - start)
+        }
+    )
 
 
 @router.delete("/{conversation_id}")

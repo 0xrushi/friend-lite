@@ -15,88 +15,6 @@ from advanced_omi_backend.controllers.queue_controller import transcription_queu
 logger = logging.getLogger(__name__)
 
 
-def _merge_overlapping_speaker_segments(
-    segments: list[dict],
-    overlap: float
-) -> list[dict]:
-    """
-    Merge speaker segments from overlapping audio chunks.
-
-    This function handles segments that may overlap due to chunked processing,
-    merging segments from the same speaker and resolving conflicts using confidence scores.
-
-    Args:
-        segments: List of speaker segment dicts with start, end, text, speaker, confidence
-        overlap: Overlap duration in seconds used during chunking
-
-    Returns:
-        Merged list of speaker segments
-
-    Example:
-        >>> segments = [
-        ...     {"start": 0, "end": 930, "speaker": "Alice", "text": "...", "confidence": 0.9},
-        ...     {"start": 900, "end": 1830, "speaker": "Alice", "text": "...", "confidence": 0.8},
-        ... ]
-        >>> merged = _merge_overlapping_speaker_segments(segments, overlap=30.0)
-        >>> # Returns single merged segment from Alice
-    """
-    if not segments:
-        return []
-
-    # Sort by start time
-    segments.sort(key=lambda s: s.get("start", 0))
-
-    merged = []
-    current = segments[0].copy()  # Copy to avoid mutating input
-
-    for next_seg in segments[1:]:
-        # Check if segments overlap
-        if next_seg["start"] < current["end"]:
-            # Overlapping - decide how to merge
-            if current.get("speaker") == next_seg.get("speaker"):
-                # Same speaker - merge by extending end time
-                current["end"] = max(current["end"], next_seg["end"])
-
-                # Combine text (avoid duplication in overlap region)
-                current_text = current.get("text", "")
-                next_text = next_seg.get("text", "")
-
-                # Simple text merging - just append if different
-                if next_text and next_text not in current_text:
-                    current["text"] = f"{current_text} {next_text}".strip()
-
-                # Use higher confidence
-                current["confidence"] = max(
-                    current.get("confidence", 0),
-                    next_seg.get("confidence", 0)
-                )
-            else:
-                # Different speakers - use confidence to decide boundary
-                current_conf = current.get("confidence", 0)
-                next_conf = next_seg.get("confidence", 0)
-
-                if next_conf > current_conf:
-                    # Next segment more confident, close current and start new
-                    merged.append(current)
-                    current = next_seg.copy()
-                else:
-                    # Current more confident, adjust next segment start
-                    # Save current, update next to start after current
-                    merged.append(current)
-                    next_seg_copy = next_seg.copy()
-                    next_seg_copy["start"] = current["end"]
-                    current = next_seg_copy
-        else:
-            # No overlap, save current and move to next
-            merged.append(current)
-            current = next_seg.copy()
-
-    # Don't forget last segment
-    merged.append(current)
-
-    return merged
-
-
 @async_job(redis=True, beanie=True)
 async def check_enrolled_speakers_job(
     session_id: str,
@@ -266,14 +184,6 @@ async def recognise_speakers_job(
             "processing_time_seconds": 0
         }
 
-    # Reconstruct audio from MongoDB chunks
-    from advanced_omi_backend.utils.audio_chunk_utils import (
-        reconstruct_wav_from_conversation,
-        reconstruct_audio_segments,
-        filter_transcript_by_time
-    )
-    import os
-
     # Read transcript text and words from the transcript version
     # (Parameters may be empty if called via job dependency)
     actual_transcript_text = transcript_text or transcript_version.transcript or ""
@@ -298,122 +208,53 @@ async def recognise_speakers_job(
         "words": actual_words
     }
 
-    # Check if we need to use chunked processing
-    total_duration = conversation.audio_total_duration or 0.0
-    chunk_threshold = float(os.getenv("SPEAKER_CHUNK_THRESHOLD", "1500"))  # 25 minutes default
+    # Generate backend token for speaker service to fetch audio
+    # Speaker service will check conversation duration and decide
+    # whether to chunk based on its own memory constraints
+    from advanced_omi_backend.auth import generate_jwt_for_user
+    from advanced_omi_backend.users import UserManager
 
-    logger.info(f"📦 Reconstructing audio from MongoDB chunks for conversation {conversation_id}")
-    logger.info(f"📊 Total duration: {total_duration:.1f}s, Threshold: {chunk_threshold:.1f}s")
-
-    # Call speaker recognition service
+    # Get user details for token generation
     try:
-        speaker_segments = []
+        user = await UserManager.get(user_id)
+        if not user:
+            logger.error(f"User {user_id} not found for token generation")
+            return {
+                "success": False,
+                "conversation_id": conversation_id,
+                "version_id": version_id,
+                "error": "User not found",
+                "processing_time_seconds": time.time() - start_time
+            }
 
-        if total_duration > chunk_threshold:
-            # Chunked processing for large files
-            logger.info(f"🎤 Using chunked processing for large file ({total_duration:.1f}s > {chunk_threshold:.1f}s)")
+        backend_token = generate_jwt_for_user(user_id, user.email)
+        logger.info(f"🔐 Generated backend token for speaker service")
 
-            segment_duration = float(os.getenv("SPEAKER_CHUNK_SIZE", "900"))  # 15 minutes default
-            overlap = float(os.getenv("SPEAKER_CHUNK_OVERLAP", "30"))  # 30 seconds default
-
-            async for wav_data, start_time, end_time in reconstruct_audio_segments(
-                conversation_id=conversation_id,
-                segment_duration=segment_duration,
-                overlap=overlap
-            ):
-                logger.info(
-                    f"📦 Processing segment {start_time:.1f}s - {end_time:.1f}s: "
-                    f"{len(wav_data) / 1024 / 1024:.2f} MB"
-                )
-
-                # Filter transcript for this time range
-                segment_transcript = filter_transcript_by_time(
-                    transcript_data,
-                    start_time,
-                    end_time
-                )
-
-                # Call speaker service for this segment
-                speaker_result = await speaker_client.diarize_identify_match(
-                    audio_data=wav_data,
-                    transcript_data=segment_transcript,
-                    user_id=user_id
-                )
-
-                # Check for errors from speaker service
-                if speaker_result.get("error"):
-                    error_type = speaker_result.get("error")
-                    error_message = speaker_result.get("message", "Unknown error")
-                    logger.error(f"🎤 Speaker service error on segment {start_time:.1f}s: {error_type}")
-
-                    # Raise exception for connection failures
-                    if error_type in ("connection_failed", "timeout", "client_error"):
-                        raise RuntimeError(f"Speaker recognition service unavailable: {error_type} - {error_message}")
-
-                    # For processing errors, continue with other segments
-                    continue
-
-                # Adjust timestamps to global time
-                if speaker_result and "segments" in speaker_result:
-                    for seg in speaker_result["segments"]:
-                        seg["start"] += start_time
-                        seg["end"] += start_time
-
-                    speaker_segments.extend(speaker_result["segments"])
-
-            logger.info(f"🎤 Collected {len(speaker_segments)} segments from chunked processing")
-
-            # Merge overlapping segments
-            if speaker_segments:
-                speaker_segments = _merge_overlapping_speaker_segments(speaker_segments, overlap)
-                logger.info(f"🎤 After merging overlaps: {len(speaker_segments)} segments")
-
-            # Package as result dict for consistent handling below
-            speaker_result = {"segments": speaker_segments}
-
-        else:
-            # Normal processing for files <= threshold
-            logger.info(f"🎤 Using normal processing for small file ({total_duration:.1f}s <= {chunk_threshold:.1f}s)")
-
-            # Reconstruct WAV from MongoDB chunks (already in memory as bytes)
-            wav_data = await reconstruct_wav_from_conversation(conversation_id)
-
-            logger.info(
-                f"📦 Reconstructed audio from MongoDB chunks: "
-                f"{len(wav_data) / 1024 / 1024:.2f} MB"
-            )
-
-            logger.info(f"🎤 Calling speaker recognition service...")
-
-            # Call speaker service with in-memory audio data (no temp file needed!)
-            speaker_result = await speaker_client.diarize_identify_match(
-                audio_data=wav_data,  # Pass bytes directly, no disk I/O
-                transcript_data=transcript_data,
-                user_id=user_id
-            )
-
-    except ValueError as e:
-        # No chunks found for conversation
-        logger.error(f"No audio chunks found for conversation {conversation_id}: {e}")
+    except Exception as token_error:
+        logger.error(f"Failed to generate backend token: {token_error}", exc_info=True)
         return {
             "success": False,
             "conversation_id": conversation_id,
             "version_id": version_id,
-            "error": f"No audio chunks found: {e}",
-            "processing_time_seconds": time.time() - start_time
-        }
-    except Exception as audio_error:
-        logger.error(f"Failed to reconstruct audio from MongoDB: {audio_error}", exc_info=True)
-        return {
-            "success": False,
-            "conversation_id": conversation_id,
-            "version_id": version_id,
-            "error": f"Audio reconstruction failed: {audio_error}",
+            "error": f"Token generation failed: {token_error}",
             "processing_time_seconds": time.time() - start_time
         }
 
-    # Continue with speaker recognition result processing
+    # Call speaker recognition service with conversation_id
+    # Speaker service will:
+    # 1. Fetch conversation metadata to check duration
+    # 2. Decide whether to chunk based on its MAX_DIARIZE_DURATION setting
+    # 3. Request audio segments via backend API as needed
+    # 4. Return merged speaker segments
+    logger.info(f"🎤 Calling speaker recognition service with conversation_id...")
+
     try:
+        speaker_result = await speaker_client.diarize_identify_match(
+            conversation_id=conversation_id,
+            backend_token=backend_token,
+            transcript_data=transcript_data,
+            user_id=user_id
+        )
 
         # Check for errors from speaker service
         if speaker_result.get("error"):

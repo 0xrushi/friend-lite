@@ -67,14 +67,21 @@ class SpeakerRecognitionClient:
             logger.info("Speaker recognition client disabled (no service URL configured)")
 
     async def diarize_identify_match(
-        self, audio_data: bytes, transcript_data: Dict, user_id: Optional[str] = None
+        self,
+        conversation_id: str,
+        backend_token: str,
+        transcript_data: Dict,
+        user_id: Optional[str] = None
     ) -> Dict:
         """
         Perform diarization, speaker identification, and word-to-speaker matching.
-        Routes to appropriate endpoint based on diarization source configuration.
+
+        Speaker service fetches audio from backend and handles chunking based on its
+        own memory constraints.
 
         Args:
-            audio_data: WAV audio data as bytes (in-memory)
+            conversation_id: Conversation ID for speaker service to fetch audio
+            backend_token: JWT token for speaker service to authenticate with backend
             transcript_data: Dict containing words array and text from transcription
             user_id: Optional user ID for speaker identification
 
@@ -86,7 +93,7 @@ class SpeakerRecognitionClient:
             return {}
 
         try:
-            logger.info(f"🎤 Identifying speakers from in-memory audio ({len(audio_data) / 1024 / 1024:.2f} MB)")
+            logger.info(f"🎤 Calling speaker service with conversation_id: {conversation_id[:12]}...")
 
             # Read diarization source from existing config system
             from advanced_omi_backend.config import load_diarization_settings_from_file
@@ -94,11 +101,10 @@ class SpeakerRecognitionClient:
             diarization_source = config.get("diarization_source", "pyannote")
 
             async with aiohttp.ClientSession() as session:
-                # Prepare the audio data for upload (no disk I/O!)
+                # Prepare form data with conversation_id + backend_token
                 form_data = aiohttp.FormData()
-                form_data.add_field(
-                    "file", audio_data, filename="audio.wav", content_type="audio/wav"
-                )
+                form_data.add_field("conversation_id", conversation_id)
+                form_data.add_field("backend_token", backend_token)
 
                 if diarization_source == "deepgram":
                     # DEEPGRAM DIARIZATION PATH: We EXPECT transcript has speaker info from Deepgram

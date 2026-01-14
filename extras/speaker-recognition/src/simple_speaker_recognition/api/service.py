@@ -2,6 +2,7 @@
 
 import logging
 import os
+import yaml
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import cast, Optional, Union
@@ -23,6 +24,31 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(na
 log = logging.getLogger("speaker_service")
 
 
+def load_speaker_config_from_root() -> dict:
+    """
+    Load speaker_recognition section from root config.yml.
+
+    Returns:
+        Dictionary with speaker_recognition config, or empty dict if not found
+    """
+    config_dir = Path(os.getenv("CONFIG_DIR", "/app/config"))
+    config_path = config_dir / "config.yml"
+
+    if not config_path.exists():
+        log.warning(f"Root config.yml not found at {config_path}, using defaults")
+        return {}
+
+    try:
+        with open(config_path, "r") as f:
+            config = yaml.safe_load(f) or {}
+            speaker_config = config.get("speaker_recognition", {})
+            log.info(f"Loaded speaker_recognition config from root config.yml: {speaker_config}")
+            return speaker_config
+    except Exception as e:
+        log.warning(f"Failed to load root config.yml: {e}, using defaults")
+        return {}
+
+
 class Settings(BaseSettings):
     """Service configuration settings."""
     similarity_threshold: float = Field(default=0.15, description="Cosine similarity threshold for speaker identification (0.1-0.3 typical for ECAPA-TDNN)")
@@ -33,11 +59,43 @@ class Settings(BaseSettings):
     deepgram_base_url: str = Field(default="https://api.deepgram.com", description="Deepgram API base URL")
     hf_token: Optional[str] = Field(default=None, description="Hugging Face token for Pyannote models")
 
+    # Backend API configuration for chunked processing
+    # Loaded from root config.yml speaker_recognition section, can be overridden by env vars
+    max_diarize_duration: int = Field(
+        default=60,
+        description="Maximum audio duration (seconds) for single PyAnnote call"
+    )
+    diarize_chunk_overlap: float = Field(
+        default=5.0,
+        description="Overlap (seconds) between chunks for continuity"
+    )
+    backend_api_url: str = Field(
+        default="http://host.docker.internal:8000",
+        description="Backend API URL for fetching audio segments"
+    )
+
     class Config:
         case_sensitive = True
         env_file = ".env"
         env_file_encoding = "utf-8"
         extra = "ignore"  # Ignore extra environment variables
+
+    def __init__(self, **kwargs):
+        """Initialize settings, loading from root config.yml first, then env overrides."""
+        # Load from root config.yml
+        root_config = load_speaker_config_from_root()
+
+        # Apply root config values as defaults (only if not provided in kwargs or env)
+        if 'max_diarize_duration' not in kwargs and 'MAX_DIARIZE_DURATION' not in os.environ:
+            kwargs['max_diarize_duration'] = root_config.get('max_diarize_duration', 60)
+
+        if 'diarize_chunk_overlap' not in kwargs and 'DIARIZE_CHUNK_OVERLAP' not in os.environ:
+            kwargs['diarize_chunk_overlap'] = root_config.get('diarize_chunk_overlap', 5.0)
+
+        if 'backend_api_url' not in kwargs and 'BACKEND_API_URL' not in os.environ:
+            kwargs['backend_api_url'] = root_config.get('backend_api_url', 'http://host.docker.internal:8000')
+
+        super().__init__(**kwargs)
 
 
 # Get HF_TOKEN from environment and create settings

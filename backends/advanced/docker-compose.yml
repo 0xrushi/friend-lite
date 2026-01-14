@@ -115,6 +115,33 @@ services:
         condition: service_started
     restart: unless-stopped
 
+  # Annotation Cron Scheduler
+  # Runs periodic jobs for AI-powered annotation suggestions:
+  # - Daily: Surface potential errors in transcripts/memories
+  # - Weekly: Fine-tune error detection models using user feedback
+  # Set DEV_MODE=true in .env for 1-minute intervals (testing)
+  annotation-cron:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: prod
+    command: ["uv", "run", "python", "-m", "advanced_omi_backend.cron"]
+    container_name: chronicle-annotation-cron
+    env_file:
+      - .env
+    environment:
+      - MONGODB_URI=mongodb://mongo:27017
+      - DEV_MODE=${DEV_MODE:-false}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - LLM_PROVIDER=${LLM_PROVIDER:-openai}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL}
+    depends_on:
+      mongo:
+        condition: service_healthy
+    restart: unless-stopped
+    profiles:
+      - annotation  # Optional profile - enable with: docker compose --profile annotation up
+
   webui:
     build:
       context: ./webui

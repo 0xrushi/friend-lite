@@ -321,6 +321,77 @@ class MemoryService(MemoryServiceBase):
             memory_logger.error(f"Get memory failed: {e}")
             return None
 
+    async def update_memory(
+        self,
+        memory_id: str,
+        content: Optional[str] = None,
+        metadata: Optional[dict[str, Any]] = None,
+        user_id: Optional[str] = None,
+        user_email: Optional[str] = None
+    ) -> bool:
+        """Update a specific memory's content and/or metadata.
+
+        Regenerates embeddings when content is updated.
+
+        Args:
+            memory_id: Unique identifier of the memory to update
+            content: New content for the memory (if None, content is not updated)
+            metadata: New metadata to merge with existing (if None, metadata is not updated)
+            user_id: Optional user ID for authentication
+            user_email: Optional user email for authentication
+
+        Returns:
+            True if update succeeded, False otherwise
+        """
+        if not self._initialized:
+            await self.initialize()
+
+        try:
+            # Get existing memory
+            existing_memory = await self.vector_store.get_memory(memory_id, user_id)
+            if not existing_memory:
+                memory_logger.warning(f"Memory {memory_id} not found for update")
+                return False
+
+            # Determine new content and metadata
+            new_content = content if content is not None else existing_memory.content
+            new_metadata = {**existing_memory.metadata}
+            if metadata:
+                new_metadata.update(metadata)
+
+            # Update timestamps
+            new_metadata["updated_at"] = str(int(time.time()))
+
+            # Generate new embedding if content changed
+            if content is not None:
+                new_embedding = await self.llm_provider.generate_embedding(new_content)
+            else:
+                # If content didn't change, reuse existing embedding
+                if existing_memory.embedding:
+                    new_embedding = existing_memory.embedding
+                else:
+                    # No existing embedding, generate one
+                    new_embedding = await self.llm_provider.generate_embedding(new_content)
+
+            # Update in vector store
+            success = await self.vector_store.update_memory(
+                memory_id=memory_id,
+                new_content=new_content,
+                new_embedding=new_embedding,
+                new_metadata=new_metadata
+            )
+
+            if success:
+                memory_logger.info(f"✅ Updated memory {memory_id}")
+            else:
+                memory_logger.error(f"Failed to update memory {memory_id}")
+
+            return success
+
+        except Exception as e:
+            memory_logger.error(f"Error updating memory {memory_id}: {e}", exc_info=True)
+            return False
+
     async def delete_memory(self, memory_id: str, user_id: Optional[str] = None, user_email: Optional[str] = None) -> bool:
         """Delete a specific memory by ID.
         

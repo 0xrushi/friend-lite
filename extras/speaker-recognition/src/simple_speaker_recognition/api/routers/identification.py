@@ -268,9 +268,11 @@ async def diarize_and_identify(
 
 @router.post("/v1/diarize-identify-match")
 async def diarize_identify_match(
-    file: UploadFile = File(..., description="Audio file for diarization and word matching"),
+    file: UploadFile = File(None, description="Audio file for diarization and word matching"),
     transcript_data: str = Form(..., description="JSON string with transcript words and text"),
     user_id: Optional[int] = Form(default=None, description="User ID for speaker identification"),
+    conversation_id: Optional[str] = Form(default=None, description="Conversation ID to fetch audio from backend"),
+    backend_token: Optional[str] = Form(default=None, description="JWT token for backend API authentication"),
     min_duration: float = Form(default=0.5, description="Minimum segment duration in seconds"),
     similarity_threshold: float = Form(default=0.15, description="Speaker similarity threshold"),
     min_speakers: Optional[int] = Form(default=None, description="Minimum number of speakers to detect"),
@@ -281,23 +283,39 @@ async def diarize_identify_match(
 ):
     """
     Diarize audio, identify speakers, and match transcript words to speaker segments.
-    
-    This endpoint:
-    1. Uses internal pyannote for speaker diarization
+
+    This endpoint supports two modes:
+    1. File upload: Pass audio file directly
+    2. Conversation mode: Pass conversation_id + backend_token to fetch audio from Chronicle backend
+
+    The endpoint:
+    1. Uses internal pyannote for speaker diarization (with automatic chunking for large files)
     2. Identifies enrolled speakers for each segment
     3. Matches transcript words to diarization segments by time overlap
     4. Returns complete segments with text and speaker identification
-    
+
     The transcript_data should be a JSON string containing:
     {
         "words": [{"word": "hello", "start": 1.23, "end": 1.45}, ...],
         "text": "full transcript text"
     }
+
+    Maximum audio duration: 2 hours (7200 seconds)
+    Files longer than max_diarize_duration (default 60s) are automatically chunked
     """
-    log.info(f"Processing diarize-identify-match request: {file.filename}")
+    log.info(f"Processing diarize-identify-match request")
+    log.info(f"Mode: {'conversation' if conversation_id else 'file upload'}")
     log.info(f"Parameters - user_id: {user_id}, min_duration: {min_duration}, similarity_threshold: {similarity_threshold}, min_speakers: {min_speakers}, max_speakers: {max_speakers}, collar: {collar}, min_duration_off: {min_duration_off}")
     log.info(f"Transcript data length: {len(transcript_data) if transcript_data else 0}")
-    
+
+    # Validate: must provide either file OR conversation_id
+    if not file and not conversation_id:
+        raise HTTPException(400, "Must provide either audio file or conversation_id")
+    if file and conversation_id:
+        raise HTTPException(400, "Cannot provide both audio file and conversation_id - choose one mode")
+    if conversation_id and not backend_token:
+        raise HTTPException(400, "backend_token required when using conversation_id")
+
     # Parse transcript data
     try:
         transcript = json.loads(transcript_data)
@@ -305,24 +323,83 @@ async def diarize_identify_match(
         full_text = transcript.get("text", "")
     except json.JSONDecodeError as e:
         raise HTTPException(400, f"Invalid transcript_data JSON: {str(e)}")
-    
+
     if not words:
         raise HTTPException(400, "No words found in transcript_data")
-    
-    # Create temporary file
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_file:
-        tmp_file.write(await file.read())
-        tmp_path = Path(tmp_file.name)
-    
+
+    # Get settings for chunking configuration
+    from simple_speaker_recognition.api.service import auth as settings
+    max_diarize_duration = settings.max_diarize_duration  # Default 60 seconds
+    diarize_chunk_overlap = settings.diarize_chunk_overlap  # Default 5 seconds
+    MAX_AUDIO_DURATION = 7200  # 2 hours hard limit
+
+    # Mode 1: Conversation mode - fetch audio from backend
+    if conversation_id:
+        from simple_speaker_recognition.core.backend_client import BackendClient
+
+        backend_client = BackendClient(settings.backend_api_url)
+        try:
+            # Get conversation metadata
+            metadata = await backend_client.get_conversation_metadata(conversation_id, backend_token)
+            total_duration = metadata['duration']
+
+            log.info(f"Conversation {conversation_id[:12]}: duration={total_duration:.1f}s")
+
+            # Validate: 2 hour maximum
+            if total_duration > MAX_AUDIO_DURATION:
+                raise HTTPException(400, f"Audio duration {total_duration:.1f}s exceeds maximum allowed duration of {MAX_AUDIO_DURATION}s (2 hours)")
+
+            # Fetch full audio from backend
+            log.info(f"Fetching audio from backend for conversation {conversation_id[:12]}")
+            wav_bytes = await backend_client.get_audio_segment(
+                conversation_id,
+                backend_token,
+                start=0.0,
+                duration=total_duration
+            )
+
+            # Write to temp file
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_file:
+                tmp_file.write(wav_bytes)
+                tmp_path = Path(tmp_file.name)
+        finally:
+            await backend_client.close()
+
+    # Mode 2: File upload mode
+    else:
+        # Create temporary file from upload
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_file:
+            tmp_file.write(await file.read())
+            tmp_path = Path(tmp_file.name)
+
+        # Get audio duration for validation
+        from simple_speaker_recognition.utils.audio_processing import get_audio_info
+        audio_info = get_audio_info(str(tmp_path))
+        total_duration = audio_info.get('duration_seconds', 0)
+
+        log.info(f"Uploaded file: {file.filename}, duration={total_duration:.1f}s")
+
+        # Validate: 2 hour maximum
+        if total_duration > MAX_AUDIO_DURATION:
+            tmp_path.unlink(missing_ok=True)
+            raise HTTPException(400, f"Audio duration {total_duration:.1f}s exceeds maximum allowed duration of {MAX_AUDIO_DURATION}s (2 hours)")
+
     try:
-        # Step 1: Perform diarization
+        # Step 1: Perform diarization (chunking happens automatically inside if needed)
         log.info(f"Performing speaker diarization on {tmp_path}")
         if min_speakers or max_speakers:
             log.info(f"Using speaker constraints: min={min_speakers}, max={max_speakers}")
-        
+
         audio_backend = get_audio_backend()
-        diarization_segments = await audio_backend.async_diarize(tmp_path, min_speakers=min_speakers, max_speakers=max_speakers,
-                                                                 collar=collar, min_duration_off=min_duration_off)
+        diarization_segments = await audio_backend.async_diarize(
+            tmp_path,
+            min_speakers=min_speakers,
+            max_speakers=max_speakers,
+            collar=collar,
+            min_duration_off=min_duration_off,
+            max_duration=max_diarize_duration,
+            chunk_overlap=diarize_chunk_overlap
+        )
         
         # Apply minimum duration filter
         if min_duration > 0:

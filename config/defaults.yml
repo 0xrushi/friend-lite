@@ -239,6 +239,15 @@ speaker_recognition:
   # Request timeout in seconds
   timeout: 60
 
+  # Diarization chunking configuration (speaker service self-managed chunking)
+  # Maximum audio duration (seconds) for single PyAnnote call
+  # Files longer than this will be chunked automatically by the speaker service
+  max_diarize_duration: 60
+  # Overlap (seconds) between chunks for speaker continuity
+  diarize_chunk_overlap: 5.0
+  # Backend API URL for fetching audio segments (used by speaker service)
+  backend_api_url: http://host.docker.internal:8000
+
 # ===========================
 # Chat Configuration
 # ===========================

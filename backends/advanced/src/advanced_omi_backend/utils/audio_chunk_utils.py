@@ -495,6 +495,108 @@ async def reconstruct_audio_segments(
         start_time += segment_duration
 
 
+async def reconstruct_audio_segment(
+    conversation_id: str,
+    start_time: float,
+    end_time: float
+) -> bytes:
+    """
+    Reconstruct audio for a specific time range from MongoDB chunks.
+
+    This function returns a single audio segment for the specified time range,
+    enabling on-demand access to conversation audio without loading the entire
+    file into memory. Used by the audio segment API endpoint.
+
+    Args:
+        conversation_id: Conversation ID
+        start_time: Start time in seconds
+        end_time: End time in seconds
+
+    Returns:
+        WAV audio bytes (16kHz mono or original format)
+
+    Raises:
+        ValueError: If conversation not found or has no audio
+        Exception: If audio reconstruction fails
+
+    Example:
+        >>> # Get first 60 seconds of audio
+        >>> wav_bytes = await reconstruct_audio_segment(conv_id, 0.0, 60.0)
+        >>> # Save to file
+        >>> with open("segment.wav", "wb") as f:
+        ...     f.write(wav_bytes)
+    """
+    from advanced_omi_backend.models.conversation import Conversation
+
+    # Validate inputs
+    if start_time < 0:
+        raise ValueError(f"start_time must be >= 0, got {start_time}")
+    if end_time <= start_time:
+        raise ValueError(f"end_time ({end_time}) must be > start_time ({start_time})")
+
+    # Get conversation metadata
+    conversation = await Conversation.get(conversation_id)
+
+    if not conversation:
+        raise ValueError(f"Conversation {conversation_id} not found")
+
+    total_duration = conversation.audio_total_duration or 0.0
+
+    if total_duration == 0:
+        raise ValueError(f"Conversation {conversation_id} has no audio")
+
+    # Clamp end_time to conversation duration
+    end_time = min(end_time, total_duration)
+
+    # Get audio format from first chunk
+    first_chunk = await AudioChunkDocument.find_one(
+        AudioChunkDocument.conversation_id == conversation_id
+    )
+
+    if not first_chunk:
+        raise ValueError(f"No audio chunks found for conversation {conversation_id}")
+
+    sample_rate = first_chunk.sample_rate
+    channels = first_chunk.channels
+
+    # Get chunks that overlap with this time range
+    chunks = await AudioChunkDocument.find(
+        AudioChunkDocument.conversation_id == conversation_id,
+        AudioChunkDocument.start_time < end_time,  # Chunk starts before segment ends
+        AudioChunkDocument.end_time > start_time,  # Chunk ends after segment starts
+    ).sort(+AudioChunkDocument.chunk_index).to_list()
+
+    if not chunks:
+        logger.warning(
+            f"No chunks found for time range {start_time:.1f}s - {end_time:.1f}s "
+            f"in conversation {conversation_id[:8]}..."
+        )
+        # Return silence for empty range
+        return await build_wav_from_pcm(
+            pcm_data=b"",
+            sample_rate=sample_rate,
+            channels=channels,
+        )
+
+    # Decode and concatenate chunks
+    pcm_data = await concatenate_chunks_to_pcm(chunks)
+
+    # Build WAV file for this segment
+    wav_bytes = await build_wav_from_pcm(
+        pcm_data=pcm_data,
+        sample_rate=sample_rate,
+        channels=channels,
+    )
+
+    logger.info(
+        f"Reconstructed audio segment for {conversation_id[:8]}...: "
+        f"{start_time:.1f}s - {end_time:.1f}s "
+        f"({len(chunks)} chunks, {len(wav_bytes)} bytes)"
+    )
+
+    return wav_bytes
+
+
 def filter_transcript_by_time(
     transcript_data: dict,
     start_time: float,
@@ -569,7 +671,7 @@ async def convert_audio_to_chunks(
         Number of chunks created
 
     Raises:
-        ValueError: If audio duration exceeds 30 minutes
+        ValueError: If audio duration exceeds 2 hours
 
     Example:
         >>> # Convert from memory without disk write
@@ -590,12 +692,12 @@ async def convert_audio_to_chunks(
     # Calculate audio duration and validate maximum limit
     bytes_per_second = sample_rate * sample_width * channels
     total_duration_seconds = len(audio_data) / bytes_per_second
-    MAX_DURATION_SECONDS = 1800  # 30 minutes (180 chunks @ 10s each)
+    MAX_DURATION_SECONDS = 7200  # 2 hours (720 chunks @ 10s each)
 
     if total_duration_seconds > MAX_DURATION_SECONDS:
         raise ValueError(
             f"Audio duration ({total_duration_seconds:.1f}s) exceeds maximum allowed "
-            f"({MAX_DURATION_SECONDS}s / 30 minutes). Please split the file into smaller segments."
+            f"({MAX_DURATION_SECONDS}s / 2 hours). Please split the file into smaller segments."
         )
 
     # Calculate chunk size in bytes
@@ -719,7 +821,7 @@ async def convert_wav_to_chunks(
 
     Raises:
         FileNotFoundError: If WAV file doesn't exist
-        ValueError: If WAV file is invalid or exceeds 30 minutes
+        ValueError: If WAV file is invalid or exceeds 2 hours
 
     Example:
         >>> # Convert uploaded file to chunks
@@ -756,12 +858,12 @@ async def convert_wav_to_chunks(
     # Calculate audio duration and validate maximum limit
     bytes_per_second = sample_rate * sample_width * channels
     total_duration_seconds = len(pcm_data) / bytes_per_second
-    MAX_DURATION_SECONDS = 1800  # 30 minutes (180 chunks @ 10s each)
+    MAX_DURATION_SECONDS = 7200  # 2 hours (720 chunks @ 10s each)
 
     if total_duration_seconds > MAX_DURATION_SECONDS:
         raise ValueError(
             f"Audio duration ({total_duration_seconds:.1f}s) exceeds maximum allowed "
-            f"({MAX_DURATION_SECONDS}s / 30 minutes). Please split the file into smaller segments."
+            f"({MAX_DURATION_SECONDS}s / 2 hours). Please split the file into smaller segments."
         )
 
     # Calculate chunk size in bytes
