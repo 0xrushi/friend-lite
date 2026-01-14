@@ -22,6 +22,7 @@ from rq.registry import ScheduledJobRegistry, DeferredJobRegistry
 
 from advanced_omi_backend.models.job import JobPriority
 from advanced_omi_backend.models.conversation import Conversation
+from advanced_omi_backend.config_loader import get_service_config
 
 logger = logging.getLogger(__name__)
 
@@ -405,27 +406,39 @@ def start_post_conversation_jobs(
     if client_id:
         job_meta['client_id'] = client_id
 
-    # Step 1: Speaker recognition job (uses streaming transcript from conversation document)
-    speaker_job_id = f"speaker_{conversation_id[:12]}"
-    logger.info(f"🔍 DEBUG: Creating speaker job with job_id={speaker_job_id}, conversation_id={conversation_id[:12]}, audio_uuid={audio_uuid[:12]}")
+    # Check if speaker recognition is enabled
+    speaker_config = get_service_config('speaker_recognition')
+    speaker_enabled = speaker_config.get('enabled', True)  # Default to True for backward compatibility
 
-    speaker_job = transcription_queue.enqueue(
-        recognise_speakers_job,
-        conversation_id,
-        version_id,
-        job_timeout=1200,  # 20 minutes
-        result_ttl=JOB_RESULT_TTL,
-        depends_on=depends_on_job,  # Direct dependency (no transcription job)
-        job_id=speaker_job_id,
-        description=f"Speaker recognition for conversation {conversation_id[:8]}",
-        meta=job_meta
-    )
-    if depends_on_job:
-        logger.info(f"📥 RQ: Enqueued speaker recognition job {speaker_job.id}, meta={speaker_job.meta} (depends on {depends_on_job.id})")
+    # Step 1: Speaker recognition job (conditional - only if enabled)
+    speaker_dependency = depends_on_job  # Start with upstream dependency (transcription if file upload)
+    speaker_job = None
+
+    if speaker_enabled:
+        speaker_job_id = f"speaker_{conversation_id[:12]}"
+        logger.info(f"🔍 DEBUG: Creating speaker job with job_id={speaker_job_id}, conversation_id={conversation_id[:12]}, audio_uuid={audio_uuid[:12]}")
+
+        speaker_job = transcription_queue.enqueue(
+            recognise_speakers_job,
+            conversation_id,
+            version_id,
+            job_timeout=1200,  # 20 minutes
+            result_ttl=JOB_RESULT_TTL,
+            depends_on=speaker_dependency,
+            job_id=speaker_job_id,
+            description=f"Speaker recognition for conversation {conversation_id[:8]}",
+            meta=job_meta
+        )
+        speaker_dependency = speaker_job  # Chain for next jobs
+        if depends_on_job:
+            logger.info(f"📥 RQ: Enqueued speaker recognition job {speaker_job.id}, meta={speaker_job.meta} (depends on {depends_on_job.id})")
+        else:
+            logger.info(f"📥 RQ: Enqueued speaker recognition job {speaker_job.id}, meta={speaker_job.meta} (no dependencies, starts immediately)")
     else:
-        logger.info(f"📥 RQ: Enqueued speaker recognition job {speaker_job.id}, meta={speaker_job.meta} (no dependencies, starts immediately)")
+        logger.info(f"⏭️  Speaker recognition disabled, skipping speaker job for conversation {conversation_id[:8]}")
 
-    # Step 3: Memory extraction job (parallel with title/summary)
+    # Step 2: Memory extraction job
+    # Depends on speaker job if it was created, otherwise depends on upstream (transcription or nothing)
     memory_job_id = f"memory_{conversation_id[:12]}"
     logger.info(f"🔍 DEBUG: Creating memory job with job_id={memory_job_id}, conversation_id={conversation_id[:12]}, audio_uuid={audio_uuid[:12]}")
 
@@ -434,15 +447,20 @@ def start_post_conversation_jobs(
         conversation_id,
         job_timeout=900,  # 15 minutes
         result_ttl=JOB_RESULT_TTL,
-        depends_on=speaker_job,
+        depends_on=speaker_dependency,  # Either speaker_job or upstream dependency
         job_id=memory_job_id,
         description=f"Memory extraction for conversation {conversation_id[:8]}",
         meta=job_meta
     )
-    logger.info(f"📥 RQ: Enqueued memory extraction job {memory_job.id}, meta={memory_job.meta} (depends on {speaker_job.id})")
+    if speaker_job:
+        logger.info(f"📥 RQ: Enqueued memory extraction job {memory_job.id}, meta={memory_job.meta} (depends on speaker job {speaker_job.id})")
+    elif depends_on_job:
+        logger.info(f"📥 RQ: Enqueued memory extraction job {memory_job.id}, meta={memory_job.meta} (depends on {depends_on_job.id})")
+    else:
+        logger.info(f"📥 RQ: Enqueued memory extraction job {memory_job.id}, meta={memory_job.meta} (no dependencies, starts immediately)")
 
-    # Step 4: Title/summary generation job (parallel with memory, independent)
-    # This ensures conversations always get titles/summaries even if memory job fails
+    # Step 3: Title/summary generation job
+    # Depends on speaker job if enabled, otherwise on upstream dependency
     title_job_id = f"title_summary_{conversation_id[:12]}"
     logger.info(f"🔍 DEBUG: Creating title/summary job with job_id={title_job_id}, conversation_id={conversation_id[:12]}, audio_uuid={audio_uuid[:12]}")
 
@@ -451,12 +469,17 @@ def start_post_conversation_jobs(
         conversation_id,
         job_timeout=300,  # 5 minutes
         result_ttl=JOB_RESULT_TTL,
-        depends_on=speaker_job,  # Depends on speaker job, NOT memory job
+        depends_on=speaker_dependency,  # Depends on speaker job if enabled, NOT memory job
         job_id=title_job_id,
         description=f"Generate title and summary for conversation {conversation_id[:8]}",
         meta=job_meta
     )
-    logger.info(f"📥 RQ: Enqueued title/summary job {title_summary_job.id}, meta={title_summary_job.meta} (depends on {speaker_job.id})")
+    if speaker_job:
+        logger.info(f"📥 RQ: Enqueued title/summary job {title_summary_job.id}, meta={title_summary_job.meta} (depends on speaker job {speaker_job.id})")
+    elif depends_on_job:
+        logger.info(f"📥 RQ: Enqueued title/summary job {title_summary_job.id}, meta={title_summary_job.meta} (depends on {depends_on_job.id})")
+    else:
+        logger.info(f"📥 RQ: Enqueued title/summary job {title_summary_job.id}, meta={title_summary_job.meta} (no dependencies, starts immediately)")
 
     # Step 5: Dispatch conversation.complete event (runs after both memory and title/summary complete)
     # This ensures plugins receive the event after all processing is done

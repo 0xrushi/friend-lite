@@ -4,11 +4,11 @@
 plugins:
   test_event:
     enabled: true
-    subscriptions:
+    events:
       - transcript.streaming
       - transcript.batch
       - conversation.complete
       - memory.processed
-    trigger:
+    condition:
       type: always  # Capture all events without filtering
     db_path: /app/debug/test_plugin_events.db

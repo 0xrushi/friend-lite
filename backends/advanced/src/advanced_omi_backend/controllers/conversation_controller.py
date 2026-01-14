@@ -440,33 +440,49 @@ async def reprocess_transcript(conversation_id: str, user: User):
         )
         logger.info(f"📥 RQ: Enqueued transcription job {transcript_job.id}")
 
-        # Job 2: Recognize speakers (depends on transcription, reads data from DB)
-        speaker_job = transcription_queue.enqueue(
-            recognise_speakers_job,
-            conversation_id,
-            version_id,
-            depends_on=transcript_job,
-            job_timeout=600,
-            result_ttl=JOB_RESULT_TTL,
-            job_id=f"speaker_{conversation_id[:8]}",
-            description=f"Recognize speakers for {conversation_id[:8]}",
-            meta={'audio_uuid': audio_uuid, 'conversation_id': conversation_id}
-        )
-        logger.info(f"📥 RQ: Enqueued speaker recognition job {speaker_job.id} (depends on {transcript_job.id})")
+        # Check if speaker recognition is enabled
+        from advanced_omi_backend.config_loader import get_service_config
+        speaker_config = get_service_config('speaker_recognition')
+        speaker_enabled = speaker_config.get('enabled', True)  # Default to True for backward compatibility
 
-        # Job 3: Extract memories (depends on speaker recognition)
+        # Job 2: Recognize speakers (conditional - only if enabled)
+        speaker_dependency = transcript_job  # Start with transcription job
+        speaker_job = None
+
+        if speaker_enabled:
+            speaker_job = transcription_queue.enqueue(
+                recognise_speakers_job,
+                conversation_id,
+                version_id,
+                depends_on=transcript_job,
+                job_timeout=600,
+                result_ttl=JOB_RESULT_TTL,
+                job_id=f"speaker_{conversation_id[:8]}",
+                description=f"Recognize speakers for {conversation_id[:8]}",
+                meta={'audio_uuid': audio_uuid, 'conversation_id': conversation_id}
+            )
+            speaker_dependency = speaker_job  # Chain for next job
+            logger.info(f"📥 RQ: Enqueued speaker recognition job {speaker_job.id} (depends on {transcript_job.id})")
+        else:
+            logger.info(f"⏭️  Speaker recognition disabled, skipping speaker job for conversation {conversation_id[:8]}")
+
+        # Job 3: Extract memories
+        # Depends on speaker job if it was created, otherwise depends on transcription
         # Note: redis_client is injected by @async_job decorator, don't pass it directly
         memory_job = memory_queue.enqueue(
             process_memory_job,
             conversation_id,
-            depends_on=speaker_job,
+            depends_on=speaker_dependency,  # Either speaker_job or transcript_job
             job_timeout=1800,
             result_ttl=JOB_RESULT_TTL,
             job_id=f"memory_{conversation_id[:8]}",
             description=f"Extract memories for {conversation_id[:8]}",
             meta={'audio_uuid': audio_uuid, 'conversation_id': conversation_id}
         )
-        logger.info(f"📥 RQ: Enqueued memory job {memory_job.id} (depends on {speaker_job.id})")
+        if speaker_job:
+            logger.info(f"📥 RQ: Enqueued memory job {memory_job.id} (depends on speaker job {speaker_job.id})")
+        else:
+            logger.info(f"📥 RQ: Enqueued memory job {memory_job.id} (depends on transcript job {transcript_job.id})")
 
         job = transcript_job  # For backward compatibility with return value
         logger.info(f"Created transcript reprocessing job {job.id} (version: {version_id}) for conversation {conversation_id}")

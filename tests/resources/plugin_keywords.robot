@@ -6,7 +6,7 @@ Documentation    Plugin testing resource file
 ...              - Mock plugin creation and registration
 ...              - Plugin event subscription verification
 ...              - Event dispatch testing via API
-...              - Wake word trigger testing
+...              - Wake word condition testing
 ...
 Library          Collections
 Library          OperatingSystem
@@ -16,17 +16,17 @@ Library          RequestsLibrary
 *** Keywords ***
 Create Mock Plugin Config
     [Documentation]    Create a mock plugin configuration for testing
-    [Arguments]    ${subscriptions}    ${trigger_type}=always    ${wake_words}=${NONE}
+    [Arguments]    ${events}    ${condition_type}=always    ${wake_words}=${NONE}
 
     ${config}=    Create Dictionary
     ...    enabled=True
-    ...    subscriptions=${subscriptions}
+    ...    events=${events}
 
-    ${trigger}=    Create Dictionary    type=${trigger_type}
+    ${condition}=    Create Dictionary    type=${condition_type}
     IF    $wake_words is not None
-        Set To Dictionary    ${trigger}    wake_words=${wake_words}
+        Set To Dictionary    ${condition}    wake_words=${wake_words}
     END
-    Set To Dictionary    ${config}    trigger=${trigger}
+    Set To Dictionary    ${config}    condition=${condition}
 
     RETURN    ${config}
 
@@ -34,14 +34,14 @@ Verify Plugin Config Format
     [Documentation]    Verify plugin config follows new event-based format
     [Arguments]    ${config}
 
-    Dictionary Should Contain Key    ${config}    subscriptions
-    ...    msg=Plugin config should have 'subscriptions' field
+    Dictionary Should Contain Key    ${config}    events
+    ...    msg=Plugin config should have 'events' field
 
-    ${subscriptions}=    Get From Dictionary    ${config}    subscriptions
-    Should Be True    isinstance(${subscriptions}, list)
+    ${events}=    Get From Dictionary    ${config}    events
+    Should Be True    isinstance(${events}, list)
     ...    msg=Subscriptions should be a list
 
-    ${length}=    Get Length    ${subscriptions}
+    ${length}=    Get Length    ${events}
     Should Be True    ${length} > 0
     ...    msg=Plugin should subscribe to at least one event
 
@@ -69,13 +69,13 @@ Get Test Plugins Config Path
     RETURN    ${CURDIR}/../../config/plugins.yml
 
 Verify HA Plugin Uses Events
-    [Documentation]    Verify HomeAssistant plugin config uses event subscriptions
+    [Documentation]    Verify HomeAssistant plugin config uses event events
 
     ${plugins_yml}=    Get Test Plugins Config Path
     ${config_content}=    Get File    ${plugins_yml}
 
-    Should Contain    ${config_content}    subscriptions:
-    ...    msg=Plugin config should use 'subscriptions' field
+    Should Contain    ${config_content}    events:
+    ...    msg=Plugin config should use 'events' field
 
     Should Contain    ${config_content}    transcript.streaming
     ...    msg=HA plugin should subscribe to 'transcript.streaming' event

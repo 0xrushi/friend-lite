@@ -2,10 +2,10 @@
 Documentation    Plugin Event System Tests
 ...
 ...              Tests the event-based plugin architecture:
-...              - Plugin configuration with event subscriptions
+...              - Plugin configuration with event events
 ...              - Event dispatch to subscribed plugins
 ...              - Wake word filtering
-...              - Multiple event subscriptions
+...              - Multiple event events
 Library          RequestsLibrary
 Library          Collections
 Library          String
@@ -36,42 +36,42 @@ Plugin Mock Config Creation
     # Test single event subscription
     ${single_subscription}=    Create List    transcript.streaming
     ${config}=    Create Mock Plugin Config
-    ...    subscriptions=${single_subscription}
+    ...    events=${single_subscription}
     Verify Plugin Config Format    ${config}
 
-    ${subscriptions}=    Get From Dictionary    ${config}    subscriptions
-    Should Contain    ${subscriptions}    transcript.streaming
+    ${events}=    Get From Dictionary    ${config}    events
+    Should Contain    ${events}    transcript.streaming
     ...    msg=Plugin should subscribe to transcript.streaming event
 
-    # Test multiple event subscriptions
-    ${subscriptions_list}=    Create List    transcript.streaming    transcript.batch    conversation.complete
+    # Test multiple event events
+    ${events_list}=    Create List    transcript.streaming    transcript.batch    conversation.complete
     ${multi_config}=    Create Mock Plugin Config
-    ...    subscriptions=${subscriptions_list}
-    ${multi_subs}=    Get From Dictionary    ${multi_config}    subscriptions
+    ...    events=${events_list}
+    ${multi_subs}=    Get From Dictionary    ${multi_config}    events
     ${length}=    Get Length    ${multi_subs}
     Should Be Equal As Integers    ${length}    3
     ...    msg=Plugin should subscribe to 3 events
 
 Plugin Mock With Wake Word Trigger
-    [Documentation]    Test creating plugin with wake word trigger
+    [Documentation]    Test creating plugin with wake word condition
     [Tags]    infra
 
     ${wake_words}=    Create List    hey vivi    vivi    hey jarvis
-    ${wake_word_subscriptions}=    Create List    transcript.streaming
+    ${wake_word_events}=    Create List    transcript.streaming
     ${config}=    Create Mock Plugin Config
-    ...    subscriptions=${wake_word_subscriptions}
-    ...    trigger_type=wake_word
+    ...    events=${wake_word_events}
+    ...    condition_type=wake_word
     ...    wake_words=${wake_words}
 
-    # Verify trigger configuration
-    ${trigger}=    Get From Dictionary    ${config}    trigger
-    Dictionary Should Contain Key    ${trigger}    type
-    Dictionary Should Contain Key    ${trigger}    wake_words
+    # Verify condition configuration
+    ${condition}=    Get From Dictionary    ${config}    condition
+    Dictionary Should Contain Key    ${condition}    type
+    Dictionary Should Contain Key    ${condition}    wake_words
 
-    ${trigger_type}=    Get From Dictionary    ${trigger}    type
-    Should Be Equal    ${trigger_type}    wake_word
+    ${condition_type}=    Get From Dictionary    ${condition}    type
+    Should Be Equal    ${condition_type}    wake_word
 
-    ${configured_wake_words}=    Get From Dictionary    ${trigger}    wake_words
+    ${configured_wake_words}=    Get From Dictionary    ${condition}    wake_words
     Lists Should Be Equal    ${configured_wake_words}    ${wake_words}
 
 Event Name Format Validation
@@ -85,7 +85,7 @@ Event Name Format Validation
     Verify Event Name Format    memory.processed
 
 Event Subscription Matching
-    [Documentation]    Test event matching against subscriptions
+    [Documentation]    Test event matching against events
     [Tags]    infra
 
     # Exact matching (no wildcards in simple version)
@@ -94,7 +94,7 @@ Event Subscription Matching
     Verify Event Matches Subscription    conversation.complete    conversation.complete
 
 Batch Transcription Should Trigger Batch Event
-    [Documentation]    Verify batch transcription triggers transcript.batch event
+    [Documentation]    Verify batch transcription conditions transcript.batch event
     [Tags]    audio-upload	requires-api-keys
 
     # Upload audio file for batch processing
@@ -108,11 +108,11 @@ Batch Transcription Should Trigger Batch Event
     ...    msg=At least one file should be processed successfully
 
     # Note: We can't directly verify event dispatch without plugin instrumentation
-    # This test validates the upload pathway that triggers transcript.batch
+    # This test validates the upload pathway that conditions transcript.batch
     # Integration with real plugin would verify actual event dispatch
 
 Streaming Transcription Should Trigger Streaming Event
-    [Documentation]    Verify streaming transcription triggers transcript.streaming event
+    [Documentation]    Verify streaming transcription conditions transcript.streaming event
     [Tags]    audio-streaming	requires-api-keys
 
     # Note: This would require WebSocket streaming test infrastructure
@@ -121,7 +121,7 @@ Streaming Transcription Should Trigger Streaming Event
     # 1. Connect WebSocket with test audio
     # 2. Stream audio data
     # 3. Verify transcript.streaming event dispatched
-    # 4. Verify subscribed plugins triggered
+    # 4. Verify subscribed plugins conditioned
 
     # For now, we verify the config is set up correctly
     Verify HA Plugin Uses Events

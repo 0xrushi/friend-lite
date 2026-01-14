@@ -54,12 +54,26 @@ class BasePlugin(ABC):
 
         Args:
             config: Plugin configuration from config/plugins.yml
-                   Contains: enabled, subscriptions, trigger, and plugin-specific config
+                   Contains: enabled, events, condition, and plugin-specific config
         """
+        import logging
+        logger = logging.getLogger(__name__)
+
         self.config = config
         self.enabled = config.get('enabled', False)
-        self.subscriptions = config.get('subscriptions', [])
-        self.trigger = config.get('trigger', {'type': 'always'})
+
+        # NEW terminology with backward compatibility
+        self.events = config.get('events') or config.get('subscriptions', [])
+        self.condition = config.get('condition') or config.get('trigger', {'type': 'always'})
+
+        # Deprecation warnings
+        plugin_name = config.get('name', 'unknown')
+        if 'subscriptions' in config:
+            logger.warning(f"Plugin '{plugin_name}': 'subscriptions' is deprecated, use 'events' instead")
+        if 'trigger' in config:
+            logger.warning(f"Plugin '{plugin_name}': 'condition' is deprecated, use 'condition' instead")
+        if 'access_level' in config:
+            logger.warning(f"Plugin '{plugin_name}': 'access_level' is deprecated and ignored")
 
     @abstractmethod
     async def initialize(self):
@@ -91,7 +105,7 @@ class BasePlugin(ABC):
             - segment_id: str - Unique segment identifier
             - conversation_id: str - Current conversation ID
 
-        For wake_word triggers, router adds:
+        For wake_word conditions, router adds:
             - command: str - Command with wake word stripped
             - original_transcript: str - Full transcript
 

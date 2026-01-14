@@ -14,11 +14,11 @@
 plugins:
   homeassistant:
     enabled: true
-    subscriptions:  # Subscribe to specific events (event-based architecture)
+    events:  # Events that trigger this plugin (event-based architecture)
       - transcript.streaming  # Execute on each streaming transcript chunk
       # - transcript.batch    # Uncomment to also handle batch transcription
       # - conversation.complete  # Uncomment to handle completed conversations
-    trigger:
+    condition:
       type: wake_word
       wake_words:  # Support multiple wake words
         - hey vivi      # Example: "hey vivi, turn off the lights"

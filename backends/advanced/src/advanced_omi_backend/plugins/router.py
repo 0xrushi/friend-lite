@@ -88,20 +88,20 @@ class PluginRouter:
 
     def __init__(self):
         self.plugins: Dict[str, BasePlugin] = {}
-        # Index plugins by event subscription for fast lookup
+        # Index plugins by event for fast lookup
         self._plugins_by_event: Dict[str, List[str]] = {}
 
     def register_plugin(self, plugin_id: str, plugin: BasePlugin):
         """Register a plugin with the router"""
         self.plugins[plugin_id] = plugin
 
-        # Index by each event subscription
-        for event in plugin.subscriptions:
+        # Index by each event
+        for event in plugin.events:
             if event not in self._plugins_by_event:
                 self._plugins_by_event[event] = []
             self._plugins_by_event[event].append(plugin_id)
 
-        logger.info(f"Registered plugin '{plugin_id}' for events: {plugin.subscriptions}")
+        logger.info(f"Registered plugin '{plugin_id}' for events: {plugin.events}")
 
     async def dispatch_event(
         self,
@@ -133,8 +133,8 @@ class PluginRouter:
             if not plugin.enabled:
                 continue
 
-            # Check trigger condition (wake_word, etc.)
-            if not await self._should_trigger(plugin, data):
+            # Check execution condition (wake_word, etc.)
+            if not await self._should_execute(plugin, data):
                 continue
 
             # Execute plugin
@@ -161,23 +161,23 @@ class PluginRouter:
 
         return results
 
-    async def _should_trigger(self, plugin: BasePlugin, data: Dict) -> bool:
-        """Check if plugin should be triggered based on trigger configuration"""
-        trigger_type = plugin.trigger.get('type', 'always')
+    async def _should_execute(self, plugin: BasePlugin, data: Dict) -> bool:
+        """Check if plugin should be executed based on condition configuration"""
+        condition_type = plugin.condition.get('type', 'always')
 
-        if trigger_type == 'always':
+        if condition_type == 'always':
             return True
 
-        elif trigger_type == 'wake_word':
+        elif condition_type == 'wake_word':
             # Normalize transcript for matching (handles punctuation and spacing)
             transcript = data.get('transcript', '')
             normalized_transcript = normalize_text_for_wake_word(transcript)
 
             # Support both singular 'wake_word' and plural 'wake_words' (list)
-            wake_words = plugin.trigger.get('wake_words', [])
+            wake_words = plugin.condition.get('wake_words', [])
             if not wake_words:
                 # Fallback to singular wake_word for backward compatibility
-                wake_word = plugin.trigger.get('wake_word', '')
+                wake_word = plugin.condition.get('wake_word', '')
                 if wake_word:
                     wake_words = [wake_word]
 
@@ -194,7 +194,7 @@ class PluginRouter:
 
             return False
 
-        elif trigger_type == 'conditional':
+        elif condition_type == 'conditional':
             # Future: Custom condition checking
             return True
 
