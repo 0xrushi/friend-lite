@@ -107,9 +107,15 @@ export const authApi = {
 }
 
 export const conversationsApi = {
-  getAll: () => api.get('/api/conversations'),
+  getAll: (includeDeleted?: boolean) => api.get('/api/conversations', {
+    params: includeDeleted !== undefined ? { include_deleted: includeDeleted } : {}
+  }),
   getById: (id: string) => api.get(`/api/conversations/${id}`),
   delete: (id: string) => api.delete(`/api/conversations/${id}`),
+  restore: (id: string) => api.post(`/api/conversations/${id}/restore`),
+  permanentDelete: (id: string) => api.delete(`/api/conversations/${id}`, {
+    params: { permanent: true }
+  }),
 
   // Reprocessing endpoints
   reprocessTranscript: (conversationId: string) => api.post(`/api/conversations/${conversationId}/reprocess-transcript`),

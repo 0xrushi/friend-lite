@@ -28,9 +28,12 @@ async def close_current_conversation(
 
 
 @router.get("")
-async def get_conversations(current_user: User = Depends(current_active_user)):
+async def get_conversations(
+    include_deleted: bool = Query(False, description="Include soft-deleted conversations"),
+    current_user: User = Depends(current_active_user)
+):
     """Get conversations. Admins see all conversations, users see only their own."""
-    return await conversation_controller.get_conversations(current_user)
+    return await conversation_controller.get_conversations(current_user, include_deleted)
 
 
 @router.get("/{conversation_id}")

@@ -133,7 +133,8 @@ export default function Conversations() {
   const loadConversations = async () => {
     try {
       setLoading(true)
-      const response = await conversationsApi.getAll()
+      // Exclude deleted conversations from main view
+      const response = await conversationsApi.getAll(false)
       // API now returns a flat list with client_id as a field
       const conversationsList = response.data.conversations || []
       setConversations(conversationsList)
@@ -506,38 +507,10 @@ export default function Conversations() {
           conversations.map((conversation) => (
             <div
               key={conversation.conversation_id || conversation.audio_uuid}
-              className={`rounded-lg p-6 border ${
-                conversation.deleted
-                  ? 'bg-red-50 dark:bg-red-900/20 border-red-300 dark:border-red-700'
-                  : 'bg-gray-50 dark:bg-gray-700 border-gray-200 dark:border-gray-600'
-              }`}
+              className="rounded-lg p-6 border bg-gray-50 dark:bg-gray-700 border-gray-200 dark:border-gray-600"
             >
-              {/* Deleted Conversation Warning */}
-              {conversation.deleted && (
-                <div className="mb-4 p-3 bg-red-100 dark:bg-red-900/40 rounded-lg border border-red-300 dark:border-red-700">
-                  <div className="flex items-start space-x-2">
-                    <Trash2 className="h-5 w-5 text-red-600 dark:text-red-400 mt-0.5 flex-shrink-0" />
-                    <div className="flex-1">
-                      <p className="font-semibold text-red-800 dark:text-red-300 text-sm">Processing Failed</p>
-                      <p className="text-xs text-red-700 dark:text-red-400 mt-1">
-                        Reason: {conversation.deletion_reason === 'no_meaningful_speech'
-                          ? 'No meaningful speech detected'
-                          : conversation.deletion_reason === 'audio_file_not_ready'
-                          ? 'Audio file not saved (possible Bluetooth disconnect)'
-                          : conversation.deletion_reason || 'Unknown'}
-                      </p>
-                      {conversation.deleted_at && (
-                        <p className="text-xs text-red-600 dark:text-red-500 mt-1">
-                          Deleted at: {new Date(conversation.deleted_at).toLocaleString()}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              )}
-
               {/* Version Selector Header - Only show for conversations with conversation_id */}
-              {conversation.conversation_id && !conversation.deleted && (
+              {conversation.conversation_id && (
                 <ConversationVersionHeader
                   conversationId={conversation.conversation_id}
                   versionInfo={{

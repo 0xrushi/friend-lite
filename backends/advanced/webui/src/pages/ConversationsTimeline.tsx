@@ -87,11 +87,6 @@ function ConversationCard({ conversation, formatDuration }: ConversationCardProp
               {formatDuration(conversation.duration_seconds)}
             </span>
           )}
-          {conversation.deleted && (
-            <span className="px-2 py-1 bg-red-100 text-red-700 rounded">
-              Failed: {conversation.deletion_reason || 'Unknown'}
-            </span>
-          )}
         </div>
       </div>
 
@@ -176,7 +171,8 @@ export default function ConversationsTimeline() {
   const loadConversations = async () => {
     try {
       setLoading(true)
-      const response = await conversationsApi.getAll()
+      // Exclude deleted conversations from timeline view
+      const response = await conversationsApi.getAll(false)
       const conversationsList = response.data.conversations || []
       setConversations(conversationsList)
       setError(null)
