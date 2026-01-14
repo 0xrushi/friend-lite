@@ -6,6 +6,7 @@ import logging
 import os
 import shutil
 import time
+import warnings
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -14,13 +15,211 @@ from fastapi import HTTPException
 
 from advanced_omi_backend.config import (
     get_diarization_settings as load_diarization_settings,
+)
+from advanced_omi_backend.config import (
     save_diarization_settings,
 )
+from advanced_omi_backend.config_loader import get_plugins_yml_path
 from advanced_omi_backend.model_registry import _find_config_path, load_models_config
 from advanced_omi_backend.models.user import User
 
 logger = logging.getLogger(__name__)
 audio_logger = logging.getLogger("audio_processing")
+
+
+async def get_config_diagnostics():
+    """
+    Get comprehensive configuration diagnostics.
+    
+    Returns warnings, errors, and status for all configuration components.
+    """
+    diagnostics = {
+        "timestamp": datetime.now(UTC).isoformat(),
+        "overall_status": "healthy",
+        "issues": [],
+        "warnings": [],
+        "info": [],
+        "components": {}
+    }
+    
+    # Test OmegaConf configuration loading
+    try:
+        from advanced_omi_backend.config_loader import load_config
+        
+        # Capture warnings during config load
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            config = load_config(force_reload=True)
+            
+            # Check for OmegaConf warnings
+            for warning in w:
+                warning_msg = str(warning.message)
+                if "some elements are missing" in warning_msg.lower():
+                    # Extract the variable name from warning
+                    if "variable '" in warning_msg.lower():
+                        var_name = warning_msg.split("'")[1]
+                        diagnostics["warnings"].append({
+                            "component": "OmegaConf",
+                            "severity": "warning",
+                            "message": f"Environment variable '{var_name}' not set (using empty default)",
+                            "resolution": f"Set {var_name} in .env file if needed"
+                        })
+        
+        diagnostics["components"]["omegaconf"] = {
+            "status": "healthy",
+            "message": "Configuration loaded successfully"
+        }
+    except Exception as e:
+        diagnostics["overall_status"] = "unhealthy"
+        diagnostics["issues"].append({
+            "component": "OmegaConf",
+            "severity": "error",
+            "message": f"Failed to load configuration: {str(e)}",
+            "resolution": "Check config/defaults.yml and config/config.yml syntax"
+        })
+        diagnostics["components"]["omegaconf"] = {
+            "status": "unhealthy",
+            "message": str(e)
+        }
+    
+    # Test model registry
+    try:
+        from advanced_omi_backend.model_registry import get_models_registry
+        
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            registry = get_models_registry()
+            
+            # Capture model loading warnings
+            for warning in w:
+                warning_msg = str(warning.message)
+                diagnostics["warnings"].append({
+                    "component": "Model Registry",
+                    "severity": "warning",
+                    "message": warning_msg,
+                    "resolution": "Check model definitions in config/defaults.yml"
+                })
+        
+        if registry:
+            diagnostics["components"]["model_registry"] = {
+                "status": "healthy",
+                "message": f"Loaded {len(registry.models)} models",
+                "details": {
+                    "total_models": len(registry.models),
+                    "defaults": dict(registry.defaults) if registry.defaults else {}
+                }
+            }
+            
+            # Check critical models
+            stt = registry.get_default("stt")
+            stt_stream = registry.get_default("stt_stream")
+            llm = registry.get_default("llm")
+            
+            # STT check
+            if stt:
+                if stt.api_key:
+                    diagnostics["info"].append({
+                        "component": "STT (Batch)",
+                        "message": f"Configured: {stt.name} ({stt.model_provider}) - API key present"
+                    })
+                else:
+                    diagnostics["warnings"].append({
+                        "component": "STT (Batch)",
+                        "severity": "warning",
+                        "message": f"{stt.name} ({stt.model_provider}) - No API key configured",
+                        "resolution": "Transcription will fail without API key"
+                    })
+            else:
+                diagnostics["issues"].append({
+                    "component": "STT (Batch)",
+                    "severity": "error",
+                    "message": "No batch STT model configured",
+                    "resolution": "Set defaults.stt in config.yml"
+                })
+                diagnostics["overall_status"] = "partial"
+            
+            # Streaming STT check
+            if stt_stream:
+                if stt_stream.api_key:
+                    diagnostics["info"].append({
+                        "component": "STT (Streaming)",
+                        "message": f"Configured: {stt_stream.name} ({stt_stream.model_provider}) - API key present"
+                    })
+                else:
+                    diagnostics["warnings"].append({
+                        "component": "STT (Streaming)",
+                        "severity": "warning",
+                        "message": f"{stt_stream.name} ({stt_stream.model_provider}) - No API key configured",
+                        "resolution": "Real-time transcription will fail without API key"
+                    })
+            else:
+                diagnostics["warnings"].append({
+                    "component": "STT (Streaming)",
+                    "severity": "warning",
+                    "message": "No streaming STT model configured - streaming worker disabled",
+                    "resolution": "Set defaults.stt_stream in config.yml for WebSocket transcription"
+                })
+            
+            # LLM check
+            if llm:
+                if llm.api_key:
+                    diagnostics["info"].append({
+                        "component": "LLM",
+                        "message": f"Configured: {llm.name} ({llm.model_provider}) - API key present"
+                    })
+                else:
+                    diagnostics["warnings"].append({
+                        "component": "LLM",
+                        "severity": "warning",
+                        "message": f"{llm.name} ({llm.model_provider}) - No API key configured",
+                        "resolution": "Memory extraction will fail without API key"
+                    })
+            
+        else:
+            diagnostics["overall_status"] = "unhealthy"
+            diagnostics["issues"].append({
+                "component": "Model Registry",
+                "severity": "error",
+                "message": "Failed to load model registry",
+                "resolution": "Check config/defaults.yml for syntax errors"
+            })
+            diagnostics["components"]["model_registry"] = {
+                "status": "unhealthy",
+                "message": "Registry failed to load"
+            }
+    except Exception as e:
+        diagnostics["overall_status"] = "partial"
+        diagnostics["issues"].append({
+            "component": "Model Registry",
+            "severity": "error",
+            "message": f"Error loading registry: {str(e)}",
+            "resolution": "Check logs for detailed error information"
+        })
+        diagnostics["components"]["model_registry"] = {
+            "status": "unhealthy",
+            "message": str(e)
+        }
+    
+    # Check environment variables
+    env_checks = [
+        ("DEEPGRAM_API_KEY", "Required for Deepgram transcription"),
+        ("OPENAI_API_KEY", "Required for OpenAI LLM and embeddings"),
+        ("AUTH_SECRET_KEY", "Required for authentication"),
+        ("ADMIN_EMAIL", "Required for admin user login"),
+        ("ADMIN_PASSWORD", "Required for admin user login"),
+    ]
+    
+    for env_var, description in env_checks:
+        value = os.getenv(env_var)
+        if not value or value == "":
+            diagnostics["warnings"].append({
+                "component": "Environment Variables",
+                "severity": "warning",
+                "message": f"{env_var} not set - {description}",
+                "resolution": f"Set {env_var} in .env file"
+            })
+    
+    return diagnostics
 
 
 async def get_current_metrics():
@@ -626,7 +825,7 @@ async def validate_chat_config_yaml(prompt_text: str) -> dict:
 async def get_plugins_config_yaml() -> str:
     """Get plugins configuration as YAML text."""
     try:
-        plugins_yml_path = Path("/app/plugins.yml")
+        plugins_yml_path = get_plugins_yml_path()
 
         # Default empty plugins config
         default_config = """plugins:
@@ -658,7 +857,7 @@ async def get_plugins_config_yaml() -> str:
 async def save_plugins_config_yaml(yaml_content: str) -> dict:
     """Save plugins configuration from YAML text."""
     try:
-        plugins_yml_path = Path("/app/plugins.yml")
+        plugins_yml_path = get_plugins_yml_path()
 
         # Validate YAML can be parsed
         try:

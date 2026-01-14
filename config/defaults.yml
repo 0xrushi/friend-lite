@@ -6,6 +6,7 @@ defaults:
   llm: openai-llm
   embedding: openai-embed
   stt: stt-deepgram
+  stt_stream: stt-deepgram-stream
   tts: tts-http
   vector_store: vs-qdrant
 
@@ -20,7 +21,7 @@ models:
     api_family: openai
     model_name: gpt-4o-mini
     model_url: https://api.openai.com/v1
-    api_key: ${oc.env:OPENAI_API_KEY,}
+    api_key: ${oc.env:OPENAI_API_KEY,''}
     model_params:
       temperature: 0.2
       max_tokens: 2000
@@ -46,7 +47,7 @@ models:
     api_family: openai
     model_name: llama-3.1-70b-versatile
     model_url: https://api.groq.com/openai/v1
-    api_key: ${oc.env:GROQ_API_KEY,}
+    api_key: ${oc.env:GROQ_API_KEY,''}
     model_params:
       temperature: 0.2
       max_tokens: 2000
@@ -62,7 +63,7 @@ models:
     api_family: openai
     model_name: text-embedding-3-small
     model_url: https://api.openai.com/v1
-    api_key: ${oc.env:OPENAI_API_KEY,}
+    api_key: ${oc.env:OPENAI_API_KEY,''}
     embedding_dimensions: 1536
     model_output: vector
 
@@ -86,13 +87,13 @@ models:
     model_provider: deepgram
     api_family: http
     model_url: https://api.deepgram.com/v1
-    api_key: ${oc.env:DEEPGRAM_API_KEY,}
+    api_key: ${oc.env:DEEPGRAM_API_KEY,''}
     operations:
       stt_transcribe:
         method: POST
         path: /listen
         headers:
-          Authorization: Token ${oc.env:DEEPGRAM_API_KEY,}
+          Authorization: Token ${oc.env:DEEPGRAM_API_KEY,''}
           Content-Type: audio/raw
         query:
           model: nova-3
@@ -150,6 +151,33 @@ models:
   # ===========================
   # Streaming STT Models
   # ===========================
+  - name: stt-deepgram-stream
+    description: Deepgram Nova 3 streaming transcription over WebSocket
+    model_type: stt_stream
+    model_provider: deepgram
+    api_family: websocket
+    model_url: wss://api.deepgram.com/v1/listen
+    api_key: ${oc.env:DEEPGRAM_API_KEY,''}
+    operations:
+      query:
+        model: nova-3
+        language: multi
+        smart_format: 'true'
+        punctuate: 'true'
+        encoding: linear16
+        sample_rate: 16000
+        channels: '1'
+      end:
+        message:
+          type: CloseStream
+      expect:
+        interim_type: Results
+        final_type: Results
+        extract:
+          text: channel.alternatives[0].transcript
+          words: channel.alternatives[0].words
+          segments: channel.alternatives[0].paragraphs.paragraphs
+
   - name: stt-parakeet-stream
     description: Parakeet streaming transcription over WebSocket
     model_type: stt_stream
@@ -240,7 +268,7 @@ speaker_recognition:
   timeout: 60
 
   # Hugging Face token for PyAnnote models (secret loaded from .env)
-  hf_token: ${oc.env:HF_TOKEN}
+  hf_token: ${oc.env:HF_TOKEN,''}
 
   # Speaker identification threshold
   similarity_threshold: 0.15
@@ -255,7 +283,7 @@ speaker_recognition:
   backend_api_url: http://host.docker.internal:8000
 
   # Optional: Deepgram API key for wrapper service
-  deepgram_api_key: ${oc.env:DEEPGRAM_API_KEY}
+  deepgram_api_key: ${oc.env:DEEPGRAM_API_KEY,''}
 
 # ===========================
 # Chat Configuration
@@ -271,14 +299,14 @@ chat:
 backend:
   # Authentication settings (secrets loaded from .env)
   auth:
-    secret_key: ${oc.env:AUTH_SECRET_KEY}
-    admin_email: ${oc.env:ADMIN_EMAIL}
-    admin_password: ${oc.env:ADMIN_PASSWORD}
+    secret_key: ${oc.env:AUTH_SECRET_KEY,''}
+    admin_email: ${oc.env:ADMIN_EMAIL,''}
+    admin_password: ${oc.env:ADMIN_PASSWORD,''}
 
   # LLM provider configuration
   llm:
     provider: openai  # or ollama
-    api_key: ${oc.env:OPENAI_API_KEY}
+    api_key: ${oc.env:OPENAI_API_KEY,''}
     base_url: https://api.openai.com/v1
     model: gpt-4o-mini
     timeout: 60
@@ -286,7 +314,7 @@ backend:
   # Transcription provider configuration
   transcription:
     provider: deepgram  # or parakeet
-    api_key: ${oc.env:DEEPGRAM_API_KEY}
+    api_key: ${oc.env:DEEPGRAM_API_KEY,''}
     base_url: https://api.deepgram.com
 
   # Diarization settings

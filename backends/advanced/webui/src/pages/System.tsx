@@ -46,10 +46,31 @@ interface DiarizationSettings {
   max_speakers: number
 }
 
+interface DiagnosticIssue {
+  component: string
+  severity: 'error' | 'warning' | 'info'
+  message: string
+  resolution?: string
+}
+
+interface ConfigDiagnostics {
+  timestamp: string
+  overall_status: 'healthy' | 'partial' | 'unhealthy'
+  issues: DiagnosticIssue[]
+  warnings: DiagnosticIssue[]
+  info: DiagnosticIssue[]
+  components: Record<string, {
+    status: string
+    message: string
+    details?: any
+  }>
+}
+
 export default function System() {
   const [healthData, setHealthData] = useState<HealthData | null>(null)
   const [readinessData, setReadinessData] = useState<any>(null)
   const [metricsData, setMetricsData] = useState<MetricsData | null>(null)
+  const [configDiagnostics, setConfigDiagnostics] = useState<ConfigDiagnostics | null>(null)
   const [processorStatus, setProcessorStatus] = useState<ProcessorStatus | null>(null)
   const [activeClients, setActiveClients] = useState<ActiveClient[]>([])
   const [loading, setLoading] = useState(false)

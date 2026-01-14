@@ -187,6 +187,7 @@ export const systemApi = {
   getHealth: () => api.get('/health'),
   getReadiness: () => api.get('/readiness'),
   getMetrics: () => api.get('/api/metrics'),
+  getConfigDiagnostics: () => api.get('/api/config/diagnostics'),
   getProcessorStatus: () => api.get('/api/processor/status'),
   getProcessorTasks: () => api.get('/api/processor/tasks'),
   getActiveClients: () => api.get('/api/clients/active'),

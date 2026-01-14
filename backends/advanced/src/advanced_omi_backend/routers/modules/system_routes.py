@@ -30,6 +30,12 @@ class MemoryConfigRequest(BaseModel):
     config_yaml: str
 
 
+@router.get("/config/diagnostics")
+async def get_config_diagnostics(current_user: User = Depends(current_superuser)):
+    """Get configuration diagnostics including errors, warnings, and status. Admin only."""
+    return await system_controller.get_config_diagnostics()
+
+
 @router.get("/metrics")
 async def get_current_metrics(current_user: User = Depends(current_superuser)):
     """Get current system metrics. Admin only."""

@@ -7,10 +7,12 @@ worker jobs to trigger plugins without accessing FastAPI app state directly.
 import logging
 import os
 import re
-from typing import Optional, Any
 from pathlib import Path
+from typing import Any, Optional
+
 import yaml
 
+from advanced_omi_backend.config_loader import get_plugins_yml_path
 from advanced_omi_backend.plugins import PluginRouter
 
 logger = logging.getLogger(__name__)
@@ -111,7 +113,7 @@ def init_plugin_router() -> Optional[PluginRouter]:
         _plugin_router = PluginRouter()
 
         # Load plugin configuration
-        plugins_yml = Path("/app/plugins.yml")
+        plugins_yml = get_plugins_yml_path()
         logger.info(f"🔍 Looking for plugins config at: {plugins_yml}")
         logger.info(f"🔍 File exists: {plugins_yml.exists()}")
 
@@ -132,13 +134,17 @@ def init_plugin_router() -> Optional[PluginRouter]:
 
                 try:
                     if plugin_id == 'homeassistant':
-                        from advanced_omi_backend.plugins.homeassistant import HomeAssistantPlugin
+                        from advanced_omi_backend.plugins.homeassistant import (
+                            HomeAssistantPlugin,
+                        )
                         plugin = HomeAssistantPlugin(plugin_config)
                         # Note: async initialization happens in app_factory lifespan
                         _plugin_router.register_plugin(plugin_id, plugin)
                         logger.info(f"✅ Plugin '{plugin_id}' registered")
                     elif plugin_id == 'test_event':
-                        from advanced_omi_backend.plugins.test_event import TestEventPlugin
+                        from advanced_omi_backend.plugins.test_event import (
+                            TestEventPlugin,
+                        )
                         plugin = TestEventPlugin(plugin_config)
                         # Note: async initialization happens in app_factory lifespan
                         _plugin_router.register_plugin(plugin_id, plugin)

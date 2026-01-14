@@ -23,6 +23,16 @@ def get_config_dir() -> Path:
     return Path(config_dir)
 
 
+def get_plugins_yml_path() -> Path:
+    """
+    Get path to plugins.yml file (single source of truth).
+    
+    Returns:
+        Path to plugins.yml
+    """
+    return get_config_dir() / "plugins.yml"
+
+
 def load_config(force_reload: bool = False) -> DictConfig:
     """
     Load and merge configuration using OmegaConf.
