@@ -478,19 +478,24 @@ class OpenMemoryMCPService(MemoryServiceBase):
             
             # Extract similarity score if available (for search results)
             score = mcp_result.get('score') or mcp_result.get('similarity') or mcp_result.get('relevance')
-            
-            # Extract timestamp
+
+            # Extract timestamps
             created_at = mcp_result.get('created_at') or mcp_result.get('timestamp') or mcp_result.get('date')
             if created_at is None:
                 created_at = str(int(time.time()))
-            
+
+            updated_at = mcp_result.get('updated_at') or mcp_result.get('modified_at')
+            if updated_at is None:
+                updated_at = str(created_at)  # Default to created_at if not provided
+
             return MemoryEntry(
                 id=memory_id,
                 content=content,
                 metadata=metadata,
                 embedding=None,  # OpenMemory MCP server handles embeddings internally
                 score=score,
-                created_at=str(created_at)
+                created_at=str(created_at),
+                updated_at=str(updated_at)
             )
             
         except Exception as e:

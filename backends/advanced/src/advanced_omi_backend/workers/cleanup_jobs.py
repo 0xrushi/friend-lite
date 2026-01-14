@@ -10,6 +10,7 @@ from typing import Optional
 
 from advanced_omi_backend.models.conversation import Conversation
 from advanced_omi_backend.models.audio_chunk import AudioChunkDocument
+from advanced_omi_backend.models.waveform import WaveformData
 from advanced_omi_backend.models.job import async_job
 from advanced_omi_backend.config import load_cleanup_settings_from_file
 
@@ -29,7 +30,7 @@ async def purge_old_deleted_conversations(
         dry_run: If True, only count what would be deleted without actually deleting
 
     Returns:
-        Dict with counts of purged conversations and chunks
+        Dict with counts of purged conversations, chunks, and waveforms
     """
     # Get retention period from config if not specified
     if retention_days is None:
@@ -48,6 +49,7 @@ async def purge_old_deleted_conversations(
 
     purged_conversations = 0
     purged_chunks = 0
+    purged_waveforms = 0
 
     for conversation in old_deleted:
         conversation_id = conversation.conversation_id
@@ -59,13 +61,20 @@ async def purge_old_deleted_conversations(
             ).delete()
             purged_chunks += chunk_result.deleted_count
 
+            # Hard delete waveforms
+            waveform_result = await WaveformData.find(
+                WaveformData.conversation_id == conversation_id
+            ).delete()
+            purged_waveforms += waveform_result.deleted_count
+
             # Hard delete conversation
             await conversation.delete()
             purged_conversations += 1
 
             logger.info(
                 f"Purged conversation {conversation_id} "
-                f"(deleted {chunk_result.deleted_count} chunks)"
+                f"(deleted {chunk_result.deleted_count} chunks, "
+                f"{waveform_result.deleted_count} waveforms)"
             )
         else:
             # Dry run - just count
@@ -73,21 +82,29 @@ async def purge_old_deleted_conversations(
                 AudioChunkDocument.conversation_id == conversation_id
             ).count()
             purged_chunks += chunk_count
+
+            waveform_count = await WaveformData.find(
+                WaveformData.conversation_id == conversation_id
+            ).count()
+            purged_waveforms += waveform_count
+
             purged_conversations += 1
 
             logger.info(
                 f"[DRY RUN] Would purge conversation {conversation_id} "
-                f"(with {chunk_count} chunks)"
+                f"(with {chunk_count} chunks, {waveform_count} waveforms)"
             )
 
     logger.info(
         f"{'[DRY RUN] Would purge' if dry_run else 'Purged'} "
-        f"{purged_conversations} conversations and {purged_chunks} chunks"
+        f"{purged_conversations} conversations, {purged_chunks} chunks, "
+        f"and {purged_waveforms} waveforms"
     )
 
     return {
         "purged_conversations": purged_conversations,
         "purged_chunks": purged_chunks,
+        "purged_waveforms": purged_waveforms,
         "retention_days": retention_days,
         "cutoff_date": cutoff_date.isoformat(),
         "dry_run": dry_run,

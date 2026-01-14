@@ -1,8 +1,9 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { MessageSquare, RefreshCw, Calendar, User, Play, Pause, MoreVertical, RotateCcw, Zap, ChevronDown, ChevronUp, Trash2 } from 'lucide-react'
 import { conversationsApi, BACKEND_URL } from '../services/api'
 import ConversationVersionHeader from '../components/ConversationVersionHeader'
 import { getStorageKey } from '../utils/storage'
+import { WaveformDisplay } from '../components/audio/WaveformDisplay'
 
 interface Conversation {
   conversation_id?: string
@@ -15,6 +16,8 @@ interface Conversation {
   segment_count?: number  // From list endpoint
   memory_count?: number  // From list endpoint
   audio_path?: string
+  audio_chunks_count?: number  // Number of MongoDB audio chunks
+  audio_total_duration?: number  // Total duration in seconds
   duration_seconds?: number
   has_memory?: boolean
   transcript?: string  // From detail endpoint
@@ -60,6 +63,7 @@ export default function Conversations() {
   const [expandedDetailedSummaries, setExpandedDetailedSummaries] = useState<Set<string>>(new Set())
   // Audio playback state
   const [playingSegment, setPlayingSegment] = useState<string | null>(null) // Format: "audioUuid-segmentIndex"
+  const [audioCurrentTime, setAudioCurrentTime] = useState<{ [conversationId: string]: number }>({})
   const audioRefs = useRef<{ [key: string]: HTMLAudioElement }>({})
   const segmentTimerRef = useRef<number | null>(null)
 
@@ -68,6 +72,63 @@ export default function Conversations() {
   const [reprocessingTranscript, setReprocessingTranscript] = useState<Set<string>>(new Set())
   const [reprocessingMemory, setReprocessingMemory] = useState<Set<string>>(new Set())
   const [deletingConversation, setDeletingConversation] = useState<Set<string>>(new Set())
+
+  // Stable seek handler for waveform click-to-seek
+  const handleSeek = useCallback((conversationId: string, time: number) => {
+    console.log(`🎯 handleSeek called: conversationId=${conversationId}, time=${time.toFixed(2)}s`);
+
+    const audioElement = audioRefs.current[conversationId];
+
+    if (!audioElement) {
+      console.error(`❌ Audio element not found for conversation ${conversationId}`);
+      console.log('Available audio refs:', Object.keys(audioRefs.current));
+      return;
+    }
+
+    console.log(`📍 Audio element found, readyState=${audioElement.readyState}, paused=${audioElement.paused}`);
+
+    // Check if audio is ready for seeking (readyState >= 1 means HAVE_METADATA)
+    if (audioElement.readyState < 1) {
+      console.warn(`⚠️ Audio not ready for seeking (readyState=${audioElement.readyState})`);
+      // Try again after metadata loads
+      audioElement.addEventListener('loadedmetadata', () => {
+        console.log('✅ Metadata loaded, retrying seek');
+        audioElement.currentTime = time;
+      }, { once: true });
+      return;
+    }
+
+    try {
+      // Force a small delay to ensure audio is ready
+      const wasPlaying = !audioElement.paused;
+
+      // Pause before seeking (helps with seeking reliability)
+      if (wasPlaying) {
+        audioElement.pause();
+      }
+
+      // Set the seek position
+      audioElement.currentTime = time;
+
+      // Verify the seek worked
+      setTimeout(() => {
+        console.log(`✅ Seek complete: requested=${time.toFixed(2)}s, actual=${audioElement.currentTime.toFixed(2)}s`);
+
+        if (Math.abs(audioElement.currentTime - time) > 1.0) {
+          console.error(`⚠️ Seek failed! Requested ${time.toFixed(2)}s but got ${audioElement.currentTime.toFixed(2)}s`);
+        }
+      }, 100);
+
+      // Resume playback if it was playing
+      if (wasPlaying) {
+        audioElement.play().catch(err => {
+          console.warn('Could not resume playback after seek:', err);
+        });
+      }
+    } catch (err) {
+      console.error('❌ Seek failed:', err);
+    }
+  }, []); // Empty deps - uses ref which is always stable
 
   const loadConversations = async () => {
     try {
@@ -630,22 +691,52 @@ export default function Conversations() {
                 </div>
               </div>
 
-              {/* Audio Player */}
+              {/* Audio Player with Waveform */}
               <div className="mb-4">
                 <div className="space-y-2">
-                  {conversation.audio_path && (
+                  {(conversation.audio_chunks_count && conversation.audio_chunks_count > 0) && (
                     <>
                       <div className="flex items-center space-x-2 text-sm text-gray-700 dark:text-gray-300">
                         <span className="font-medium">
                           🎵 Audio
                         </span>
                       </div>
+
+                      {/* Waveform Visualization */}
+                      {conversation.conversation_id && conversation.audio_total_duration && (
+                        <WaveformDisplay
+                          conversationId={conversation.conversation_id}
+                          duration={conversation.audio_total_duration}
+                          currentTime={conversation.conversation_id ? audioCurrentTime[conversation.conversation_id] : undefined}
+                          onSeek={(time) => handleSeek(conversation.conversation_id!, time)}
+                          height={80}
+                        />
+                      )}
+
+                      {/* Audio Player */}
                       <audio
+                        ref={(el) => {
+                          if (el && conversation.conversation_id) {
+                            audioRefs.current[conversation.conversation_id] = el;
+                          }
+                        }}
                         controls
                         className="w-full h-10"
                         preload="metadata"
                         style={{ minWidth: '300px' }}
                         src={`${BACKEND_URL}/api/audio/get_audio/${conversation.conversation_id}?token=${localStorage.getItem(getStorageKey('token')) || ''}`}
+                        onTimeUpdate={(e) => {
+                          // Extract currentTime IMMEDIATELY before any async operations
+                          const currentTime = e.currentTarget?.currentTime;
+                          const conversationId = conversation.conversation_id;
+
+                          if (conversationId && currentTime !== undefined) {
+                            setAudioCurrentTime(prev => ({
+                              ...prev,
+                              [conversationId]: currentTime
+                            }));
+                          }
+                        }}
                       >
                         Your browser does not support the audio element.
                       </audio>

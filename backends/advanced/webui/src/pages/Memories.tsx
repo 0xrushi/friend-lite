@@ -174,7 +174,12 @@ export default function Memories() {
     (memory.category?.toLowerCase() || '').includes(searchQuery.toLowerCase())
   )
 
-  const formatDate = (dateInput: string | number) => {
+  const formatDate = (dateInput: string | number | undefined | null) => {
+    // Handle missing/undefined dates
+    if (dateInput === undefined || dateInput === null || dateInput === '') {
+      return 'N/A'
+    }
+
     // Handle both timestamp numbers and date strings
     let date: Date
 
@@ -198,7 +203,7 @@ export default function Memories() {
     // Check if date is valid
     if (isNaN(date.getTime())) {
       console.warn('Invalid date:', dateInput)
-      return 'Invalid Date'
+      return 'N/A'
     }
 
     return date.toLocaleString()

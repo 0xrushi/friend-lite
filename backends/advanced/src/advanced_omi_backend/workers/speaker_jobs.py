@@ -296,11 +296,19 @@ async def recognise_speakers_job(
         updated_segments = []
         empty_segment_count = 0
         for seg in speaker_segments:
-            segment_text = seg.get("text", "").strip()
+            # FIX: More robust empty segment detection
+            text = seg.get("text", "").strip()
 
-            # Skip segments with no text
-            if not segment_text:
+            # Skip segments with no text, whitespace-only, or very short
+            if not text or len(text) < 3:
                 empty_segment_count += 1
+                logger.debug(f"Filtered empty/short segment: text='{text}'")
+                continue
+
+            # Skip segments with invalid structure
+            if not isinstance(seg.get("start"), (int, float)) or not isinstance(seg.get("end"), (int, float)):
+                empty_segment_count += 1
+                logger.debug(f"Filtered segment with invalid timing: {seg}")
                 continue
 
             speaker_name = seg.get("identified_as") or seg.get("speaker", "Unknown")
@@ -308,7 +316,7 @@ async def recognise_speakers_job(
                 Conversation.SpeakerSegment(
                     start=seg.get("start", 0),
                     end=seg.get("end", 0),
-                    text=segment_text,
+                    text=text,
                     speaker=speaker_name,
                     confidence=seg.get("confidence")
                 )

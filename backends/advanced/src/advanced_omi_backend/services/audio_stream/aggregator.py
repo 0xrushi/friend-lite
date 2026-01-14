@@ -107,24 +107,56 @@ class TranscriptionResultsAggregator:
                 "provider": None
             }
 
-        # For streaming providers (Deepgram), use ONLY the latest final result
-        # Each is_final=true result supersedes interim results for the same speech segment
-        # The latest result contains the most accurate transcription with best timing/confidence
-        latest_result = results[-1]
+        # Combine ALL final results for cumulative speech detection
+        # Each result represents a sequential segment of speech
+        all_text = []
+        all_words = []
+        all_segments = []
+        total_confidence = 0.0
+        provider = None
+
+        for result in results:
+            # Accumulate text
+            text = result.get("text", "").strip()
+            if text:
+                all_text.append(text)
+
+            # Accumulate words with timing data
+            words = result.get("words", [])
+            if words:
+                all_words.extend(words)
+
+            # Accumulate segments
+            segments = result.get("segments", [])
+            if segments:
+                all_segments.extend(segments)
+
+            # Sum confidence for averaging
+            total_confidence += result.get("confidence", 0.0)
+
+            # Get provider from first result
+            if provider is None:
+                provider = result.get("provider")
+
+        # Calculate average confidence
+        avg_confidence = total_confidence / len(results) if results else 0.0
+
+        # Join all text segments with spaces
+        combined_text = " ".join(all_text)
 
         combined = {
-            "text": latest_result.get("text", ""),
-            "words": latest_result.get("words", []),
-            "segments": latest_result.get("segments", []),
-            "chunk_count": len(results),  # Track how many results were received
-            "total_confidence": latest_result.get("confidence", 0.0),
-            "provider": latest_result.get("provider")
+            "text": combined_text,
+            "words": all_words,
+            "segments": all_segments,
+            "chunk_count": len(results),
+            "total_confidence": avg_confidence,
+            "provider": provider
         }
 
         logger.info(
             f"🔤 TRANSCRIPT [AGGREGATOR] session={session_id}, "
             f"total_results={len(results)}, words={len(combined['words'])}, "
-            f"text=\"{combined['text']}\""
+            f"text_length={len(combined_text)} chars"
         )
 
         return combined

@@ -144,11 +144,30 @@ async def upload_and_process_audio_files(
                         f"📦 Converted uploaded file to {num_chunks} MongoDB chunks "
                         f"(conversation {conversation_id[:12]})"
                     )
+                except ValueError as val_error:
+                    # Handle validation errors (e.g., file too long)
+                    audio_logger.error(f"Audio validation failed: {val_error}")
+                    processed_files.append({
+                        "filename": file.filename,
+                        "status": "error",
+                        "error": str(val_error),
+                    })
+                    # Delete the conversation since it won't have audio chunks
+                    await conversation.delete()
+                    continue
                 except Exception as chunk_error:
                     audio_logger.error(
                         f"Failed to convert uploaded file to chunks: {chunk_error}",
                         exc_info=True
                     )
+                    processed_files.append({
+                        "filename": file.filename,
+                        "status": "error",
+                        "error": f"Audio conversion failed: {str(chunk_error)}",
+                    })
+                    # Delete the conversation since it won't have audio chunks
+                    await conversation.delete()
+                    continue
 
                 # Enqueue batch transcription job first (file uploads need transcription)
                 from advanced_omi_backend.controllers.queue_controller import (

@@ -420,6 +420,9 @@ async def convert_audio_to_chunks(
     Returns:
         Number of chunks created
 
+    Raises:
+        ValueError: If audio duration exceeds 30 minutes
+
     Example:
         >>> # Convert from memory without disk write
         >>> num_chunks = await convert_audio_to_chunks(
@@ -436,11 +439,22 @@ async def convert_audio_to_chunks(
 
     logger.info(f"📦 Converting audio to MongoDB chunks: {len(audio_data)} bytes PCM")
 
-    # Calculate chunk size in bytes
+    # Calculate audio duration and validate maximum limit
     bytes_per_second = sample_rate * sample_width * channels
+    total_duration_seconds = len(audio_data) / bytes_per_second
+    MAX_DURATION_SECONDS = 1800  # 30 minutes (180 chunks @ 10s each)
+
+    if total_duration_seconds > MAX_DURATION_SECONDS:
+        raise ValueError(
+            f"Audio duration ({total_duration_seconds:.1f}s) exceeds maximum allowed "
+            f"({MAX_DURATION_SECONDS}s / 30 minutes). Please split the file into smaller segments."
+        )
+
+    # Calculate chunk size in bytes
     chunk_size_bytes = int(chunk_duration * bytes_per_second)
 
-    # Split into chunks and store
+    # Collect all chunks before batch insert
+    chunks_to_insert = []
     chunk_index = 0
     total_original_size = 0
     total_compressed_size = 0
@@ -481,8 +495,8 @@ async def convert_audio_to_chunks(
             channels=channels,
         )
 
-        # Save to MongoDB
-        await audio_chunk.insert()
+        # Add to batch
+        chunks_to_insert.append(audio_chunk)
 
         # Update stats
         total_original_size += len(chunk_pcm)
@@ -491,8 +505,16 @@ async def convert_audio_to_chunks(
         offset = chunk_end
 
         logger.debug(
-            f"💾 Saved chunk {chunk_index}: "
+            f"💾 Prepared chunk {chunk_index}: "
             f"{len(chunk_pcm)} → {len(opus_data)} bytes"
+        )
+
+    # Batch insert all chunks to MongoDB (single database operation)
+    if chunks_to_insert:
+        await AudioChunkDocument.insert_many(chunks_to_insert)
+        logger.info(
+            f"✅ Batch inserted {len(chunks_to_insert)} chunks to MongoDB "
+            f"({total_duration_seconds:.1f}s audio)"
         )
 
     # Update conversation metadata
@@ -501,13 +523,12 @@ async def convert_audio_to_chunks(
     )
 
     if conversation:
-        total_duration = len(audio_data) / bytes_per_second
         compression_ratio = total_compressed_size / total_original_size if total_original_size > 0 else 0.0
 
-        logger.info(f"🔍 DEBUG: Setting metadata - chunks={chunk_index}, duration={total_duration:.2f}s, ratio={compression_ratio:.3f}")
+        logger.info(f"🔍 DEBUG: Setting metadata - chunks={chunk_index}, duration={total_duration_seconds:.2f}s, ratio={compression_ratio:.3f}")
 
         conversation.audio_chunks_count = chunk_index
-        conversation.audio_total_duration = total_duration
+        conversation.audio_total_duration = total_duration_seconds
         conversation.audio_compression_ratio = compression_ratio
 
         logger.info(f"🔍 DEBUG: Before save - chunks={conversation.audio_chunks_count}, duration={conversation.audio_total_duration}")
@@ -550,7 +571,7 @@ async def convert_wav_to_chunks(
 
     Raises:
         FileNotFoundError: If WAV file doesn't exist
-        ValueError: If WAV file is invalid
+        ValueError: If WAV file is invalid or exceeds 30 minutes
 
     Example:
         >>> # Convert uploaded file to chunks
@@ -584,11 +605,22 @@ async def convert_wav_to_chunks(
         f"{sample_rate}Hz, {channels}ch, {sample_width*8}-bit"
     )
 
-    # Calculate chunk size in bytes
+    # Calculate audio duration and validate maximum limit
     bytes_per_second = sample_rate * sample_width * channels
+    total_duration_seconds = len(pcm_data) / bytes_per_second
+    MAX_DURATION_SECONDS = 1800  # 30 minutes (180 chunks @ 10s each)
+
+    if total_duration_seconds > MAX_DURATION_SECONDS:
+        raise ValueError(
+            f"Audio duration ({total_duration_seconds:.1f}s) exceeds maximum allowed "
+            f"({MAX_DURATION_SECONDS}s / 30 minutes). Please split the file into smaller segments."
+        )
+
+    # Calculate chunk size in bytes
     chunk_size_bytes = int(chunk_duration * bytes_per_second)
 
-    # Split into chunks and store
+    # Collect all chunks before batch insert
+    chunks_to_insert = []
     chunk_index = 0
     total_original_size = 0
     total_compressed_size = 0
@@ -629,8 +661,8 @@ async def convert_wav_to_chunks(
             channels=channels,
         )
 
-        # Save to MongoDB
-        await audio_chunk.insert()
+        # Add to batch
+        chunks_to_insert.append(audio_chunk)
 
         # Update stats
         total_original_size += len(chunk_pcm)
@@ -639,8 +671,16 @@ async def convert_wav_to_chunks(
         offset = chunk_end
 
         logger.debug(
-            f"💾 Saved chunk {chunk_index}: "
+            f"💾 Prepared chunk {chunk_index}: "
             f"{len(chunk_pcm)} → {len(opus_data)} bytes"
+        )
+
+    # Batch insert all chunks to MongoDB (single database operation)
+    if chunks_to_insert:
+        await AudioChunkDocument.insert_many(chunks_to_insert)
+        logger.info(
+            f"✅ Batch inserted {len(chunks_to_insert)} chunks to MongoDB "
+            f"({total_duration_seconds:.1f}s audio)"
         )
 
     # Update conversation metadata
@@ -649,13 +689,12 @@ async def convert_wav_to_chunks(
     )
 
     if conversation:
-        total_duration = len(pcm_data) / bytes_per_second
         compression_ratio = total_compressed_size / total_original_size if total_original_size > 0 else 0.0
 
-        logger.info(f"🔍 DEBUG: Setting metadata - chunks={chunk_index}, duration={total_duration:.2f}s, ratio={compression_ratio:.3f}")
+        logger.info(f"🔍 DEBUG: Setting metadata - chunks={chunk_index}, duration={total_duration_seconds:.2f}s, ratio={compression_ratio:.3f}")
 
         conversation.audio_chunks_count = chunk_index
-        conversation.audio_total_duration = total_duration
+        conversation.audio_total_duration = total_duration_seconds
         conversation.audio_compression_ratio = compression_ratio
 
         logger.info(f"🔍 DEBUG: Before save - chunks={conversation.audio_chunks_count}, duration={conversation.audio_total_duration}")

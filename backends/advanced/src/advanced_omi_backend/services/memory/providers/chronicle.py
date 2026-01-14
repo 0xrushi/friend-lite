@@ -277,12 +277,12 @@ class MemoryService(MemoryServiceBase):
 
     async def count_memories(self, user_id: str) -> Optional[int]:
         """Count total number of memories for a user.
-        
+
         Uses the vector store's native count capabilities.
-        
+
         Args:
             user_id: User identifier
-            
+
         Returns:
             Total count of memories for the user, or None if not supported
         """
@@ -295,6 +295,30 @@ class MemoryService(MemoryServiceBase):
             return count
         except Exception as e:
             memory_logger.error(f"Count memories failed: {e}")
+            return None
+
+    async def get_memory(self, memory_id: str, user_id: Optional[str] = None) -> Optional[MemoryEntry]:
+        """Get a specific memory by ID.
+
+        Args:
+            memory_id: Unique identifier of the memory to retrieve
+            user_id: Optional user ID for authentication/filtering
+
+        Returns:
+            MemoryEntry object if found, None otherwise
+        """
+        if not self._initialized:
+            await self.initialize()
+
+        try:
+            memory = await self.vector_store.get_memory(memory_id, user_id)
+            if memory:
+                memory_logger.info(f"📄 Retrieved memory {memory_id}")
+            else:
+                memory_logger.debug(f"Memory {memory_id} not found")
+            return memory
+        except Exception as e:
+            memory_logger.error(f"Get memory failed: {e}")
             return None
 
     async def delete_memory(self, memory_id: str, user_id: Optional[str] = None, user_email: Optional[str] = None) -> bool:
@@ -418,7 +442,8 @@ class MemoryService(MemoryServiceBase):
             List of MemoryEntry objects ready for storage
         """
         memory_entries = []
-        
+        current_time = str(int(time.time()))
+
         for memory_text, embedding in zip(fact_memories_text, embeddings):
             memory_id = str(uuid.uuid4())
             memory_entries.append(
@@ -435,10 +460,11 @@ class MemoryService(MemoryServiceBase):
                         "extraction_enabled": self.config.extraction_enabled,
                     },
                     embedding=embedding,
-                    created_at=str(int(time.time())),
+                    created_at=current_time,
+                    updated_at=current_time,
                 )
             )
-        
+
         return memory_entries
 
     async def _process_memory_updates(
@@ -633,15 +659,17 @@ class MemoryService(MemoryServiceBase):
                 if emb is None:
                     memory_logger.warning(f"Skipping ADD action due to missing embedding: {action_text}")
                     continue
-                    
+
                 memory_id = str(uuid.uuid4())
+                current_time = str(int(time.time()))
                 memory_entries.append(
                     MemoryEntry(
                         id=memory_id,
                         content=action_text,
                         metadata=base_metadata,
                         embedding=emb,
-                        created_at=str(int(time.time())),
+                        created_at=current_time,
+                        updated_at=current_time,
                     )
                 )
                 memory_logger.info(f"➕ Added new memory: {memory_id} - {action_text[:50]}...")

@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import shutil
+import yaml
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Optional
@@ -60,15 +61,147 @@ def get_diarization_config_path():
     data_path = Path("/app/data/diarization_config.json")
     if data_path.parent.exists():
         return data_path
-    
+
     # 2. App root directory
     app_path = Path("/app/diarization_config.json")
     if app_path.parent.exists():
         return app_path
-    
+
     # 3. Local development path
     local_path = Path("diarization_config.json")
     return local_path
+
+
+# ============================================================================
+# Configuration Merging System (for defaults.yml + config.yml)
+# ============================================================================
+
+def get_config_dir() -> Path:
+    """
+    Get config directory path. Single source of truth for config location.
+    Matches root config_manager.py logic.
+
+    Returns:
+        Path to config directory
+    """
+    config_dir = os.getenv("CONFIG_DIR", "/app/config")
+    return Path(config_dir)
+
+
+def get_config_yml_path() -> Path:
+    """Get path to config.yml file."""
+    return get_config_dir() / "config.yml"
+
+
+def get_defaults_yml_path() -> Path:
+    """Get path to defaults.yml file."""
+    return get_config_dir() / "defaults.yml"
+
+
+def get_defaults_config_path():
+    """
+    Get the path to the defaults config file.
+
+    DEPRECATED: Use get_defaults_yml_path() instead.
+    Kept for backward compatibility.
+    """
+    defaults_path = get_defaults_yml_path()
+    return defaults_path if defaults_path.exists() else None
+
+
+def merge_configs(defaults: dict, overrides: dict) -> dict:
+    """
+    Deep merge two configuration dictionaries.
+
+    Override values take precedence over defaults.
+    Lists are replaced (not merged).
+
+    Args:
+        defaults: Default configuration values
+        overrides: User-provided overrides
+
+    Returns:
+        Merged configuration dictionary
+    """
+    result = defaults.copy()
+
+    for key, value in overrides.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            # Recursively merge dictionaries
+            result[key] = merge_configs(result[key], value)
+        else:
+            # Override (lists, scalars, new keys)
+            result[key] = value
+
+    return result
+
+
+# Global cache for merged config
+_config_cache: Optional[dict] = None
+
+
+def get_config(force_reload: bool = False) -> dict:
+    """
+    Get merged configuration from defaults.yml + config.yml.
+
+    Priority order: config.yml > environment variables > defaults.yml
+
+    Args:
+        force_reload: If True, reload from disk even if cached
+
+    Returns:
+        Merged configuration dictionary with all settings
+    """
+    global _config_cache
+
+    if _config_cache is not None and not force_reload:
+        return _config_cache
+
+    # Load defaults
+    defaults_path = get_defaults_yml_path()
+    defaults = {}
+    if defaults_path.exists():
+        try:
+            with open(defaults_path, 'r') as f:
+                defaults = yaml.safe_load(f) or {}
+            logger.info(f"Loaded defaults from {defaults_path}")
+        except Exception as e:
+            logger.warning(f"Could not load defaults from {defaults_path}: {e}")
+
+    # Load user config
+    config_path = get_config_yml_path()
+    user_config = {}
+    if config_path.exists():
+        try:
+            with open(config_path, 'r') as f:
+                user_config = yaml.safe_load(f) or {}
+            logger.info(f"Loaded config from {config_path}")
+        except Exception as e:
+            logger.error(f"Error loading config from {config_path}: {e}")
+
+    # Merge configurations
+    merged = merge_configs(defaults, user_config)
+
+    # Resolve environment variables (lazy import to avoid circular dependency)
+    try:
+        from advanced_omi_backend.model_registry import _deep_resolve_env
+        merged = _deep_resolve_env(merged)
+    except ImportError:
+        # If model_registry not available, skip env resolution
+        # (will be resolved when model_registry loads the config)
+        logger.warning("Could not import _deep_resolve_env, environment variables may not be resolved")
+
+    # Cache result
+    _config_cache = merged
+
+    return merged
+
+
+def reload_config():
+    """Reload configuration from disk (invalidate cache)."""
+    global _config_cache
+    _config_cache = None
+    return get_config(force_reload=True)
 
 
 def load_diarization_settings_from_file():

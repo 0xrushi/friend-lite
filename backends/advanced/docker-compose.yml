@@ -39,8 +39,7 @@ services:
       - ./data/audio_chunks:/app/audio_chunks
       - ./data/debug_dir:/app/debug_dir
       - ./data:/app/data
-      - ../../config/config.yml:/app/config.yml  # Main config file
-      - ../../config/plugins.yml:/app/plugins.yml  # Plugin configuration
+      - ../../config:/app/config  # Mount entire config directory (includes config.yml, defaults.yml, plugins.yml)
     environment:
       - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY}
       - PARAKEET_ASR_URL=${PARAKEET_ASR_URL}
@@ -94,8 +93,7 @@ services:
       - ./worker_orchestrator.py:/app/worker_orchestrator.py
       - ./data/audio_chunks:/app/audio_chunks
       - ./data:/app/data
-      - ../../config/config.yml:/app/config.yml
-      - ../../config/plugins.yml:/app/plugins.yml
+      - ../../config:/app/config  # Mount entire config directory (includes config.yml, defaults.yml, plugins.yml)
     environment:
       - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY}
       - PARAKEET_ASR_URL=${PARAKEET_ASR_URL}

@@ -16,7 +16,8 @@ services:
       - ./data/test_audio_chunks:/app/audio_chunks
       - ./data/test_debug_dir:/app/debug  # Fixed: mount to /app/debug for plugin database
       - ./data/test_data:/app/data
-      - ${CONFIG_FILE:-../../config/config.yml}:/app/config.yml  # Mount config.yml for model registry and memory settings (writable for admin config updates)
+      - ../../config:/app/config  # Mount config directory with defaults.yml
+      - ${CONFIG_FILE:-../../config/config.yml}:/app/config.yml  # Override main config (for test-specific configs)
       - ${PLUGINS_CONFIG:-../../tests/config/plugins.test.yml}:/app/plugins.yml  # Mount test plugins config
     environment:
       # Override with test-specific settings
@@ -168,7 +169,8 @@ services:
       - ./data/test_audio_chunks:/app/audio_chunks
       - ./data/test_debug_dir:/app/debug  # Fixed: mount to /app/debug for plugin database
       - ./data/test_data:/app/data
-      - ${CONFIG_FILE:-../../config/config.yml}:/app/config.yml  # Mount config.yml for model registry and memory settings (writable for admin config updates)
+      - ../../config:/app/config  # Mount config directory with defaults.yml
+      - ${CONFIG_FILE:-../../config/config.yml}:/app/config.yml  # Override main config (for test-specific configs)
       - ${PLUGINS_CONFIG:-../../tests/config/plugins.test.yml}:/app/plugins.yml  # Mount test plugins config
     environment:
       # Same environment as backend

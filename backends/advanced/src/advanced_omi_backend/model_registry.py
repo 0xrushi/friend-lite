@@ -17,6 +17,9 @@ from typing import Any, Dict, List, Optional
 import logging
 from pydantic import BaseModel, Field, field_validator, model_validator, ConfigDict, ValidationError
 
+# Import config merging for defaults.yml + config.yml integration
+from advanced_omi_backend.config import get_config
+
 def _resolve_env(value: Any) -> Any:
     """Resolve ``${VAR:-default}`` patterns inside a single value.
     
@@ -250,54 +253,31 @@ _REGISTRY: Optional[AppModels] = None
 
 
 def _find_config_path() -> Path:
-    """Find config.yml in expected locations.
-    
-    Search order:
-    1. CONFIG_FILE environment variable
-    2. Current working directory
-    3. /app/config.yml (Docker container)
-    4. Walk up from module directory
-    
-    Returns:
-        Path to config.yml (may not exist)
     """
-    # ENV override
-    cfg_env = os.getenv("CONFIG_FILE")
-    if cfg_env and Path(cfg_env).exists():
-        return Path(cfg_env)
+    Find config.yml using canonical path from config module.
 
-    # Common locations (container vs repo root)
-    candidates = [Path("config.yml"), Path("/app/config.yml")]
+    DEPRECATED: Use advanced_omi_backend.config.get_config_yml_path() directly.
+    Kept for backward compatibility.
 
-    # Also walk up from current file's parents defensively
-    try:
-        for parent in Path(__file__).resolve().parents:
-            c = parent / "config.yml"
-            if c.exists():
-                return c
-    except Exception:
-        pass
-
-    for c in candidates:
-        if c.exists():
-            return c
-    
-    # Last resort: return /app/config.yml path (may not exist yet)
-    return Path("/app/config.yml")
+    Returns:
+        Path to config.yml
+    """
+    from advanced_omi_backend.config import get_config_yml_path
+    return get_config_yml_path()
 
 
 def load_models_config(force_reload: bool = False) -> Optional[AppModels]:
-    """Load model configuration from config.yml.
-    
-    This function loads and parses the config.yml file, resolves environment
-    variables, validates model definitions using Pydantic, and caches the result.
-    
+    """Load model configuration from merged defaults.yml + config.yml.
+
+    This function loads defaults.yml and config.yml, merges them with user overrides,
+    resolves environment variables, validates model definitions using Pydantic, and caches the result.
+
     Args:
         force_reload: If True, reload from disk even if already cached
-        
+
     Returns:
         AppModels instance with validated configuration, or None if config not found
-        
+
     Raises:
         ValidationError: If config.yml has invalid model definitions
         yaml.YAMLError: If config.yml has invalid YAML syntax
@@ -306,16 +286,18 @@ def load_models_config(force_reload: bool = False) -> Optional[AppModels]:
     if _REGISTRY is not None and not force_reload:
         return _REGISTRY
 
-    cfg_path = _find_config_path()
-    if not cfg_path.exists():
-        return None
-
-    # Load and parse YAML
-    with cfg_path.open("r") as f:
-        raw = yaml.safe_load(f) or {}
-    
-    # Resolve environment variables
-    raw = _deep_resolve_env(raw)
+    # Try to get merged configuration (defaults + user config)
+    try:
+        raw = get_config(force_reload=force_reload)
+    except Exception as e:
+        logging.error(f"Failed to load merged configuration: {e}")
+        # Fallback to direct config.yml loading
+        cfg_path = _find_config_path()
+        if not cfg_path.exists():
+            return None
+        with cfg_path.open("r") as f:
+            raw = yaml.safe_load(f) or {}
+        raw = _deep_resolve_env(raw)
 
     # Extract sections
     defaults = raw.get("defaults", {}) or {}

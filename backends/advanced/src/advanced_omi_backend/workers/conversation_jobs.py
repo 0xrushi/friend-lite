@@ -353,7 +353,38 @@ async def open_conversation_job(
 
         # Extract speaker information from segments
         segments = combined.get("segments", [])
-        speakers = extract_speakers_from_segments(segments)
+
+        # FIX: Validate and filter segments before processing
+        validated_segments = []
+        for i, seg in enumerate(segments):
+            # Check if segment is a dict
+            if not isinstance(seg, dict):
+                logger.warning(f"Segment {i} is not a dict: {type(seg)}")
+                continue
+
+            # Check for required text field
+            text = seg.get("text", "").strip()
+            if not text:
+                logger.debug(f"Segment {i} has no text, skipping")
+                continue
+
+            # Check for reasonable timing
+            start = seg.get("start", 0.0)
+            end = seg.get("end", 0.0)
+            if end <= start:
+                logger.debug(f"Segment {i} has invalid timing (start={start}, end={end}), correcting")
+                # Auto-correct: estimate duration from text length
+                estimated_duration = len(text.split()) * 0.5  # ~0.5 seconds per word
+                seg["end"] = start + estimated_duration
+
+            # Ensure speaker field exists
+            if "speaker" not in seg or not seg["speaker"]:
+                seg["speaker"] = "SPEAKER_00"
+
+            validated_segments.append(seg)
+
+        logger.info(f"Validated {len(validated_segments)}/{len(segments)} segments")
+        speakers = extract_speakers_from_segments(validated_segments)
 
         # Track new speech activity (word count based)
         new_speech_time, last_word_count = await track_speech_activity(
@@ -419,7 +450,7 @@ async def open_conversation_job(
         if current_count > last_result_count:
             logger.info(
                 f"📊 Conversation {conversation_id} progress: "
-                f"{current_count} results, {len(combined['text'])} chars, {len(combined['segments'])} segments"
+                f"{current_count} results, {len(combined['text'])} chars, {len(validated_segments)} segments"
             )
             last_result_count = current_count
 
@@ -435,7 +466,7 @@ async def open_conversation_job(
                             'transcript': transcript_text,
                             'segment_id': f"{session_id}_{current_count}",
                             'conversation_id': conversation_id,
-                            'segments': combined.get('segments', []),
+                            'segments': validated_segments,
                             'word_count': speech_analysis.get('word_count', 0),
                         }
 
@@ -566,7 +597,7 @@ async def open_conversation_job(
         transcript=transcript_text,
         segments=segments,
         provider=provider,
-        model=provider_str,  # Provider name as model
+        model=provider,  # Provider name as model
         processing_time_seconds=None,  # Not applicable for streaming
         metadata={
             "source": "streaming",

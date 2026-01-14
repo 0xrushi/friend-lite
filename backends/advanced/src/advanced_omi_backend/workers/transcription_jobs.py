@@ -603,6 +603,7 @@ async def stream_speech_detection_job(
     # Track when session closes for graceful shutdown
     session_closed_at = None
     final_check_grace_period = 15  # Wait up to 15 seconds for final transcription after session closes
+    last_speech_analysis = None  # Track last analysis for detailed logging
 
     # Main loop: Listen for speech
     while True:
@@ -663,6 +664,7 @@ async def stream_speech_detection_job(
         )
 
         speech_analysis = analyze_speech(transcript_data)
+        last_speech_analysis = speech_analysis  # Track for final logging
 
         logger.info(
             f"🔍 {speech_analysis.get('word_count', 0)} words, "
@@ -671,6 +673,7 @@ async def stream_speech_detection_job(
         )
 
         if not speech_analysis.get("has_speech", False):
+            logger.info(f"⏳ Waiting for more speech - {speech_analysis.get('reason', 'unknown reason')}")
             await asyncio.sleep(2)
             continue
 
@@ -847,11 +850,17 @@ async def stream_speech_detection_job(
         }
 
     # Session ended without speech
-    logger.info(f"✅ Session ended without speech")
+    reason = last_speech_analysis.get('reason', 'No transcription received') if last_speech_analysis else 'No transcription received'
+    logger.warning(
+        f"❌ Session ended without meaningful speech detected\n"
+        f"   Reason: {reason}\n"
+        f"   Runtime: {time.time() - start_time:.1f}s"
+    )
     return {
         "session_id": session_id,
         "user_id": user_id,
         "client_id": client_id,
         "no_speech_detected": True,
+        "reason": reason,
         "runtime_seconds": time.time() - start_time,
     }

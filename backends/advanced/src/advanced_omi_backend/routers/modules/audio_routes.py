@@ -7,8 +7,8 @@ Audio is served from MongoDB chunks with Opus compression.
 
 import io
 from typing import Optional
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, Request
+from fastapi.responses import FileResponse, StreamingResponse, Response
 
 from advanced_omi_backend.auth import current_superuser, current_active_user_optional, get_user_from_token_param
 from advanced_omi_backend.controllers import audio_controller
@@ -46,6 +46,7 @@ async def upload_audio_from_drive_folder(
 @router.get("/get_audio/{conversation_id}")
 async def get_conversation_audio(
     conversation_id: str,
+    request: Request,
     token: Optional[str] = Query(default=None, description="JWT token for audio element access"),
     current_user: Optional[User] = Depends(current_active_user_optional),
 ):
@@ -106,17 +107,60 @@ async def get_conversation_audio(
             detail=f"Failed to reconstruct audio: {str(e)}"
         )
 
-    # Serve as WAV file
-    return StreamingResponse(
-        io.BytesIO(wav_data),
-        media_type="audio/wav",
-        headers={
-            "Content-Disposition": f"inline; filename={conversation_id}.wav",
-            "Content-Length": str(len(wav_data)),
-            "X-Audio-Source": "mongodb-chunks",
-            "X-Chunk-Count": str(conversation.audio_chunks_count or 0),
-        }
-    )
+    # Handle Range requests for seeking support
+    file_size = len(wav_data)
+    range_header = request.headers.get("range")
+
+    # If no Range header, return complete file
+    if not range_header:
+        return StreamingResponse(
+            io.BytesIO(wav_data),
+            media_type="audio/wav",
+            headers={
+                "Content-Disposition": f"inline; filename={conversation_id}.wav",
+                "Content-Length": str(file_size),
+                "Accept-Ranges": "bytes",
+                "X-Audio-Source": "mongodb-chunks",
+                "X-Chunk-Count": str(conversation.audio_chunks_count or 0),
+            }
+        )
+
+    # Parse Range header (e.g., "bytes=0-1023")
+    try:
+        range_str = range_header.replace("bytes=", "")
+        range_start, range_end = range_str.split("-")
+        range_start = int(range_start) if range_start else 0
+        range_end = int(range_end) if range_end else file_size - 1
+
+        # Ensure valid range
+        range_start = max(0, range_start)
+        range_end = min(file_size - 1, range_end)
+        content_length = range_end - range_start + 1
+
+        # Extract requested byte range
+        range_data = wav_data[range_start:range_end + 1]
+
+        # Return 206 Partial Content with Range headers
+        return Response(
+            content=range_data,
+            status_code=206,
+            media_type="audio/wav",
+            headers={
+                "Content-Range": f"bytes {range_start}-{range_end}/{file_size}",
+                "Content-Length": str(content_length),
+                "Accept-Ranges": "bytes",
+                "Content-Disposition": f"inline; filename={conversation_id}.wav",
+                "X-Audio-Source": "mongodb-chunks",
+            }
+        )
+    except (ValueError, IndexError) as e:
+        # Invalid Range header, return 416 Range Not Satisfiable
+        return Response(
+            status_code=416,
+            headers={
+                "Content-Range": f"bytes */{file_size}"
+            }
+        )
 
 
 @router.get("/stream_audio/{conversation_id}")
