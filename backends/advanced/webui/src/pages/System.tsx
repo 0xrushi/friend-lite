@@ -101,10 +101,11 @@ export default function System() {
       setLoading(true)
       setError(null)
 
-      const [health, readiness, metrics, processor, clients] = await Promise.allSettled([
+      const [health, readiness, metrics, diagnostics, processor, clients] = await Promise.allSettled([
         systemApi.getHealth(),
         systemApi.getReadiness(),
         systemApi.getMetrics().catch(() => ({ data: null })), // Optional endpoint
+        systemApi.getConfigDiagnostics().catch(() => ({ data: null })), // Optional endpoint
         systemApi.getProcessorStatus().catch(() => ({ data: null })), // Optional endpoint
         systemApi.getActiveClients().catch(() => ({ data: [] })), // Optional endpoint
       ])
@@ -117,6 +118,9 @@ export default function System() {
       }
       if (metrics.status === 'fulfilled' && metrics.value.data) {
         setMetricsData(metrics.value.data)
+      }
+      if (diagnostics.status === 'fulfilled' && diagnostics.value.data) {
+        setConfigDiagnostics(diagnostics.value.data)
       }
       if (processor.status === 'fulfilled' && processor.value.data) {
         setProcessorStatus(processor.value.data)
@@ -307,6 +311,104 @@ export default function System() {
                 {healthData.status.toUpperCase()}
               </span>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Configuration Diagnostics */}
+      {configDiagnostics && (configDiagnostics.issues.length > 0 || configDiagnostics.warnings.length > 0 || configDiagnostics.info.length > 0) && (
+        <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6 mb-6">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center">
+              <AlertCircle className="h-5 w-5 mr-2 text-blue-600" />
+              Configuration Diagnostics
+            </h3>
+            <div className="flex items-center space-x-2">
+              {configDiagnostics.overall_status === 'healthy' && <CheckCircle className="h-5 w-5 text-green-500" />}
+              {configDiagnostics.overall_status === 'partial' && <AlertCircle className="h-5 w-5 text-yellow-500" />}
+              {configDiagnostics.overall_status === 'unhealthy' && <XCircle className="h-5 w-5 text-red-500" />}
+              <span className={`text-sm font-semibold ${getStatusColor(configDiagnostics.overall_status)}`}>
+                {configDiagnostics.overall_status.toUpperCase()}
+              </span>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            {/* Errors */}
+            {configDiagnostics.issues.map((issue, idx) => (
+              <div key={`error-${idx}`} className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md p-3">
+                <div className="flex items-start space-x-2">
+                  <XCircle className="h-5 w-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
+                  <div className="flex-1">
+                    <div className="flex items-center space-x-2 mb-1">
+                      <span className="text-xs font-semibold text-red-700 dark:text-red-300 uppercase">
+                        {issue.component}
+                      </span>
+                      <span className="text-xs px-2 py-0.5 bg-red-200 dark:bg-red-800 text-red-800 dark:text-red-200 rounded">
+                        ERROR
+                      </span>
+                    </div>
+                    <p className="text-sm text-red-700 dark:text-red-300 mb-1">
+                      {issue.message}
+                    </p>
+                    {issue.resolution && (
+                      <p className="text-xs text-red-600 dark:text-red-400">
+                        💡 {issue.resolution}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+
+            {/* Warnings */}
+            {configDiagnostics.warnings.map((warning, idx) => (
+              <div key={`warning-${idx}`} className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-md p-3">
+                <div className="flex items-start space-x-2">
+                  <AlertCircle className="h-5 w-5 text-yellow-600 dark:text-yellow-400 flex-shrink-0 mt-0.5" />
+                  <div className="flex-1">
+                    <div className="flex items-center space-x-2 mb-1">
+                      <span className="text-xs font-semibold text-yellow-700 dark:text-yellow-300 uppercase">
+                        {warning.component}
+                      </span>
+                      <span className="text-xs px-2 py-0.5 bg-yellow-200 dark:bg-yellow-800 text-yellow-800 dark:text-yellow-200 rounded">
+                        WARNING
+                      </span>
+                    </div>
+                    <p className="text-sm text-yellow-700 dark:text-yellow-300 mb-1">
+                      {warning.message}
+                    </p>
+                    {warning.resolution && (
+                      <p className="text-xs text-yellow-600 dark:text-yellow-400">
+                        💡 {warning.resolution}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+
+            {/* Info */}
+            {configDiagnostics.info.map((info, idx) => (
+              <div key={`info-${idx}`} className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-md p-3">
+                <div className="flex items-start space-x-2">
+                  <CheckCircle className="h-5 w-5 text-blue-600 dark:text-blue-400 flex-shrink-0 mt-0.5" />
+                  <div className="flex-1">
+                    <div className="flex items-center space-x-2 mb-1">
+                      <span className="text-xs font-semibold text-blue-700 dark:text-blue-300 uppercase">
+                        {info.component}
+                      </span>
+                      <span className="text-xs px-2 py-0.5 bg-blue-200 dark:bg-blue-800 text-blue-800 dark:text-blue-200 rounded">
+                        INFO
+                      </span>
+                    </div>
+                    <p className="text-sm text-blue-700 dark:text-blue-300">
+                      {info.message}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       )}

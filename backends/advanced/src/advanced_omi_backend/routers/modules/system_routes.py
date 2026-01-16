@@ -60,7 +60,7 @@ async def save_diarization_settings(
     current_user: User = Depends(current_superuser)
 ):
     """Save diarization settings. Admin only."""
-    return await system_controller.save_diarization_settings(settings)
+    return await system_controller.save_diarization_settings_controller(settings)
 
 
 @router.get("/cleanup-settings")

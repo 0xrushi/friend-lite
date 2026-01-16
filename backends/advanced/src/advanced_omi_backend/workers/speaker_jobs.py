@@ -7,10 +7,16 @@ This module contains all jobs related to speaker identification and recognition.
 import asyncio
 import logging
 import time
-from typing import Dict, Any
+from typing import Any, Dict
 
+from advanced_omi_backend.auth import generate_jwt_for_user
+from advanced_omi_backend.models.conversation import Conversation
 from advanced_omi_backend.models.job import async_job
-from advanced_omi_backend.controllers.queue_controller import transcription_queue
+from advanced_omi_backend.services.audio_stream import (
+    TranscriptionResultsAggregator,
+)
+from advanced_omi_backend.speaker_recognition_client import SpeakerRecognitionClient
+from advanced_omi_backend.users import get_user_by_id
 
 logger = logging.getLogger(__name__)
 
@@ -37,8 +43,6 @@ async def check_enrolled_speakers_job(
     Returns:
         Dict with enrolled_present, identified_speakers, and speaker_result
     """
-    from advanced_omi_backend.services.audio_stream import TranscriptionResultsAggregator
-    from advanced_omi_backend.speaker_recognition_client import SpeakerRecognitionClient
 
     logger.info(f"🎤 Starting enrolled speaker check for session {session_id[:12]}")
 
@@ -145,8 +149,6 @@ async def recognise_speakers_job(
     Returns:
         Dict with processing results
     """
-    from advanced_omi_backend.models.conversation import Conversation
-    from advanced_omi_backend.speaker_recognition_client import SpeakerRecognitionClient
 
     logger.info(f"🎤 RQ: Starting speaker recognition for conversation {conversation_id}")
 
@@ -211,12 +213,10 @@ async def recognise_speakers_job(
     # Generate backend token for speaker service to fetch audio
     # Speaker service will check conversation duration and decide
     # whether to chunk based on its own memory constraints
-    from advanced_omi_backend.auth import generate_jwt_for_user
-    from advanced_omi_backend.users import UserManager
 
     # Get user details for token generation
     try:
-        user = await UserManager.get(user_id)
+        user = await get_user_by_id(user_id)
         if not user:
             logger.error(f"User {user_id} not found for token generation")
             return {
