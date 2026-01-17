@@ -388,19 +388,18 @@ def run_plugin_setup(plugin_id, plugin_info):
     setup_path = plugin_info['setup_path']
 
     try:
-        # Run plugin setup script
+        # Run plugin setup script interactively (don't capture output)
+        # This allows the plugin to prompt for user input
         result = subprocess.run(
             ['uv', 'run', '--with-requirements', 'setup-requirements.txt', 'python', str(setup_path)],
-            cwd=str(Path.cwd()),
-            capture_output=True,
-            text=True
+            cwd=str(Path.cwd())
         )
 
         if result.returncode == 0:
-            console.print(f"[green]✅ {plugin_id} configured successfully[/green]")
+            console.print(f"\n[green]✅ {plugin_id} configured successfully[/green]")
             return True
         else:
-            console.print(f"[red]❌ {plugin_id} setup failed: {result.stderr}[/red]")
+            console.print(f"\n[red]❌ {plugin_id} setup failed with exit code {result.returncode}[/red]")
             return False
 
     except Exception as e:
