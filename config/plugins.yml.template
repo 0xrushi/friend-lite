@@ -12,8 +12,11 @@
 # Example: ha_token: ${HA_TOKEN}
 
 plugins:
+  # ========================================
+  # Home Assistant Voice Control Plugin
+  # ========================================
   homeassistant:
-    enabled: true
+    enabled: false  # Set to true to enable
     events:  # Events that trigger this plugin (event-based architecture)
       - transcript.streaming  # Execute on each streaming transcript chunk
       # - transcript.batch    # Uncomment to also handle batch transcription
@@ -31,3 +34,40 @@ plugins:
     # 3. Click "Create Token"
     # 4. Copy the token and set it as HA_TOKEN environment variable
     #    or replace ${HA_TOKEN} with the actual token (not recommended for security)
+
+  # ========================================
+  # Email Summarizer Plugin (Community)
+  # ========================================
+  # Automatically sends email summaries when conversations complete
+  # Requires: SMTP credentials (Gmail App Password recommended)
+  #
+  # Gmail Setup:
+  # 1. Enable 2-Factor Authentication on Google account
+  # 2. Go to: Google Account → Security → 2-Step Verification
+  # 3. Scroll to "App passwords" → Generate password for "Mail"
+  # 4. Copy 16-character password and set as SMTP_PASSWORD
+  # 5. Set SMTP_USERNAME to your Gmail address
+  #
+  # See: plugins/email_summarizer/README.md for full documentation
+
+  email_summarizer:
+    enabled: false  # Set to true to enable email summaries
+    events:
+      - conversation.complete  # Send email when conversation finishes
+    condition:
+      type: always  # Send for all conversations
+
+    # SMTP Configuration (use environment variables for secrets)
+    smtp_host: ${SMTP_HOST:-smtp.gmail.com}
+    smtp_port: ${SMTP_PORT:-587}
+    smtp_username: ${SMTP_USERNAME}  # Your email address
+    smtp_password: ${SMTP_PASSWORD}  # Gmail App Password (16 chars)
+    smtp_use_tls: ${SMTP_USE_TLS:-true}
+    from_email: ${FROM_EMAIL:-noreply@chronicle.ai}
+    from_name: ${FROM_NAME:-Chronicle AI}
+
+    # Email Content Options
+    subject_prefix: "Conversation Summary"
+    summary_max_sentences: 3  # LLM summary length
+    include_conversation_id: true
+    include_duration: true

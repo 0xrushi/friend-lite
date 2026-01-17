@@ -4,16 +4,19 @@ This module provides singleton access to the plugin router, allowing
 worker jobs to trigger plugins without accessing FastAPI app state directly.
 """
 
+import importlib
+import inspect
 import logging
 import os
 import re
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Dict, Optional, Type
 
 import yaml
 
 from advanced_omi_backend.config_loader import get_plugins_yml_path
 from advanced_omi_backend.plugins import PluginRouter
+from advanced_omi_backend.plugins.base import BasePlugin
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +98,100 @@ def set_plugin_router(router: PluginRouter) -> None:
     logger.info("Plugin router registered with plugin service")
 
 
+def discover_plugins() -> Dict[str, Type[BasePlugin]]:
+    """
+    Discover plugins in the plugins directory.
+
+    Scans the plugins directory for subdirectories containing plugin.py files.
+    Each plugin must:
+    1. Have a plugin.py file with a class inheriting from BasePlugin
+    2. Export the plugin class in __init__.py
+    3. Plugin class name should match directory name in PascalCase
+
+    Returns:
+        Dictionary mapping plugin_id (directory name) to plugin class
+
+    Example:
+        plugins/
+        ├── email_summarizer/
+        │   ├── __init__.py  (exports EmailSummarizerPlugin)
+        │   └── plugin.py    (defines EmailSummarizerPlugin)
+
+        Returns: {'email_summarizer': EmailSummarizerPlugin}
+    """
+    discovered_plugins = {}
+
+    # Get the plugins directory path
+    try:
+        import advanced_omi_backend.plugins
+        plugins_dir = Path(advanced_omi_backend.plugins.__file__).parent
+    except Exception as e:
+        logger.error(f"Failed to locate plugins directory: {e}")
+        return discovered_plugins
+
+    logger.info(f"🔍 Scanning for plugins in: {plugins_dir}")
+
+    # Skip these known system directories/files
+    skip_items = {'__pycache__', '__init__.py', 'base.py', 'router.py'}
+
+    # Scan for plugin directories
+    for item in plugins_dir.iterdir():
+        if not item.is_dir() or item.name in skip_items:
+            continue
+
+        plugin_id = item.name
+        plugin_file = item / 'plugin.py'
+
+        if not plugin_file.exists():
+            logger.debug(f"Skipping '{plugin_id}': no plugin.py found")
+            continue
+
+        try:
+            # Convert snake_case directory name to PascalCase class name
+            # e.g., email_summarizer -> EmailSummarizerPlugin
+            class_name = ''.join(word.capitalize() for word in plugin_id.split('_')) + 'Plugin'
+
+            # Import the plugin module
+            module_path = f'advanced_omi_backend.plugins.{plugin_id}'
+            logger.debug(f"Attempting to import plugin from: {module_path}")
+
+            # Import the plugin package (which should export the class in __init__.py)
+            plugin_module = importlib.import_module(module_path)
+
+            # Try to get the plugin class
+            if not hasattr(plugin_module, class_name):
+                logger.warning(
+                    f"Plugin '{plugin_id}' does not export '{class_name}' in __init__.py. "
+                    f"Make sure the class is exported: from .plugin import {class_name}"
+                )
+                continue
+
+            plugin_class = getattr(plugin_module, class_name)
+
+            # Validate it's a class and inherits from BasePlugin
+            if not inspect.isclass(plugin_class):
+                logger.warning(f"'{class_name}' in '{plugin_id}' is not a class")
+                continue
+
+            if not issubclass(plugin_class, BasePlugin):
+                logger.warning(
+                    f"Plugin class '{class_name}' in '{plugin_id}' does not inherit from BasePlugin"
+                )
+                continue
+
+            # Successfully discovered plugin
+            discovered_plugins[plugin_id] = plugin_class
+            logger.info(f"✅ Discovered plugin: '{plugin_id}' ({class_name})")
+
+        except ImportError as e:
+            logger.warning(f"Failed to import plugin '{plugin_id}': {e}")
+        except Exception as e:
+            logger.error(f"Error discovering plugin '{plugin_id}': {e}", exc_info=True)
+
+    logger.info(f"🎉 Plugin discovery complete: {len(discovered_plugins)} plugin(s) found")
+    return discovered_plugins
+
+
 def init_plugin_router() -> Optional[PluginRouter]:
     """Initialize the plugin router from configuration.
 
@@ -126,6 +223,12 @@ def init_plugin_router() -> Optional[PluginRouter]:
 
             logger.info(f"🔍 Loaded plugins config with {len(plugins_data)} plugin(s): {list(plugins_data.keys())}")
 
+            # Discover all plugins via auto-discovery
+            discovered_plugins = discover_plugins()
+
+            # Core plugin names (for informational logging only)
+            CORE_PLUGIN_NAMES = {'homeassistant', 'test_event'}
+
             # Initialize each enabled plugin
             for plugin_id, plugin_config in plugins_data.items():
                 logger.info(f"🔍 Processing plugin '{plugin_id}', enabled={plugin_config.get('enabled', False)}")
@@ -133,29 +236,28 @@ def init_plugin_router() -> Optional[PluginRouter]:
                     continue
 
                 try:
-                    if plugin_id == 'homeassistant':
-                        from advanced_omi_backend.plugins.homeassistant import (
-                            HomeAssistantPlugin,
+                    # Check if plugin was discovered
+                    if plugin_id not in discovered_plugins:
+                        logger.warning(
+                            f"Plugin '{plugin_id}' not found. "
+                            f"Make sure the plugin directory exists in plugins/ with proper structure."
                         )
-                        plugin = HomeAssistantPlugin(plugin_config)
-                        # Note: async initialization happens in app_factory lifespan
-                        _plugin_router.register_plugin(plugin_id, plugin)
-                        logger.info(f"✅ Plugin '{plugin_id}' registered")
-                    elif plugin_id == 'test_event':
-                        from advanced_omi_backend.plugins.test_event import (
-                            TestEventPlugin,
-                        )
-                        plugin = TestEventPlugin(plugin_config)
-                        # Note: async initialization happens in app_factory lifespan
-                        _plugin_router.register_plugin(plugin_id, plugin)
-                        logger.info(f"✅ Plugin '{plugin_id}' registered")
-                    else:
-                        logger.warning(f"Unknown plugin: {plugin_id}")
+                        continue
+
+                    # Get plugin class from discovered plugins
+                    plugin_class = discovered_plugins[plugin_id]
+                    plugin_type = "core" if plugin_id in CORE_PLUGIN_NAMES else "community"
+
+                    # Instantiate and register the plugin
+                    plugin = plugin_class(plugin_config)
+                    # Note: async initialization happens in app_factory lifespan
+                    _plugin_router.register_plugin(plugin_id, plugin)
+                    logger.info(f"✅ Plugin '{plugin_id}' registered successfully ({plugin_type})")
 
                 except Exception as e:
                     logger.error(f"Failed to register plugin '{plugin_id}': {e}", exc_info=True)
 
-            logger.info(f"Plugins registered: {len(_plugin_router.plugins)} total")
+            logger.info(f"🎉 Plugin registration complete: {len(_plugin_router.plugins)} plugin(s) registered")
         else:
             logger.info("No plugins.yml found, plugins disabled")
 
