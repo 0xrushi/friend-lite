@@ -652,6 +652,7 @@ async def open_conversation_job(
         conversation_id=conversation_id,
         audio_uuid=session_id,
         user_id=user_id,
+        transcript_version_id=version_id,  # Pass the streaming transcript version ID
         client_id=client_id  # Pass client_id for UI tracking
     )
 
