@@ -82,61 +82,43 @@ SERVICES = {
     }
 }
 
-# Plugin configuration registry
-# Plugins are lightweight integrations that extend Chronicle functionality
-# They are configured during wizard setup and stored in config/plugins.yml
-#
-# Access Levels (when plugins execute):
-#   - transcript: Fires when new transcript segment arrives
-#   - conversation: Fires when conversation completes
-#   - memory: Fires after memory extraction
-#
-# Trigger Types (how plugins decide to execute):
-#   - wake_word: Only if transcript starts with specified wake word
-#   - always: Execute on every invocation at this access level
-#   - conditional: Custom condition checking (future)
-PLUGINS = {
-    'homeassistant': {
-        'name': 'Home Assistant',
-        'description': 'Control Home Assistant devices via natural language with wake word',
-        'enabled_by_default': False,
-        'requires_tailscale': True,  # Requires Tailscale for remote HA access
-        'access_level': 'streaming_transcript',  # When to trigger
-        'trigger_type': 'wake_word',   # How to trigger
-        'config': {
-            'ha_url': {
-                'prompt': 'Home Assistant URL',
-                'default': 'http://localhost:8123',
-                'type': 'url',
-                'help': 'The URL of your Home Assistant instance (e.g., http://100.99.62.5:8123)'
-            },
-            'ha_token': {
-                'prompt': 'Long-Lived Access Token',
-                'type': 'password',
-                'help': 'Create at: Home Assistant > Profile > Long-Lived Access Tokens'
-            },
-            'wake_words': {
-                'prompt': 'Wake words for HA commands (comma-separated)',
-                'default': 'hey vivi, hey jarvis',
-                'type': 'text',
-                'help': 'Say these words before commands. Use comma-separated list for multiple (e.g., "hey vivi, hey jarvis")'
+def discover_available_plugins():
+    """
+    Discover plugins by scanning plugins directory.
+
+    Returns:
+        Dictionary mapping plugin_id to plugin metadata:
+        {
+            'plugin_id': {
+                'has_setup': bool,
+                'setup_path': Path or None,
+                'dir': Path
             }
         }
-    }
-    # Future plugin examples:
-    # 'sentiment_analyzer': {
-    #     'name': 'Sentiment Analyzer',
-    #     'access_level': 'conversation',
-    #     'trigger_type': 'always',
-    #     ...
-    # },
-    # 'memory_enricher': {
-    #     'name': 'Memory Enricher',
-    #     'access_level': 'memory',
-    #     'trigger_type': 'always',
-    #     ...
-    # }
-}
+    """
+    plugins_dir = Path("backends/advanced/src/advanced_omi_backend/plugins")
+
+    if not plugins_dir.exists():
+        console.print(f"[yellow]Warning: Plugins directory not found: {plugins_dir}[/yellow]")
+        return {}
+
+    discovered = {}
+    skip_dirs = {'__pycache__', '__init__.py', 'base.py', 'router.py'}
+
+    for plugin_dir in plugins_dir.iterdir():
+        if not plugin_dir.is_dir() or plugin_dir.name in skip_dirs:
+            continue
+
+        plugin_id = plugin_dir.name
+        setup_script = plugin_dir / "setup.py"
+
+        discovered[plugin_id] = {
+            'has_setup': setup_script.exists(),
+            'setup_path': setup_script if setup_script.exists() else None,
+            'dir': plugin_dir
+        }
+
+    return discovered
 
 def check_service_exists(service_name, service_config):
     """Check if service directory and script exist"""
@@ -210,7 +192,7 @@ def cleanup_unselected_services(selected_services):
                 console.print(f"🧹 [dim]Backed up {service_name} configuration to {backup_file.name} (service not selected)[/dim]")
 
 def run_service_setup(service_name, selected_services, https_enabled=False, server_ip=None,
-                     obsidian_enabled=False, neo4j_password=None, ts_authkey=None, hf_token=None,
+                     obsidian_enabled=False, neo4j_password=None, hf_token=None,
                      transcription_provider='deepgram'):
     """Execute individual service setup script"""
     if service_name == 'advanced':
@@ -234,10 +216,6 @@ def run_service_setup(service_name, selected_services, https_enabled=False, serv
         # Add Obsidian configuration
         if obsidian_enabled and neo4j_password:
             cmd.extend(['--enable-obsidian', '--neo4j-password', neo4j_password])
-
-        # Add Tailscale configuration
-        if ts_authkey:
-            cmd.extend(['--ts-authkey', ts_authkey])
 
     else:
         service = SERVICES['extras'][service_name]
@@ -364,24 +342,6 @@ def mask_value(value, show_chars=5):
 
     return f"{value_clean[:show_chars]}{'*' * min(15, len(value_clean) - show_chars * 2)}{value_clean[-show_chars:]}"
 
-def read_plugin_config_value(plugin_id, config_key):
-    """Read a value from existing plugins.yml file"""
-    plugins_yml_path = Path('config/plugins.yml')
-    if not plugins_yml_path.exists():
-        return None
-
-    try:
-        with open(plugins_yml_path, 'r') as f:
-            plugins_data = yaml.safe_load(f)
-
-        if not plugins_data or 'plugins' not in plugins_data:
-            return None
-
-        plugin_config = plugins_data['plugins'].get(plugin_id, {})
-        return plugin_config.get(config_key)
-    except Exception:
-        return None
-
 def prompt_with_existing_masked(prompt_text, existing_value, placeholders=None, is_password=False, default=""):
     """
     Prompt for a value, showing masked existing value if present.
@@ -423,143 +383,80 @@ def prompt_with_existing_masked(prompt_text, existing_value, placeholders=None, 
         else:
             return prompt_value(prompt_text, default)
 
-def select_plugins():
-    """Interactive plugin selection and configuration"""
+def run_plugin_setup(plugin_id, plugin_info):
+    """Run a plugin's setup.py script"""
+    setup_path = plugin_info['setup_path']
+
+    try:
+        # Run plugin setup script
+        result = subprocess.run(
+            ['uv', 'run', '--with-requirements', 'setup-requirements.txt', 'python', str(setup_path)],
+            cwd=str(Path.cwd()),
+            capture_output=True,
+            text=True
+        )
+
+        if result.returncode == 0:
+            console.print(f"[green]✅ {plugin_id} configured successfully[/green]")
+            return True
+        else:
+            console.print(f"[red]❌ {plugin_id} setup failed: {result.stderr}[/red]")
+            return False
+
+    except Exception as e:
+        console.print(f"[red]❌ Error running {plugin_id} setup: {e}[/red]")
+        return False
+
+def setup_plugins():
+    """Discover and setup plugins via delegation"""
     console.print("\n🔌 [bold cyan]Plugin Configuration[/bold cyan]")
-    console.print("Chronicle supports plugins for extended functionality.\n")
+    console.print("Chronicle supports community plugins for extended functionality.\n")
 
-    selected_plugins = {}
+    # Discover available plugins
+    available_plugins = discover_available_plugins()
 
-    for plugin_id, plugin_meta in PLUGINS.items():
-        # Show plugin description with access level and trigger type
-        console.print(f"[bold]{plugin_meta['name']}[/bold]")
-        console.print(f"  {plugin_meta['description']}")
-        console.print(f"  Access Level: [cyan]{plugin_meta['access_level']}[/cyan]")
-        console.print(f"  Trigger Type: [cyan]{plugin_meta['trigger_type']}[/cyan]\n")
-
-        try:
-            enable = Confirm.ask(
-                f"  Enable {plugin_meta['name']}?",
-                default=plugin_meta['enabled_by_default']
-            )
-        except EOFError:
-            console.print(f"  Using default: {'Yes' if plugin_meta['enabled_by_default'] else 'No'}")
-            enable = plugin_meta['enabled_by_default']
-
-        if enable:
-            plugin_config = {
-                'enabled': True,
-                'access_level': plugin_meta['access_level'],
-                'trigger': {
-                    'type': plugin_meta['trigger_type']
-                }
-            }
-
-            for config_key, config_spec in plugin_meta['config'].items():
-                # Show help text if available
-                if 'help' in config_spec:
-                    console.print(f"  [dim]{config_spec['help']}[/dim]")
-
-                # Read existing value from plugins.yml if it exists
-                existing_value = read_plugin_config_value(plugin_id, config_key)
-
-                # Use the masked prompt function
-                is_password = config_spec['type'] == 'password'
-                value = prompt_with_existing_masked(
-                    prompt_text=f"  {config_spec['prompt']}",
-                    existing_value=existing_value,
-                    placeholders=[],  # No placeholders for plugin config
-                    is_password=is_password,
-                    default=config_spec.get('default', '')
-                )
-
-                # For wake_words, convert comma-separated string to list and store in trigger
-                if config_key == 'wake_words':
-                    # Split by comma and strip whitespace
-                    wake_words_list = [w.strip() for w in value.split(',') if w.strip()]
-                    plugin_config['trigger']['wake_words'] = wake_words_list
-                    # Don't store at root level - only in trigger section
-                else:
-                    plugin_config[config_key] = value
-
-            selected_plugins[plugin_id] = plugin_config
-            console.print(f"  [green]✅ {plugin_meta['name']} configured[/green]\n")
-
-    return selected_plugins
-
-def save_plugin_config(plugins_config):
-    """Save plugin configuration to config/plugins.yml"""
-    if not plugins_config:
-        console.print("[dim]No plugins configured, skipping plugins.yml creation[/dim]")
+    if not available_plugins:
+        console.print("[dim]No plugins found[/dim]")
         return
 
-    config_dir = Path('config')
-    config_dir.mkdir(parents=True, exist_ok=True)
+    # Ask about enabling community plugins
+    try:
+        enable_plugins = Confirm.ask(
+            "Enable community plugins?",
+            default=True
+        )
+    except EOFError:
+        console.print("Using default: Yes")
+        enable_plugins = True
 
-    plugins_yml_path = config_dir / 'plugins.yml'
+    if not enable_plugins:
+        console.print("[dim]Skipping plugin configuration[/dim]")
+        return
 
-    # Build YAML structure
-    yaml_data = {
-        'plugins': {}
-    }
+    # For each plugin with setup script
+    configured_count = 0
+    for plugin_id, plugin_info in available_plugins.items():
+        if not plugin_info['has_setup']:
+            console.print(f"[dim]  {plugin_id}: No setup wizard available (configure manually)[/dim]")
+            continue
 
-    for plugin_id, plugin_config in plugins_config.items():
-        # Plugin config already includes 'enabled', 'access_level', and 'trigger'
-        yaml_data['plugins'][plugin_id] = plugin_config
+        # Ask if user wants to configure this plugin
+        try:
+            configure = Confirm.ask(
+                f"  Configure {plugin_id} plugin?",
+                default=False
+            )
+        except EOFError:
+            configure = False
 
-    # Write to file
-    with open(plugins_yml_path, 'w') as f:
-        yaml.dump(yaml_data, f, default_flow_style=False, sort_keys=False)
+        if configure:
+            # Delegate to plugin's setup script
+            console.print(f"\n[cyan]Running {plugin_id} setup wizard...[/cyan]")
+            success = run_plugin_setup(plugin_id, plugin_info)
+            if success:
+                configured_count += 1
 
-    console.print(f"[green]✅ Plugin configuration saved to {plugins_yml_path}[/green]")
-
-def setup_tailscale_if_needed(selected_plugins):
-    """Check if any selected plugins require Tailscale and prompt for auth key.
-
-    Args:
-        selected_plugins: List of plugin IDs selected by user
-
-    Returns:
-        Tailscale auth key string if provided, None otherwise
-    """
-    # Check if any selected plugins require Tailscale
-    needs_tailscale = any(
-        PLUGINS[p].get('requires_tailscale', False)
-        for p in selected_plugins
-    )
-
-    if not needs_tailscale:
-        return None
-
-    console.print("\n🌐 [bold cyan]Tailscale Configuration[/bold cyan]")
-    console.print("Home Assistant plugin requires Tailscale for remote access.")
-    console.print("\n[blue][INFO][/blue] The Tailscale Docker container enables Chronicle to access")
-    console.print("           services on your Tailscale network (like Home Assistant).")
-    console.print()
-    console.print("Get your auth key from: [link]https://login.tailscale.com/admin/settings/keys[/link]")
-    console.print()
-
-    # Check for existing TS_AUTHKEY in backend .env
-    backend_env_path = 'backends/advanced/.env'
-    existing_key = read_env_value(backend_env_path, 'TS_AUTHKEY')
-
-    # Use the masked prompt helper
-    ts_authkey = prompt_with_existing_masked(
-        prompt_text="Tailscale auth key (or press Enter to skip)",
-        existing_value=existing_key,
-        placeholders=['your-tailscale-auth-key-here'],
-        is_password=True,
-        default=""
-    )
-
-    if not ts_authkey or ts_authkey.strip() == "":
-        console.print("[yellow]⚠️  Skipping Tailscale - HA plugin will only work for local instances[/yellow]")
-        console.print("[yellow]    You can configure this later in backends/advanced/.env[/yellow]")
-        return None
-
-    console.print("[green]✅[/green] Tailscale auth key configured")
-    console.print("[blue][INFO][/blue] Start Tailscale with: docker compose --profile tailscale up -d")
-    return ts_authkey
+    console.print(f"\n[green]✅ Configured {configured_count} plugin(s)[/green]")
 
 def setup_git_hooks():
     """Setup pre-commit hooks for development"""
@@ -707,14 +604,7 @@ def main():
         return
 
     # Plugin Configuration
-    selected_plugins = select_plugins()
-    if selected_plugins:
-        save_plugin_config(selected_plugins)
-
-    # Tailscale Configuration (if plugins require it)
-    ts_authkey = None
-    if selected_plugins:
-        ts_authkey = setup_tailscale_if_needed(selected_plugins)
+    setup_plugins()  # Discovers and delegates to plugin setup scripts
 
     # HF Token Configuration (if services require it)
     hf_token = setup_hf_token_if_needed(selected_services)
@@ -804,7 +694,7 @@ def main():
 
     for service in selected_services:
         if run_service_setup(service, selected_services, https_enabled, server_ip,
-                            obsidian_enabled, neo4j_password, ts_authkey, hf_token, transcription_provider):
+                            obsidian_enabled, neo4j_password, hf_token, transcription_provider):
             success_count += 1
         else:
             failed_services.append(service)
