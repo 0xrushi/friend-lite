@@ -1,97 +1,121 @@
 #!/usr/bin/env python3
 """
 Email Summarizer Plugin Setup Wizard
-Configures SMTP credentials and plugin settings
+
+Configures SMTP credentials and plugin settings.
+Follows Chronicle's clean configuration architecture:
+- Secrets → backends/advanced/.env
+- Non-secret settings → plugins/email_summarizer/config.yml
+- Orchestration → config/plugins.yml
 """
 
 import sys
 from pathlib import Path
-import yaml
+
+from dotenv import set_key
 from rich.console import Console
-from rich.prompt import Prompt, Confirm
-import getpass
+
+# Add repo root to path for setup_utils import
+project_root = Path(__file__).resolve().parents[6]
+sys.path.insert(0, str(project_root))
+
+from setup_utils import (
+    prompt_with_existing_masked,
+    prompt_value
+)
 
 console = Console()
 
+
 def main():
+    """Interactive setup for Email Summarizer plugin"""
     console.print("\n📧 [bold cyan]Email Summarizer Plugin Setup[/bold cyan]")
     console.print("This plugin sends email summaries when conversations complete.\n")
 
-    # Prompt for SMTP configuration
+    # Path to main backend .env file
+    env_path = str(project_root / "backends" / "advanced" / ".env")
+
+    # SMTP Configuration
     console.print("[bold]SMTP Configuration[/bold]")
     console.print("[dim]For Gmail: Use App Password (Settings > Security > 2FA > App Passwords)[/dim]\n")
 
-    smtp_host = Prompt.ask("SMTP Host", default="smtp.gmail.com")
-    smtp_port = Prompt.ask("SMTP Port", default="587")
-    smtp_username = Prompt.ask("SMTP Username (your email)")
-    smtp_password = getpass.getpass("SMTP Password (App Password): ")
+    smtp_host = prompt_with_existing_masked(
+        prompt_text="SMTP Host",
+        env_file_path=env_path,
+        env_key="SMTP_HOST",
+        placeholders=['your-smtp-host-here'],
+        is_password=False,
+        default="smtp.gmail.com"
+    )
+
+    smtp_port = prompt_value("SMTP Port", default="587")
+
+    smtp_username = prompt_with_existing_masked(
+        prompt_text="SMTP Username (your email)",
+        env_file_path=env_path,
+        env_key="SMTP_USERNAME",
+        placeholders=['your-email@example.com'],
+        is_password=False
+    )
+
+    smtp_password = prompt_with_existing_masked(
+        prompt_text="SMTP Password (App Password)",
+        env_file_path=env_path,
+        env_key="SMTP_PASSWORD",
+        placeholders=['your-password-here', 'your-app-password-here'],
+        is_password=True  # Shows masked existing value
+    )
+
     # Remove spaces from app password (Google adds spaces when copying)
     smtp_password = smtp_password.replace(" ", "")
-    smtp_use_tls = Confirm.ask("Use TLS?", default=True)
 
-    from_email = Prompt.ask("From Email", default=smtp_username)
-    from_name = Prompt.ask("From Name", default="Chronicle AI")
+    smtp_use_tls = prompt_value("Use TLS? (true/false)", default="true")
 
-    # Email content options
-    console.print("\n[bold]Email Content Options[/bold]")
-    subject_prefix = Prompt.ask("Email Subject Prefix", default="Conversation Summary")
-    summary_sentences = Prompt.ask("Summary max sentences", default="3")
+    # Email sender configuration
+    from_email = prompt_with_existing_masked(
+        prompt_text="From Email",
+        env_file_path=env_path,
+        env_key="FROM_EMAIL",
+        placeholders=['noreply@example.com'],
+        is_password=False,
+        default=smtp_username  # Default to SMTP username
+    )
 
-    # Build plugin config
-    plugin_config = {
-        'enabled': True,
-        'events': ['conversation.complete'],
-        'condition': {
-            'type': 'always'
-        },
-        'smtp_host': smtp_host,
-        'smtp_port': int(smtp_port),
-        'smtp_username': smtp_username,
-        'smtp_password': smtp_password,
-        'smtp_use_tls': smtp_use_tls,
-        'from_email': from_email,
-        'from_name': from_name,
-        'subject_prefix': subject_prefix,
-        'summary_max_sentences': int(summary_sentences),
-        'include_conversation_id': True,
-        'include_duration': True
-    }
+    from_name = prompt_value("From Name", default="Chronicle AI")
 
-    # Find project root (7 levels up from this file)
-    project_root = Path(__file__).resolve().parent.parent.parent.parent.parent.parent.parent
-    config_dir = project_root / 'config'
-    plugins_yml = config_dir / 'plugins.yml'
+    # Save secrets to .env
+    console.print("\n💾 [bold]Saving credentials to .env...[/bold]")
 
-    # Ensure config directory exists
-    config_dir.mkdir(parents=True, exist_ok=True)
+    set_key(env_path, "SMTP_HOST", smtp_host)
+    set_key(env_path, "SMTP_PORT", smtp_port)
+    set_key(env_path, "SMTP_USERNAME", smtp_username)
+    set_key(env_path, "SMTP_PASSWORD", smtp_password)
+    set_key(env_path, "SMTP_USE_TLS", smtp_use_tls)
+    set_key(env_path, "FROM_EMAIL", from_email)
+    set_key(env_path, "FROM_NAME", from_name)
 
-    # Load existing plugins.yml or create new
-    if plugins_yml.exists():
-        with open(plugins_yml, 'r') as f:
-            config = yaml.safe_load(f) or {}
-    else:
-        config = {}
+    console.print("[green]✅ SMTP credentials saved to backends/advanced/.env[/green]")
 
-    if 'plugins' not in config:
-        config['plugins'] = {}
+    # Inform user about next steps
+    console.print("\n[bold cyan]✅ Email Summarizer plugin configured successfully![/bold cyan]")
+    console.print("\n[bold]Next steps:[/bold]")
+    console.print("1. Enable the plugin in [cyan]config/plugins.yml[/cyan]:")
+    console.print("   [dim]plugins:[/dim]")
+    console.print("   [dim]  email_summarizer:[/dim]")
+    console.print("   [dim]    enabled: true[/dim]")
+    console.print()
+    console.print("2. Adjust plugin settings in [cyan]plugins/email_summarizer/config.yml[/cyan]")
+    console.print("   (subject prefix, summary length, etc.)")
+    console.print()
+    console.print("3. Restart the backend to apply changes:")
+    console.print("   [dim]cd backends/advanced && docker compose restart[/dim]")
+    console.print()
+    console.print("[dim]Plugin configuration architecture:[/dim]")
+    console.print("[dim]  • Secrets:      backends/advanced/.env[/dim]")
+    console.print("[dim]  • Settings:     plugins/email_summarizer/config.yml[/dim]")
+    console.print("[dim]  • Orchestration: config/plugins.yml[/dim]")
+    console.print()
 
-    # Add/update email_summarizer config
-    config['plugins']['email_summarizer'] = plugin_config
-
-    # Write back to plugins.yml
-    with open(plugins_yml, 'w') as f:
-        yaml.dump(config, f, default_flow_style=False, sort_keys=False)
-
-    console.print(f"\n[green]✅ Email Summarizer configured successfully[/green]")
-    console.print(f"[green]✅ Configuration written to {plugins_yml}[/green]")
-
-    # Note about environment variables
-    console.print(f"\n[yellow]Note: SMTP credentials are stored in plugins.yml[/yellow]")
-    console.print(f"[dim]You can also use environment variables in backends/advanced/.env:[/dim]")
-    console.print(f"[dim]  SMTP_HOST={smtp_host}[/dim]")
-    console.print(f"[dim]  SMTP_PORT={smtp_port}[/dim]")
-    console.print(f"[dim]  SMTP_USERNAME={smtp_username}[/dim]")
-    console.print(f"[dim]  SMTP_PASSWORD=<your-app-password>[/dim]")
 
 if __name__ == '__main__':
     try:
@@ -101,4 +125,6 @@ if __name__ == '__main__':
         sys.exit(1)
     except Exception as e:
         console.print(f"\n[red]Error during setup: {e}[/red]")
+        import traceback
+        traceback.print_exc()
         sys.exit(1)

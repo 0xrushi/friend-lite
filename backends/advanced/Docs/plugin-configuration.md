@@ -316,8 +316,122 @@ grep MY_PLUGIN .env
 3. Conditions are met (wake words, etc.)
 4. Plugin initialized without errors (check logs)
 
+## Using Shared Setup Utilities in Plugin Setup Scripts
+
+Chronicle provides shared utilities (`setup_utils.py`) for creating interactive plugin setup wizards with password masking and existing value detection.
+
+### Quick Reference
+
+```python
+#!/usr/bin/env python3
+import sys
+from pathlib import Path
+
+# Import shared utilities
+project_root = Path(__file__).resolve().parents[6]
+sys.path.insert(0, str(project_root))
+
+from setup_utils import (
+    prompt_with_existing_masked,  # Main function for masked prompts
+    prompt_value,                   # Simple value prompts
+    prompt_password,                # Password with validation
+    mask_value,                     # Mask a value manually
+    read_env_value                  # Read from .env
+)
+from dotenv import set_key
+
+# Path to backend .env
+env_path = str(project_root / "backends" / "advanced" / ".env")
+
+# Prompt for password/token with masking
+api_key = prompt_with_existing_masked(
+    prompt_text="API Key",
+    env_file_path=env_path,
+    env_key="MY_PLUGIN_API_KEY",
+    placeholders=['your-key-here'],
+    is_password=True  # ← Shows masked existing value
+)
+
+# Save to .env
+set_key(env_path, "MY_PLUGIN_API_KEY", api_key)
+```
+
+### Function Details
+
+**`prompt_with_existing_masked()`** - Primary function for secrets
+
+Shows masked existing values and allows users to reuse them:
+```python
+smtp_password = prompt_with_existing_masked(
+    prompt_text="SMTP Password",
+    env_file_path="../../.env",           # Path to .env file
+    env_key="SMTP_PASSWORD",              # Environment variable name
+    placeholders=['your-password-here'],  # Values to treat as "not set"
+    is_password=True,                     # Use masking and hidden input
+    default=""                            # Fallback if no existing value
+)
+# Output: SMTP Password (smtp_***********word) [press Enter to reuse, or enter new]:
+```
+
+**Benefits:**
+- ✅ Shows previously configured values as masked (e.g., `sk-pr***********xyz`)
+- ✅ Lets users press Enter to keep existing value (no re-entry needed)
+- ✅ Automatically reads from .env if path/key provided
+- ✅ Works with placeholders - treats them as "not configured"
+
+**`prompt_password()`** - Password with validation
+
+```python
+admin_pass = prompt_password(
+    prompt_text="Admin Password",
+    min_length=8,          # Minimum length requirement
+    allow_generated=True   # Auto-generate in non-interactive mode
+)
+```
+
+**`prompt_value()`** - Simple value prompts
+
+```python
+port = prompt_value("SMTP Port", default="587")
+```
+
+### Complete Plugin Setup Example
+
+See `backends/advanced/src/advanced_omi_backend/plugins/email_summarizer/setup.py` for a complete working example showing:
+- Masked password/token prompts with existing value reuse
+- Saving credentials to backend .env
+- Clean user-facing instructions
+- Error handling
+
+### Best Practices
+
+1. **Always show masked values for secrets** - Use `is_password=True`
+2. **Auto-read from .env** - Provide `env_file_path` and `env_key` parameters
+3. **Use placeholders** - Define common placeholder values to detect "not configured"
+4. **Save to backend .env** - All plugin secrets go in `backends/advanced/.env`
+5. **Clear instructions** - Tell users what to do next (enable in plugins.yml, restart)
+
+### Convenience Functions
+
+For common patterns, use the convenience wrappers:
+
+```python
+from setup_utils import prompt_api_key, prompt_token
+
+# API keys
+openai_key = prompt_api_key("OpenAI", env_file_path="../../.env")
+# Prompts: "OpenAI API Key"
+# Env var: OPENAI_API_KEY
+
+# Auth tokens
+ha_token = prompt_token("Home Assistant", env_file_path="../../.env")
+# Prompts: "Home Assistant Token"
+# Env var: HOME_ASSISTANT_TOKEN
+```
+
 ## See Also
 
 - [CLAUDE.md](../../../CLAUDE.md) - Main documentation
 - [Plugin Development Guide](plugin-development.md) - Creating custom plugins
 - [Environment Variables](environment-variables.md) - Complete .env reference
+- [setup_utils.py](../../../setup_utils.py) - Shared setup utility reference
