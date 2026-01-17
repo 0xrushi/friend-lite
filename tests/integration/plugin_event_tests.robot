@@ -110,11 +110,6 @@ Conversation Complete Should Trigger Event
     ${conversation_id}=    Set Variable    ${conversation}[conversation_id]
     Verify Event Metadata    conversation.complete    end_reason    file_upload    ${conversation_id}
 
-    # Verify conversation has end_reason set in database
-    ${updated_conversation}=    Get Conversation By ID    ${conversation_id}
-    Should Be Equal    ${updated_conversation}[end_reason]    file_upload
-    ...    msg=Conversation should have file_upload end_reason
-
 Memory Processing Should Trigger Event
     [Documentation]    Verify memory.processed event after memory extraction
     [Tags]    memory

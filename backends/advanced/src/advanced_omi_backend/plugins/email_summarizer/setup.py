@@ -9,11 +9,15 @@ Follows Chronicle's clean configuration architecture:
 - Orchestration → config/plugins.yml
 """
 
+import shutil
 import sys
+from datetime import datetime
 from pathlib import Path
 
+import yaml
 from dotenv import set_key
 from rich.console import Console
+from rich.prompt import Confirm
 
 # Add repo root to path for setup_utils import
 project_root = Path(__file__).resolve().parents[6]
@@ -25,6 +29,70 @@ from setup_utils import (
 )
 
 console = Console()
+
+
+def update_plugins_yml_with_env_refs():
+    """
+    Update config/plugins.yml with environment variable references.
+    This ensures secrets are NOT hardcoded in plugins.yml.
+    """
+    plugins_yml_path = project_root / "config" / "plugins.yml"
+
+    # Load existing or create from template
+    if plugins_yml_path.exists():
+        with open(plugins_yml_path, 'r') as f:
+            config = yaml.safe_load(f) or {}
+    else:
+        # Copy from template
+        template_path = project_root / "config" / "plugins.yml.template"
+        if template_path.exists():
+            with open(template_path, 'r') as f:
+                config = yaml.safe_load(f) or {}
+        else:
+            config = {'plugins': {}}
+
+    # Ensure structure exists
+    if 'plugins' not in config:
+        config['plugins'] = {}
+
+    # Build plugin config with env var references (NOT actual values!)
+    plugin_config = {
+        'enabled': False,  # Let user enable manually or prompt
+        'events': ['conversation.complete'],
+        'condition': {'type': 'always'},
+        # Use env var references - these get expanded at runtime
+        'smtp_host': '${SMTP_HOST:-smtp.gmail.com}',
+        'smtp_port': '${SMTP_PORT:-587}',
+        'smtp_username': '${SMTP_USERNAME}',
+        'smtp_password': '${SMTP_PASSWORD}',
+        'smtp_use_tls': '${SMTP_USE_TLS:-true}',
+        'from_email': '${FROM_EMAIL}',
+        'from_name': '${FROM_NAME:-Chronicle AI}',
+        # Non-secret settings (literal values OK)
+        'subject_prefix': 'Conversation Summary',
+        'summary_max_sentences': 3,
+        'include_conversation_id': True,
+        'include_duration': True
+    }
+
+    # Update or create plugin entry
+    config['plugins']['email_summarizer'] = plugin_config
+
+    # Backup existing file
+    if plugins_yml_path.exists():
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_path = plugins_yml_path.parent / f"plugins.yml.backup.{timestamp}"
+        shutil.copy(plugins_yml_path, backup_path)
+        console.print(f"[dim]Backed up existing plugins.yml to {backup_path.name}[/dim]")
+
+    # Write updated config
+    plugins_yml_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(plugins_yml_path, 'w') as f:
+        yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+
+    console.print("[green]✅ Updated config/plugins.yml with environment variable references[/green]")
+
+    return plugins_yml_path
 
 
 def main():
@@ -96,25 +164,36 @@ def main():
 
     console.print("[green]✅ SMTP credentials saved to backends/advanced/.env[/green]")
 
-    # Inform user about next steps
-    console.print("\n[bold cyan]✅ Email Summarizer plugin configured successfully![/bold cyan]")
-    console.print("\n[bold]Next steps:[/bold]")
-    console.print("1. Enable the plugin in [cyan]config/plugins.yml[/cyan]:")
-    console.print("   [dim]plugins:[/dim]")
-    console.print("   [dim]  email_summarizer:[/dim]")
-    console.print("   [dim]    enabled: true[/dim]")
+    # Auto-update plugins.yml with env var references
+    console.print("\n📝 [bold]Updating plugin configuration...[/bold]")
+    plugins_yml_path = update_plugins_yml_with_env_refs()
+
+    # Prompt to enable plugin
+    enable_now = Confirm.ask("\nEnable email_summarizer plugin now?", default=True)
+    if enable_now:
+        with open(plugins_yml_path, 'r') as f:
+            config = yaml.safe_load(f)
+        config['plugins']['email_summarizer']['enabled'] = True
+        with open(plugins_yml_path, 'w') as f:
+            yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+        console.print("[green]✅ Plugin enabled in config/plugins.yml[/green]")
+
+    console.print("\n[bold cyan]✅ Email Summarizer configured successfully![/bold cyan]")
+    console.print("\n[bold]Configuration saved to:[/bold]")
+    console.print("  • [green]backends/advanced/.env[/green] - SMTP credentials (secrets)")
+    console.print("  • [green]config/plugins.yml[/green] - Plugin orchestration (env var references)")
     console.print()
-    console.print("2. Adjust plugin settings in [cyan]plugins/email_summarizer/config.yml[/cyan]")
-    console.print("   (subject prefix, summary length, etc.)")
+
+    if not enable_now:
+        console.print("[bold]To enable later:[/bold]")
+        console.print("  Edit config/plugins.yml and set: enabled: true")
+        console.print()
+
+    console.print("[bold]Restart backend to apply:[/bold]")
+    console.print("  [dim]cd backends/advanced && docker compose restart[/dim]")
     console.print()
-    console.print("3. Restart the backend to apply changes:")
-    console.print("   [dim]cd backends/advanced && docker compose restart[/dim]")
-    console.print()
-    console.print("[dim]Plugin configuration architecture:[/dim]")
-    console.print("[dim]  • Secrets:      backends/advanced/.env[/dim]")
-    console.print("[dim]  • Settings:     plugins/email_summarizer/config.yml[/dim]")
-    console.print("[dim]  • Orchestration: config/plugins.yml[/dim]")
-    console.print()
+    console.print("[yellow]⚠️  SECURITY: Never paste actual passwords in config/plugins.yml![/yellow]")
+    console.print("[yellow]    Secrets go in .env, YAML files use ${ENV_VAR} references.[/yellow]")
 
 
 if __name__ == '__main__':

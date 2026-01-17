@@ -447,6 +447,16 @@ class ChronicleSetup:
 
             self.console.print("[green][SUCCESS][/green] Obsidian/Neo4j configured")
             self.console.print("[blue][INFO][/blue] Neo4j will start automatically with --profile obsidian")
+        else:
+            # Explicitly disable Obsidian in config.yml when not enabled
+            self.config_manager.update_memory_config({
+                "obsidian": {
+                    "enabled": False,
+                    "neo4j_host": "neo4j-mem0",
+                    "timeout": 30
+                }
+            })
+            self.console.print("[blue][INFO][/blue] Obsidian/Neo4j integration disabled")
 
     def setup_network(self):
         """Configure network settings"""

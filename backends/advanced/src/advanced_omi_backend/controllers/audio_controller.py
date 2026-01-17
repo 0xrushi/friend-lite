@@ -31,6 +31,7 @@ audio_logger = logging.getLogger("audio_processing")
 
 def generate_client_id(user: User, device_name: str) -> str:
     """Generate client ID for uploaded files."""
+    logger.error(f"🔍 DEBUG generate_client_id - user.id={user.id}, user.email={user.email}, type={type(user.id)}")
     user_id_suffix = str(user.id)[-6:]
     return f"{user_id_suffix}-{device_name}"
 

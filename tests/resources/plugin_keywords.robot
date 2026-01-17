@@ -232,4 +232,4 @@ Verify Event Metadata
     END
 
     Should Be True    ${found}
-    ...    msg=No events found with metadata '${metadata_key}=${expected_value}' for event type '${event_type}'${EMPTY}${conversation_id != EMPTY and ' for conversation ${conversation_id}' or ''}
+    ...    msg=No events found with metadata '${metadata_key}=${expected_value}' for event type '${event_type}'
