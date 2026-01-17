@@ -470,8 +470,8 @@ async def open_conversation_job(
                             'word_count': speech_analysis.get('word_count', 0),
                         }
 
-                        plugin_results = await plugin_router.trigger_plugins(
-                            access_level='streaming_transcript',
+                        plugin_results = await plugin_router.dispatch_event(
+                            event='transcript.streaming',
                             user_id=user_id,
                             data=plugin_data,
                             metadata={'client_id': client_id}

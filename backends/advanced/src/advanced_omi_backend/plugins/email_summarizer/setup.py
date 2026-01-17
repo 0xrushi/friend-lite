@@ -25,6 +25,8 @@ def main():
     smtp_port = Prompt.ask("SMTP Port", default="587")
     smtp_username = Prompt.ask("SMTP Username (your email)")
     smtp_password = getpass.getpass("SMTP Password (App Password): ")
+    # Remove spaces from app password (Google adds spaces when copying)
+    smtp_password = smtp_password.replace(" ", "")
     smtp_use_tls = Confirm.ask("Use TLS?", default=True)
 
     from_email = Prompt.ask("From Email", default=smtp_username)
