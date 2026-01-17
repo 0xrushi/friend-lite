@@ -504,9 +504,6 @@ def main():
         console.print("\n[yellow]No services selected. Exiting.[/yellow]")
         return
 
-    # Plugin Configuration
-    setup_plugins()  # Discovers and delegates to plugin setup scripts
-
     # HF Token Configuration (if services require it)
     hf_token = setup_hf_token_if_needed(selected_services)
 
@@ -599,6 +596,11 @@ def main():
             success_count += 1
         else:
             failed_services.append(service)
+
+    # Plugin Configuration (AFTER backend .env is created)
+    # This ensures plugins can add their secrets to the existing .env file
+    # without the backend init overwriting them
+    setup_plugins()
 
     # Check for Obsidian/Neo4j configuration (read from config.yml)
     obsidian_enabled = False
