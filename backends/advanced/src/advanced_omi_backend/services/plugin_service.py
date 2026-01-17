@@ -4,16 +4,19 @@ This module provides singleton access to the plugin router, allowing
 worker jobs to trigger plugins without accessing FastAPI app state directly.
 """
 
+import importlib
+import importlib.util
+import inspect
 import logging
 import os
 import re
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Dict, Optional, Type
 
 import yaml
 
 from advanced_omi_backend.config_loader import get_plugins_yml_path
-from advanced_omi_backend.plugins import PluginRouter
+from advanced_omi_backend.plugins import BasePlugin, PluginRouter
 
 logger = logging.getLogger(__name__)
 
