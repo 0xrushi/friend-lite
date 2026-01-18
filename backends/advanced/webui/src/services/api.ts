@@ -275,12 +275,11 @@ export const uploadApi = {
       },
     }),
 
-  uploadFromGDriveFolder: (payload: { gdrive_folder_id: string; device_name?: string; auto_generate_client?: boolean }) =>
+  uploadFromGDriveFolder: (payload: { gdrive_folder_id: string; device_name?: string }) =>
     api.post('/api/audio/upload_audio_from_gdrive', null, {
       params: {
         gdrive_folder_id: payload.gdrive_folder_id,
         device_name: payload.device_name,
-        auto_generate_client: payload.auto_generate_client,
       },
       timeout: 300000,
     }),

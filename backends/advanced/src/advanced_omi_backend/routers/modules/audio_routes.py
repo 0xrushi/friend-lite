@@ -31,15 +31,14 @@ async def upload_audio_from_drive_folder(
     gdrive_folder_id: str = Query(..., description="Google Drive Folder ID containing audio files (e.g., the string after /folders/ in the URL)"),
     current_user: User = Depends(current_superuser),
     device_name: str = Query(default="upload"),
-    auto_generate_client: bool = Query(default=True),
 ):
     try:
         files = await download_audio_files_from_drive(gdrive_folder_id, current_user.id)
-    except AudioValidationError as e: 
+    except AudioValidationError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
     return await audio_controller.upload_and_process_audio_files(
-        current_user, files, device_name, auto_generate_client, source="gdrive"
+        current_user, files, device_name, source="gdrive"
     )
 
 
@@ -399,13 +398,11 @@ async def upload_audio_files(
     current_user: User = Depends(current_superuser),
     files: list[UploadFile] = File(...),
     device_name: str = Query(default="upload", description="Device name for uploaded files"),
-    auto_generate_client: bool = Query(default=True, description="Auto-generate client ID"),
-    folder: Optional[str] = Query(default=None, description="Optional subfolder for audio storage (e.g., 'fixtures')"),
 ):
     """
     Upload and process audio files. Admin only.
 
-    Audio files are saved to disk and enqueued for processing via RQ jobs.
+    Audio files are stored as MongoDB chunks and enqueued for processing via RQ jobs.
     This allows for scalable processing of large files without blocking the API.
 
     Returns:
@@ -413,5 +410,5 @@ async def upload_audio_files(
         - Summary of enqueued vs failed uploads
     """
     return await audio_controller.upload_and_process_audio_files(
-        current_user, files, device_name, auto_generate_client, folder
+        current_user, files, device_name
     )

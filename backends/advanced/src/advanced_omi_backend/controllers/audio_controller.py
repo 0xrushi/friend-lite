@@ -40,8 +40,6 @@ async def upload_and_process_audio_files(
     user: User,
     files: list[UploadFile],
     device_name: str = "upload",
-    auto_generate_client: bool = True,
-    folder: str = None,
     source: str = "upload"
 ) -> dict:
     """
@@ -56,8 +54,7 @@ async def upload_and_process_audio_files(
         user: Authenticated user
         files: List of uploaded audio files
         device_name: Device identifier
-        auto_generate_client: Whether to auto-generate client ID
-        folder: Optional subfolder for audio storage (e.g., 'fixtures')
+        source: Source of the upload (e.g., 'upload', 'gdrive')
     """
     try:
         if not files:

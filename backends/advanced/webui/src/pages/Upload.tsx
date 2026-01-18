@@ -49,7 +49,6 @@ export default function Upload() {
       await uploadApi.uploadFromGDriveFolder({
         gdrive_folder_id: gdriveFolderId,
         device_name: 'upload',
-        auto_generate_client: true,
       })
 
       setGdriveUploadStatus({
