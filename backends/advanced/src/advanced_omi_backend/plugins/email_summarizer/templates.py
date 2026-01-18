@@ -3,6 +3,7 @@ Email templates for the Email Summarizer plugin.
 
 Provides HTML and plain text email templates.
 """
+import html
 from datetime import datetime
 from typing import Optional
 
@@ -52,8 +53,12 @@ def format_html_email(
     formatted_duration = format_duration(duration)
     date_str = created_at.strftime("%B %d, %Y at %I:%M %p") if created_at else "N/A"
 
-    # Format transcript with line breaks
-    transcript_html = transcript.replace('\n', '<br>')
+    # Escape HTML to prevent XSS attacks
+    summary_escaped = html.escape(summary, quote=True)
+    transcript_escaped = html.escape(transcript, quote=True)
+
+    # Format transcript with line breaks (after escaping)
+    transcript_html = transcript_escaped.replace('\n', '<br>')
 
     return f"""
 <!DOCTYPE html>
@@ -168,7 +173,7 @@ def format_html_email(
     <div class="content">
         <div class="summary">
             <h2>📋 Summary</h2>
-            <p>{summary}</p>
+            <p>{summary_escaped}</p>
         </div>
 
         <div class="transcript">

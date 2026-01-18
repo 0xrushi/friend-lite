@@ -9,6 +9,7 @@ Usage:
 """
 import argparse
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -43,10 +44,15 @@ def create_plugin(plugin_name: str, force: bool = False):
     plugin_dir = plugins_dir / plugin_name
 
     # Check if plugin already exists
-    if plugin_dir.exists() and not force:
-        print(f"❌ Error: Plugin '{plugin_name}' already exists at {plugin_dir}")
-        print(f"   Use --force to overwrite")
-        sys.exit(1)
+    if plugin_dir.exists():
+        if not force:
+            print(f"❌ Error: Plugin '{plugin_name}' already exists at {plugin_dir}")
+            print(f"   Use --force to overwrite")
+            sys.exit(1)
+        else:
+            # Remove existing directory when using --force
+            print(f"🗑️  Removing existing plugin directory: {plugin_dir}")
+            shutil.rmtree(plugin_dir)
 
     # Create plugin directory
     print(f"📁 Creating plugin directory: {plugin_dir}")

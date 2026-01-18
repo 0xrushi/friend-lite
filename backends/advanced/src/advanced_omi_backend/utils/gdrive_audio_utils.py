@@ -56,7 +56,7 @@ async def download_and_wrap_drive_file(service, file_item):
 # -------------------------------------------------------------
 # LIST + DOWNLOAD FILES IN FOLDER (OAUTH)
 # -------------------------------------------------------------
-async def download_audio_files_from_drive(folder_id: str) -> List[StarletteUploadFile]:
+async def download_audio_files_from_drive(folder_id: str, user_id: str) -> List[StarletteUploadFile]:
     if not folder_id:
         raise AudioValidationError("Google Drive folder ID is required.")
 
@@ -89,10 +89,11 @@ async def download_audio_files_from_drive(folder_id: str) -> List[StarletteUploa
         for item in audio_files_metadata:
             file_id = item["id"] # Get the Google Drive File ID
 
-            # Check if the file is already processed (check Conversation by external_source_id)
+            # Check if the file is already processed (check Conversation by external_source_id and user_id)
             existing = await Conversation.find_one(
                 Conversation.external_source_id == file_id,
-                Conversation.external_source_type == "gdrive"
+                Conversation.external_source_type == "gdrive",
+                Conversation.user_id == user_id
             )
 
             if existing:

@@ -10,9 +10,14 @@ import websockets
 from dotenv import load_dotenv
 from wyoming.audio import AudioChunk
 
+# Load environment variables first
+env_path = ".env"
+load_dotenv(env_path)
+
 # Configuration
 BACKEND_HOST = os.getenv("BACKEND_HOST", "100.83.66.30:8000")
 USE_HTTPS = os.getenv("USE_HTTPS", "false").lower() == "true"
+VERIFY_SSL = os.getenv("VERIFY_SSL", "true").lower() == "true"
 
 # Use appropriate protocol based on USE_HTTPS setting
 ws_protocol = "wss" if USE_HTTPS else "ws"
@@ -20,8 +25,6 @@ http_protocol = "https" if USE_HTTPS else "http"
 
 websocket_uri = f"{ws_protocol}://{BACKEND_HOST}/ws?codec=pcm"
 backend_url = f"{http_protocol}://{BACKEND_HOST}"
-env_path = ".env"
-load_dotenv(env_path)
 
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD")
 ADMIN_EMAIL = os.getenv("ADMIN_EMAIL")
@@ -44,7 +47,7 @@ async def get_jwt_token(username: str, password: str) -> Optional[str]:
     try:
         logger.info(f"Authenticating with backend as: {username}")
 
-        async with httpx.AsyncClient(timeout=10.0, verify=False) as client:
+        async with httpx.AsyncClient(timeout=10.0, verify=VERIFY_SSL) as client:
             response = await client.post(
                 f"{backend_url}/auth/jwt/login",
                 data={'username': username, 'password': password},
@@ -143,10 +146,11 @@ async def stream_to_backend(stream: AsyncGenerator[AudioChunk, None]):
     # Only use SSL context for wss:// connections
     ssl_context = None
     if USE_HTTPS:
-        # Skip SSL verification for self-signed certs
         ssl_context = ssl.create_default_context()
-        ssl_context.check_hostname = False
-        ssl_context.verify_mode = ssl.CERT_NONE
+        if not VERIFY_SSL:
+            # Skip SSL verification (only when explicitly disabled via VERIFY_SSL=false)
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
 
     logger.info(f"Connecting to WebSocket: {websocket_uri}")
     async with websockets.connect(

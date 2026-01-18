@@ -33,8 +33,8 @@ async def upload_audio_from_drive_folder(
     device_name: str = Query(default="upload"),
     auto_generate_client: bool = Query(default=True),
 ):
-    try: 
-        files = await download_audio_files_from_drive(gdrive_folder_id)
+    try:
+        files = await download_audio_files_from_drive(gdrive_folder_id, current_user.id)
     except AudioValidationError as e: 
         raise HTTPException(status_code=400, detail=str(e))
 

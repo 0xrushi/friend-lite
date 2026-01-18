@@ -89,11 +89,11 @@ def mask_value(value: str, show_chars: int = 5) -> str:
         >>> mask_value('smtp_password_12345')
         'smtp_***********2345'
     """
-    if not value or len(value) <= show_chars * 2:
-        return value
+    # Strip whitespace before processing
+    value_clean = value.strip() if value else value
 
-    # Strip whitespace for masking
-    value_clean = value.strip()
+    if not value_clean or len(value_clean) <= show_chars * 2:
+        return value
 
     return f"{value_clean[:show_chars]}{'*' * min(15, len(value_clean) - show_chars * 2)}{value_clean[-show_chars:]}"
 

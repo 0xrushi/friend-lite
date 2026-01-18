@@ -113,13 +113,13 @@ class SMTPEmailService:
         # Connect to SMTP server
         if self.use_tls:
             # Use STARTTLS (most common for port 587)
-            smtp_server = smtplib.SMTP(self.host, self.port)
+            smtp_server = smtplib.SMTP(self.host, self.port, timeout=30)
             smtp_server.ehlo()
             smtp_server.starttls()
             smtp_server.ehlo()
         else:
             # Direct connection (for port 465 SSL or no encryption)
-            smtp_server = smtplib.SMTP(self.host, self.port)
+            smtp_server = smtplib.SMTP(self.host, self.port, timeout=30)
 
         try:
             # Login and send
