@@ -320,9 +320,8 @@ async def diarize_identify_match(
     try:
         transcript = json.loads(transcript_data)
         words = transcript.get("words", [])
-        full_text = transcript.get("text", "")
     except json.JSONDecodeError as e:
-        raise HTTPException(400, f"Invalid transcript_data JSON: {str(e)}")
+        raise HTTPException(400, f"Invalid transcript_data JSON: {str(e)}") from e
 
     if not words:
         raise HTTPException(400, "No words found in transcript_data")
