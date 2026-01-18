@@ -119,7 +119,6 @@ async def check_enrolled_speakers_job(
             current_job.meta = {}
         current_job.meta.update({
             "session_id": session_id,
-            "audio_uuid": session_id,
             "client_id": client_id,
             "enrolled_present": enrolled_present,
             "identified_speakers": identified_speakers,

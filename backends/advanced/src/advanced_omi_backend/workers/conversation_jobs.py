@@ -148,16 +148,16 @@ async def handle_end_of_conversation(
                 session_id,
                 user_id,
                 client_id,
-                job_timeout=3600,
+                job_timeout=86400,  # 24 hours to match max_runtime in stream_speech_detection_job
                 result_ttl=JOB_RESULT_TTL,
                 job_id=f"speech-detect_{session_id[:12]}_{conversation_count}",
                 description=f"Listening for speech (conversation #{conversation_count + 1})",
-                meta={"audio_uuid": session_id, "client_id": client_id, "session_level": True},
+                meta={"client_id": client_id, "session_level": True},
             )
 
             # Store job ID for cleanup (keyed by client_id for WebSocket cleanup)
             try:
-                redis_conn.set(f"speech_detection_job:{client_id}", speech_job.id, ex=3600)
+                redis_conn.set(f"speech_detection_job:{client_id}", speech_job.id, ex=86400)  # 24 hours
                 logger.info(f"📌 Stored speech detection job ID for client {client_id}")
             except Exception as e:
                 logger.warning(f"⚠️ Failed to store job ID for {client_id}: {e}")
@@ -224,7 +224,6 @@ async def open_conversation_job(
     
     # Create minimal streaming conversation (conversation_id auto-generated)
     conversation = create_conversation(
-        audio_uuid=session_id,
         user_id=user_id,
         client_id=client_id,
         title="Recording...",
@@ -650,7 +649,6 @@ async def open_conversation_job(
 
     job_ids = start_post_conversation_jobs(
         conversation_id=conversation_id,
-        audio_uuid=session_id,
         user_id=user_id,
         transcript_version_id=version_id,  # Pass the streaming transcript version ID
         client_id=client_id  # Pass client_id for UI tracking
@@ -677,7 +675,6 @@ async def open_conversation_job(
             plugin_data = {
                 'conversation': {
                     'conversation_id': conversation_id,
-                    'audio_uuid': session_id,
                     'client_id': client_id,
                     'user_id': user_id,
                 },
@@ -846,7 +843,6 @@ async def generate_title_summary_job(conversation_id: str, *, redis_client=None)
 @async_job(redis=True, beanie=True)
 async def dispatch_conversation_complete_event_job(
     conversation_id: str,
-    audio_uuid: str,
     client_id: str,
     user_id: str,
     *,
@@ -861,7 +857,6 @@ async def dispatch_conversation_complete_event_job(
 
     Args:
         conversation_id: Conversation ID
-        audio_uuid: Audio UUID
         client_id: Client ID
         user_id: User ID
         redis_client: Redis client (injected by decorator)
@@ -909,7 +904,6 @@ async def dispatch_conversation_complete_event_job(
 
         plugin_data = {
             'conversation': {
-                'audio_uuid': audio_uuid,
                 'client_id': client_id,
                 'user_id': user_id,
             },
