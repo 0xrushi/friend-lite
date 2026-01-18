@@ -31,10 +31,11 @@ from setup_utils import (
 console = Console()
 
 
-def update_plugins_yml_with_env_refs():
+def update_plugins_yml_orchestration():
     """
-    Update config/plugins.yml with environment variable references.
-    This ensures secrets are NOT hardcoded in plugins.yml.
+    Update config/plugins.yml with orchestration settings only.
+    Plugin-specific settings are in plugins/email_summarizer/config.yml.
+    This follows Chronicle's three-file configuration architecture.
     """
     plugins_yml_path = project_root / "config" / "plugins.yml"
 
@@ -55,24 +56,12 @@ def update_plugins_yml_with_env_refs():
     if 'plugins' not in config:
         config['plugins'] = {}
 
-    # Build plugin config with env var references (NOT actual values!)
+    # Only orchestration settings in config/plugins.yml
+    # Plugin-specific settings are in plugins/email_summarizer/config.yml
     plugin_config = {
         'enabled': False,  # Let user enable manually or prompt
         'events': ['conversation.complete'],
-        'condition': {'type': 'always'},
-        # Use env var references - these get expanded at runtime
-        'smtp_host': '${SMTP_HOST:-smtp.gmail.com}',
-        'smtp_port': '${SMTP_PORT:-587}',
-        'smtp_username': '${SMTP_USERNAME}',
-        'smtp_password': '${SMTP_PASSWORD}',
-        'smtp_use_tls': '${SMTP_USE_TLS:-true}',
-        'from_email': '${FROM_EMAIL}',
-        'from_name': '${FROM_NAME:-Chronicle AI}',
-        # Non-secret settings (literal values OK)
-        'subject_prefix': 'Conversation Summary',
-        'summary_max_sentences': 3,
-        'include_conversation_id': True,
-        'include_duration': True
+        'condition': {'type': 'always'}
     }
 
     # Update or create plugin entry
@@ -90,7 +79,7 @@ def update_plugins_yml_with_env_refs():
     with open(plugins_yml_path, 'w') as f:
         yaml.dump(config, f, default_flow_style=False, sort_keys=False)
 
-    console.print("[green]✅ Updated config/plugins.yml with environment variable references[/green]")
+    console.print("[green]✅ Updated config/plugins.yml (orchestration only)[/green]")
 
     return plugins_yml_path
 
@@ -164,9 +153,9 @@ def main():
 
     console.print("[green]✅ SMTP credentials saved to backends/advanced/.env[/green]")
 
-    # Auto-update plugins.yml with env var references
+    # Auto-update plugins.yml with orchestration settings only
     console.print("\n📝 [bold]Updating plugin configuration...[/bold]")
-    plugins_yml_path = update_plugins_yml_with_env_refs()
+    plugins_yml_path = update_plugins_yml_orchestration()
 
     # Prompt to enable plugin
     enable_now = Confirm.ask("\nEnable email_summarizer plugin now?", default=True)
@@ -181,7 +170,8 @@ def main():
     console.print("\n[bold cyan]✅ Email Summarizer configured successfully![/bold cyan]")
     console.print("\n[bold]Configuration saved to:[/bold]")
     console.print("  • [green]backends/advanced/.env[/green] - SMTP credentials (secrets)")
-    console.print("  • [green]config/plugins.yml[/green] - Plugin orchestration (env var references)")
+    console.print("  • [green]config/plugins.yml[/green] - Plugin orchestration (enabled, events)")
+    console.print("  • [green]plugins/email_summarizer/config.yml[/green] - Plugin settings (already configured)")
     console.print()
 
     if not enable_now:
@@ -192,8 +182,9 @@ def main():
     console.print("[bold]Restart backend to apply:[/bold]")
     console.print("  [dim]cd backends/advanced && docker compose restart[/dim]")
     console.print()
-    console.print("[yellow]⚠️  SECURITY: Never paste actual passwords in config/plugins.yml![/yellow]")
-    console.print("[yellow]    Secrets go in .env, YAML files use ${ENV_VAR} references.[/yellow]")
+    console.print("[yellow]⚠️  SECURITY: Never commit secrets to git![/yellow]")
+    console.print("[yellow]    • Secrets go in backends/advanced/.env (gitignored)[/yellow]")
+    console.print("[yellow]    • Config files use ${ENV_VAR} references only[/yellow]")
 
 
 if __name__ == '__main__':

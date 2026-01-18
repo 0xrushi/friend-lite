@@ -239,44 +239,6 @@ class MyPlugin(BasePlugin):
 
 ✅ **Unified interface**: All plugins loaded with same pattern via `load_plugin_config()`
 
-## Migration from Old System
-
-If you have existing plugins using the old configuration system:
-
-**Old way** (everything in `config/plugins.yml`):
-```yaml
-plugins:
-  email_summarizer:
-    enabled: true
-    events: [...]
-    subject_prefix: "Summary"          # ❌ Config mixed with orchestration
-    smtp_host: smtp.gmail.com          # ❌ Non-secret in wrong place
-    smtp_password: app-password        # ❌ SECRET IN VERSION CONTROL!
-```
-
-**New way** (properly separated):
-
-1. **Orchestration** in `config/plugins.yml`:
-   ```yaml
-   plugins:
-     email_summarizer:
-       enabled: true
-       events: [conversation.complete]
-   ```
-
-2. **Settings** in `plugins/email_summarizer/config.yml`:
-   ```yaml
-   subject_prefix: "Summary"
-   smtp_host: ${SMTP_HOST}
-   smtp_password: ${SMTP_PASSWORD}
-   ```
-
-3. **Secrets** in `.env`:
-   ```bash
-   SMTP_HOST=smtp.gmail.com
-   SMTP_PASSWORD=app-password
-   ```
-
 ## Troubleshooting
 
 ### Plugin not loading

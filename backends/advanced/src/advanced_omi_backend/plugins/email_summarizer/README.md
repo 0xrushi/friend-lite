@@ -20,6 +20,26 @@ Automatically sends email summaries when conversations complete.
 5. Formats beautiful HTML and plain text emails
 6. Sends email via configured SMTP server
 
+## Configuration Architecture
+
+Chronicle uses a clean three-file separation for plugin configuration:
+
+1. **`backends/advanced/.env`** - Secrets only (SMTP credentials, API keys)
+   - Gitignored for security
+   - Never commit to version control
+
+2. **`plugins/email_summarizer/config.yml`** - Plugin-specific settings
+   - Email content options (subject prefix, max sentences, etc.)
+   - References environment variables using `${VAR_NAME}` syntax
+   - Defaults work for most users - typically no editing needed
+
+3. **`config/plugins.yml`** - Orchestration only
+   - `enabled` flag
+   - Event subscriptions
+   - Trigger conditions
+
+This separation keeps secrets secure and configuration organized. See [`plugin-configuration.md`](../../../Docs/plugin-configuration.md) for details.
+
 ## Configuration
 
 ### Step 1: Get SMTP Credentials
@@ -55,7 +75,7 @@ FROM_NAME=Chronicle AI
 
 ### Step 3: Enable Plugin
 
-Add to `config/plugins.yml`:
+Add to `config/plugins.yml` (orchestration only):
 
 ```yaml
 plugins:
@@ -65,22 +85,13 @@ plugins:
       - conversation.complete
     condition:
       type: always
-
-    # SMTP Configuration
-    smtp_host: ${SMTP_HOST:-smtp.gmail.com}
-    smtp_port: ${SMTP_PORT:-587}
-    smtp_username: ${SMTP_USERNAME}
-    smtp_password: ${SMTP_PASSWORD}
-    smtp_use_tls: ${SMTP_USE_TLS:-true}
-    from_email: ${FROM_EMAIL:-noreply@chronicle.ai}
-    from_name: ${FROM_NAME:-Chronicle AI}
-
-    # Email Content Options
-    subject_prefix: "Conversation Summary"
-    summary_max_sentences: 3
-    include_conversation_id: true
-    include_duration: true
 ```
+
+**That's it!** Plugin-specific settings are already configured in:
+- **`plugins/email_summarizer/config.yml`** - Email content options (subject prefix, max sentences, etc.)
+- **SMTP credentials** are automatically read from `.env` via environment variable references
+
+You typically don't need to edit `config.yml` - the defaults work for most users. If you want to customize email content settings, see the Configuration Options section below.
 
 ### Step 4: Restart Backend
 
@@ -90,6 +101,8 @@ docker compose restart
 ```
 
 ## Configuration Options
+
+All configuration options below are in **`plugins/email_summarizer/config.yml`** and have sensible defaults. You typically don't need to modify these unless you want to customize email content.
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
@@ -180,17 +193,12 @@ This will:
 
 ## 🔒 Security Best Practices
 
-### NEVER Commit Secrets to YAML Files
+### NEVER Commit Secrets to Version Control
 
-**WRONG** ❌:
-```yaml
-# config/plugins.yml
-smtp_password: xnetcqctkkfgzllh  # Hardcoded secret - SECURITY RISK!
-```
+Always use environment variable references in configuration files:
 
-**CORRECT** ✅:
 ```yaml
-# config/plugins.yml
+# plugins/email_summarizer/config.yml
 smtp_password: ${SMTP_PASSWORD}  # Reference to environment variable
 ```
 
@@ -199,12 +207,13 @@ smtp_password: ${SMTP_PASSWORD}  # Reference to environment variable
 SMTP_PASSWORD=xnetcqctkkfgzllh  # Actual secret stored safely
 ```
 
-### Configuration Architecture
+### How Configuration Works
 
-The setup wizard automatically:
-- ✅ Saves SMTP credentials to `backends/advanced/.env`
-- ✅ Updates `config/plugins.yml` with `${ENV_VAR}` references
-- ✅ Prevents accidental secret commits
+The plugin system automatically:
+- ✅ Loads settings from `plugins/email_summarizer/config.yml`
+- ✅ Expands `${ENV_VAR}` references from `backends/advanced/.env`
+- ✅ Merges orchestration settings (enabled, events) from `config/plugins.yml`
+- ✅ Prevents accidental secret commits (only .env has secrets, and it's gitignored)
 
 **Always use the setup wizard** instead of manual configuration:
 ```bash
