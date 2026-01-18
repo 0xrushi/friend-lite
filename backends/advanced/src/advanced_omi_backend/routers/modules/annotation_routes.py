@@ -284,7 +284,8 @@ async def update_annotation_status(
                 # Update transcript segment
                 try:
                     conversation = await Conversation.find_one(
-                        Conversation.conversation_id == annotation.conversation_id
+                        Conversation.conversation_id == annotation.conversation_id,
+                        Conversation.user_id == annotation.user_id
                     )
                     if conversation:
                         transcript = conversation.get_active_transcript()

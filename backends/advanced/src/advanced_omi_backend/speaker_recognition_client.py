@@ -90,7 +90,7 @@ class SpeakerRecognitionClient:
         """
         if not self.enabled:
             logger.info(f"🎤 Speaker recognition disabled, returning empty result")
-            return {}
+            return {"segments": []}
 
         try:
             logger.info(f"🎤 Calling speaker service with conversation_id: {conversation_id[:12]}...")
@@ -160,7 +160,7 @@ class SpeakerRecognitionClient:
                         logger.error(
                             f"🎤 ❌ Speaker service returned status {response.status}: {response_text}"
                         )
-                        return {}
+                        return {"segments": []}
 
                     result = await response.json()
 
@@ -202,7 +202,7 @@ class SpeakerRecognitionClient:
 
         if not self.enabled:
             logger.warning("🎤 [DIARIZE] Speaker recognition is disabled")
-            return {}
+            return {"segments": []}
 
         try:
             logger.info(
@@ -265,7 +265,7 @@ class SpeakerRecognitionClient:
                         logger.warning(
                             f"🎤 [DIARIZE] ❌ Speaker recognition service returned status {response.status}: {response_text}"
                         )
-                        return {}
+                        return {"segments": []}
 
                     result = await response.json()
                     segments_count = len(result.get('segments', []))
@@ -334,8 +334,10 @@ class SpeakerRecognitionClient:
                         "file", audio_file, filename=Path(audio_path).name, content_type="audio/wav"
                     )
                     # Get current diarization settings
-                    from advanced_omi_backend.controllers.system_controller import _diarization_settings
-                    
+                    from advanced_omi_backend.config import get_diarization_settings
+
+                    _diarization_settings = get_diarization_settings()
+
                     # Add all diarization parameters for the diarize-and-identify endpoint
                     form_data.add_field("min_duration", str(_diarization_settings.get("min_duration", 0.5)))
                     form_data.add_field("similarity_threshold", str(_diarization_settings.get("similarity_threshold", 0.15)))

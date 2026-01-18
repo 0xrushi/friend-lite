@@ -137,7 +137,7 @@ def schedule_cleanup_job(retention_days: Optional[int] = None) -> Optional[str]:
         from advanced_omi_backend.controllers.queue_controller import get_queue
 
         if retention_days is None:
-            retention_days = settings.retention_days
+            retention_days = settings_dict['retention_days']
 
         queue = get_queue("default")
         job = queue.enqueue(

@@ -530,11 +530,9 @@ async def reconstruct_audio_segment(
     """
     from advanced_omi_backend.models.conversation import Conversation
 
-    # Validate inputs
+    # Validate start_time
     if start_time < 0:
         raise ValueError(f"start_time must be >= 0, got {start_time}")
-    if end_time <= start_time:
-        raise ValueError(f"end_time ({end_time}) must be > start_time ({start_time})")
 
     # Get conversation metadata
     conversation = await Conversation.find_one(
@@ -549,8 +547,15 @@ async def reconstruct_audio_segment(
     if total_duration == 0:
         raise ValueError(f"Conversation {conversation_id} has no audio")
 
-    # Clamp end_time to conversation duration
+    # Clamp values to valid ranges
+    start_time = max(0, start_time)
     end_time = min(end_time, total_duration)
+
+    # Validate clamped time range
+    if end_time <= start_time:
+        raise ValueError(
+            f"Invalid time range: end_time ({end_time}s) must be > start_time ({start_time}s)"
+        )
 
     # Get audio format from first chunk
     first_chunk = await AudioChunkDocument.find_one(

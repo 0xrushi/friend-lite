@@ -10,20 +10,17 @@ Also includes audio cropping operations that work with the Conversation model.
 import logging
 import time
 import uuid
-from pathlib import Path
 
 from fastapi import UploadFile
 from fastapi.responses import JSONResponse
 
+from advanced_omi_backend.models.conversation import create_conversation
+from advanced_omi_backend.models.user import User
+from advanced_omi_backend.utils.audio_chunk_utils import convert_audio_to_chunks
 from advanced_omi_backend.utils.audio_utils import (
     AudioValidationError,
     validate_and_prepare_audio,
 )
-from advanced_omi_backend.utils.audio_chunk_utils import convert_audio_to_chunks
-from advanced_omi_backend.models.job import JobPriority
-from advanced_omi_backend.models.user import User
-from advanced_omi_backend.models.conversation import create_conversation
-from advanced_omi_backend.models.conversation import Conversation
 
 logger = logging.getLogger(__name__)
 audio_logger = logging.getLogger("audio_processing")
@@ -170,11 +167,13 @@ async def upload_and_process_audio_files(
 
                 # Enqueue batch transcription job first (file uploads need transcription)
                 from advanced_omi_backend.controllers.queue_controller import (
+                    JOB_RESULT_TTL,
                     start_post_conversation_jobs,
                     transcription_queue,
-                    JOB_RESULT_TTL
                 )
-                from advanced_omi_backend.workers.transcription_jobs import transcribe_full_audio_job
+                from advanced_omi_backend.workers.transcription_jobs import (
+                    transcribe_full_audio_job,
+                )
 
                 version_id = str(uuid.uuid4())
                 transcribe_job_id = f"transcribe_{conversation_id[:12]}"

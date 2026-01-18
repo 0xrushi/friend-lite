@@ -102,7 +102,7 @@ async def surface_error_suggestions():
             #     # ...
 
             # Placeholder logging
-            logger.debug(f"   Analyzed user {user.email} (placeholder)")
+            logger.debug(f"   Analyzed user {user.id} (placeholder)")
 
         logger.info("✅ Suggestion check complete (placeholder implementation)")
         logger.info(

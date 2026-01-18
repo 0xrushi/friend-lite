@@ -364,14 +364,16 @@ class MemoryService(MemoryServiceBase):
 
             # Generate new embedding if content changed
             if content is not None:
-                new_embedding = await self.llm_provider.generate_embedding(new_content)
+                embeddings = await self.llm_provider.generate_embeddings([new_content])
+                new_embedding = embeddings[0]
             else:
                 # If content didn't change, reuse existing embedding
                 if existing_memory.embedding:
                     new_embedding = existing_memory.embedding
                 else:
                     # No existing embedding, generate one
-                    new_embedding = await self.llm_provider.generate_embedding(new_content)
+                    embeddings = await self.llm_provider.generate_embeddings([new_content])
+                    new_embedding = embeddings[0]
 
             # Update in vector store
             success = await self.vector_store.update_memory(
