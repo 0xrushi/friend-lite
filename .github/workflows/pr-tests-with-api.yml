@@ -116,12 +116,12 @@ jobs:
       run: |
         echo "Saving service logs to files..."
         mkdir -p logs
-        docker compose -f docker-compose-test.yml logs --no-log-prefix chronicle-backend-test > logs/backend.log 2>&1 || true
-        docker compose -f docker-compose-test.yml logs --no-log-prefix workers-test > logs/workers.log 2>&1 || true
-        docker compose -f docker-compose-test.yml logs --no-log-prefix mongo-test > logs/mongo.log 2>&1 || true
-        docker compose -f docker-compose-test.yml logs --no-log-prefix redis-test > logs/redis.log 2>&1 || true
-        docker compose -f docker-compose-test.yml logs --no-log-prefix qdrant-test > logs/qdrant.log 2>&1 || true
-        docker compose -f docker-compose-test.yml logs --no-log-prefix speaker-service-test > logs/speaker.log 2>&1 || true
+        docker logs chronicle-backend-test > logs/backend.log 2>&1 || true
+        docker logs workers-test > logs/workers.log 2>&1 || true
+        docker logs mongo-test > logs/mongo.log 2>&1 || true
+        docker logs redis-test > logs/redis.log 2>&1 || true
+        docker logs qdrant-test > logs/qdrant.log 2>&1 || true
+        docker logs speaker-service-test > logs/speaker.log 2>&1 || true
         echo "✓ Logs saved to backends/advanced/logs/"
         ls -lh logs/
 

@@ -341,7 +341,9 @@ async def diarize_identify_match(
         try:
             # Get conversation metadata
             metadata = await backend_client.get_conversation_metadata(conversation_id, backend_token)
-            total_duration = metadata['duration']
+            total_duration = metadata.get('duration')
+            if total_duration is None:
+                raise HTTPException(400, "Conversation metadata missing duration field")
 
             log.info(f"Conversation {conversation_id[:12]}: duration={total_duration:.1f}s")
 
