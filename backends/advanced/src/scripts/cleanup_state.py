@@ -564,10 +564,12 @@ class CleanupManager:
         logger.info("Cleaning Redis job queues...")
 
         queue_names = ["transcription", "memory", "audio", "default"]
-        total_jobs = 0
+        successful_jobs = 0
+        failed_jobs = 0
         failed_queues = []
 
         for queue_name in queue_names:
+            job_count = 0  # Initialize to 0 in case counting fails
             try:
                 queue = Queue(queue_name, connection=self.redis_conn)
 
@@ -581,7 +583,6 @@ class CleanupManager:
                     len(queue.deferred_job_registry) +
                     len(queue.scheduled_job_registry)
                 )
-                total_jobs += job_count
 
                 # Clear queue and registries
                 queue.empty()
@@ -601,18 +602,24 @@ class CleanupManager:
                 for job_id in queue.scheduled_job_registry.get_job_ids():
                     queue.scheduled_job_registry.remove(job_id)
 
+                # Only count as successful if cleanup completed without exception
+                successful_jobs += job_count
                 logger.info(f"Cleared {queue_name} queue ({job_count} jobs)")
 
             except Exception as e:
                 logger.error(f"Failed to clean {queue_name} queue: {e}", exc_info=True)
+                # job_count might be 0 if counting failed, or partial count if cleanup failed
+                failed_jobs += job_count
                 failed_queues.append(queue_name)
                 # Continue processing remaining queues
 
-        stats.redis_jobs_count = total_jobs
-        logger.info(f"Cleared total of {total_jobs} Redis jobs")
-
+        stats.redis_jobs_count = successful_jobs
         if failed_queues:
-            logger.warning(f"Failed to clean queues: {', '.join(failed_queues)}")
+            logger.warning(
+                f"Cleared {successful_jobs} Redis jobs, failed to clear {failed_jobs} jobs from queues: {', '.join(failed_queues)}"
+            )
+        else:
+            logger.info(f"Cleared total of {successful_jobs} Redis jobs")
 
     def _cleanup_legacy_wav(self, stats: CleanupStats):
         """Clean legacy WAV files"""

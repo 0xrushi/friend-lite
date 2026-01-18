@@ -116,15 +116,20 @@ jobs:
         echo "test_exit_code=$TEST_EXIT_CODE" >> $GITHUB_ENV
         exit 0  # Don't fail here, we'll fail at the end after uploading artifacts
 
-    - name: Show service logs
+    - name: Save service logs to files
       if: always()
       working-directory: backends/advanced
       run: |
-        echo "=== Backend Logs (last 50 lines) ==="
-        docker compose -f docker-compose-test.yml logs --tail=50 chronicle-backend-test
-        echo ""
-        echo "=== Worker Logs (last 50 lines) ==="
-        docker compose -f docker-compose-test.yml logs --tail=50 workers-test
+        echo "Saving service logs to files..."
+        mkdir -p logs
+        docker compose -f docker-compose-test.yml logs --no-log-prefix chronicle-backend-test > logs/backend.log 2>&1 || true
+        docker compose -f docker-compose-test.yml logs --no-log-prefix workers-test > logs/workers.log 2>&1 || true
+        docker compose -f docker-compose-test.yml logs --no-log-prefix mongo-test > logs/mongo.log 2>&1 || true
+        docker compose -f docker-compose-test.yml logs --no-log-prefix redis-test > logs/redis.log 2>&1 || true
+        docker compose -f docker-compose-test.yml logs --no-log-prefix qdrant-test > logs/qdrant.log 2>&1 || true
+        docker compose -f docker-compose-test.yml logs --no-log-prefix speaker-service-test > logs/speaker.log 2>&1 || true
+        echo "✓ Logs saved to backends/advanced/logs/"
+        ls -lh logs/
 
     - name: Check if test results exist
       if: always()
@@ -200,6 +205,7 @@ jobs:
       with:
         name: robot-test-logs-full
         path: |
+          backends/advanced/logs/*.log
           backends/advanced/.env
           tests/setup/.env.test
         retention-days: 7
