@@ -42,7 +42,7 @@ BACKEND_DIR="$(cd ../backends/advanced && pwd)"
 print_info "Robot Framework Test Runner (No API Keys)"
 print_info "=========================================="
 print_info "This runner executes tests that don't require external API services"
-print_info "Tests tagged with 'requires-api-keys' are excluded"
+print_info "Tests tagged with 'requires-api-keys', 'slow', and 'sdk' are excluded"
 
 # Configuration
 CLEANUP_CONTAINERS="${CLEANUP_CONTAINERS:-false}"
@@ -102,13 +102,15 @@ fi
 FRESH_BUILD=true "$TESTS_DIR/setup-test-containers.sh"
 
 # Run Robot Framework tests via Makefile with tag exclusion
-# Exclude tests that require API keys
-print_info "Running Robot Framework tests (excluding requires-api-keys tag)..."
+# Exclude tests that require API keys, slow tests, and SDK tests
+print_info "Running Robot Framework tests (excluding requires-api-keys, slow, sdk tags)..."
 print_info "Output directory: $OUTPUTDIR"
 
 # Run tests with tag exclusion
 if timeout 30m uv run --with-requirements test-requirements.txt \
     robot --exclude requires-api-keys \
+    --exclude slow \
+    --exclude sdk \
     --outputdir "$OUTPUTDIR" \
     --loglevel INFO \
     --consolecolors on \

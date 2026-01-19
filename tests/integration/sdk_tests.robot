@@ -35,7 +35,7 @@ SDK Can Authenticate With Admin Credentials
 
 SDK Can Upload Audio File
     [Documentation]    Test SDK audio upload functionality
-    [Tags]    audio-upload
+    [Tags]    audio-upload	sdk
 
     ${test_audio}=    Set Variable    ${TEST_AUDIO_DIR}/audio_short.wav
     File Should Exist    ${test_audio}    Test audio file should exist
@@ -48,7 +48,7 @@ SDK Can Upload Audio File
 
 SDK Can Retrieve Conversations
     [Documentation]    Test SDK conversation retrieval
-    [Tags]    conversation
+    [Tags]    conversation	sdk
 
     ${result}=    Run Process    uv    run    python
     ...    ${CURDIR}/../scripts/sdk_test_conversations.py

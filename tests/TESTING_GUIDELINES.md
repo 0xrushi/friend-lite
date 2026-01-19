@@ -394,6 +394,135 @@ cd tests
 - Tests transcription and memory extraction
 - Use before pushing to dev/main
 
+## Slow and SDK Test Organization
+
+Chronicle excludes certain tests from default test runs to provide faster feedback and cleaner test execution.
+
+### The `slow` Tag
+
+**Purpose**: Mark tests that require long timeouts (>30s) or infrastructure operations like service restarts.
+
+**Add this tag when tests:**
+- Restart backend or other services (stop/start cycles)
+- Test connection resilience after service failures
+- Require timeouts longer than 30 seconds
+- Test infrastructure operations that significantly slow down test execution
+
+**Do NOT add this tag when tests:**
+- Complete within normal timeouts (<30s)
+- Don't restart or rebuild services
+- Are simple endpoint or integration tests
+
+**Example:**
+```robot
+*** Test Cases ***
+Test Job Persistence Through Backend Restart
+    [Documentation]    Test that RQ jobs persist when backend service restarts
+    [Tags]    queue	slow
+    [Timeout]    120s
+
+    ${job_id}=    Reprocess Transcript    ${conversation_id}
+    Restart Backend Service    wait_timeout=90s    # Longer timeout for slow test
+    ${jobs_after}=    Get job queue
+    Should Be True    ${jobs_count_after} >= 0
+```
+
+**Running Slow Tests:**
+```bash
+cd tests
+
+# Default test run (EXCLUDES slow tests)
+make test         # Faster feedback, no service restarts
+
+# Run ONLY slow tests
+make test-slow    # Explicit slow test execution
+
+# Run ALL tests including slow
+make test-all-with-slow-and-sdk
+```
+
+### The `sdk` Tag
+
+**Purpose**: Mark tests for unreleased SDK functionality that should be excluded until the SDK is published.
+
+**Add this tag when tests:**
+- Test SDK client library features
+- Require SDK installation or SDK-specific imports
+- Are for SDK features not yet released to users
+- Test SDK authentication, upload, or retrieval methods
+
+**Do NOT add this tag when tests:**
+- Test backend API endpoints directly (these should always run)
+- Test features available through direct HTTP/WebSocket calls
+- Are part of the core backend functionality
+
+**Example:**
+```robot
+*** Test Cases ***
+SDK Can Upload Audio File
+    [Documentation]    Test SDK audio upload functionality
+    [Tags]    audio-upload	sdk
+
+    ${result}=    Run Process    uv    run    python
+    ...    ${CURDIR}/../scripts/sdk_test_upload.py
+    ...    ${BACKEND_URL}    ${ADMIN_EMAIL}    ${ADMIN_PASSWORD}    ${test_audio}
+    Should Be Equal As Integers    ${result.rc}    0
+```
+
+**Running SDK Tests:**
+```bash
+cd tests
+
+# Default test run (EXCLUDES sdk tests)
+make test         # SDK not released yet
+
+# Run ONLY SDK tests (when developing SDK)
+make test-sdk
+
+# Run ALL tests including SDK
+make test-all-with-slow-and-sdk
+```
+
+**When to Re-enable SDK Tests:**
+Once the SDK is released and published:
+1. Remove `--exclude sdk` from default Makefile target (`make test`)
+2. Keep the `sdk` tag for organization (allows filtering SDK-specific tests)
+3. Update `tests/README.md` to reflect that SDK tests are included
+
+### Benefits of Excluding Slow and SDK Tests
+
+**Faster Default Test Runs:**
+- Default `make test` excludes slow tests (service restarts, long timeouts)
+- Provides faster feedback during development (saves 2-5 minutes per run)
+- Developers can iterate quickly on endpoint and integration tests
+
+**Cleaner Test Reports:**
+- SDK tests won't fail in CI when SDK isn't released yet
+- No confusing failures for unreleased features
+- Clear separation of released vs unreleased functionality
+
+**Explicit Execution When Needed:**
+- Run slow tests explicitly when testing infrastructure resilience
+- Run SDK tests explicitly when developing SDK features
+- Full test suite available via `make test-all-with-slow-and-sdk`
+
+### Tag Combination Examples
+
+```robot
+# Good - Slow infrastructure test
+[Tags]    queue	slow
+[Timeout]    120s
+
+# Good - Unreleased SDK feature
+[Tags]    audio-upload	sdk
+
+# Good - Multiple component tags
+[Tags]    conversation	memory
+
+# Bad - Don't combine slow and sdk (different purposes)
+[Tags]    slow	sdk
+```
+
 ## Future Additions
 
 As we develop more conventions and encounter new patterns, we will add them to this file:

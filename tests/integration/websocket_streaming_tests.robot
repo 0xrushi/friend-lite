@@ -68,7 +68,8 @@ Conversation Job Created After Speech Detection
 
     # Send enough audio to trigger speech detection (test audio has speech)
     # Test audio is 4 minutes long at 16kHz, sending 200 chunks ensures enough speech
-    Send Audio Chunks To Stream    ${stream_id}    ${TEST_AUDIO_FILE}    num_chunks=200
+    # Use realtime pacing so Deepgram can finalize transcription segments as audio streams in
+    Send Audio Chunks To Stream    ${stream_id}    ${TEST_AUDIO_FILE}    num_chunks=200    realtime_pacing=True
 
     # Wait for open_conversation job to be created (transcription + speech analysis takes time)
     # Deepgram/OpenAI API calls + job processing can take 30-60s with queue

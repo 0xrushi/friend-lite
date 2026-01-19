@@ -84,7 +84,7 @@ Upload Audio And Verify Transcript Batch Event
 
 Conversation Complete Should Trigger Event
     [Documentation]    Verify conversation.complete event after conversation ends
-    [Tags]    conversation
+    [Tags]    conversation	requires-api-keys
 
     # Clear events
     Clear Plugin Events
@@ -136,7 +136,7 @@ Memory Processing Should Trigger Event
 
 WebSocket Disconnect Should Trigger Conversation Complete Event
     [Documentation]    Verify conversation.complete event when WebSocket disconnects
-    [Tags]    audio-streaming	conversation
+    [Tags]    audio-streaming	conversation	requires-api-keys
     [Timeout]    60s
 
     # Clear events
@@ -149,16 +149,15 @@ WebSocket Disconnect Should Trigger Conversation Complete Event
     ${stream_id}=    Open Audio Stream    device_name=plugin-test-ws
     ${client_id}=    Get Client ID From Device Name    plugin-test-ws
 
-    # Send audio chunks to create conversation
-    ${chunks_sent}=    Send Audio Chunks To Stream    ${stream_id}    ${TEST_AUDIO_FILE}    num_chunks=50
+    # Send audio chunks to create conversation (with realtime pacing for Deepgram to finalize segments)
+    ${chunks_sent}=    Send Audio Chunks To Stream    ${stream_id}    ${TEST_AUDIO_FILE}    num_chunks=200    realtime_pacing=True
 
-    # Wait for conversation creation (speech detection takes a few seconds)
-    Sleep    5s    Allow time for speech detection and conversation creation
-
-    # Get conversation ID from jobs (before disconnect)
-    ${jobs}=    Get Jobs By Type And Client    open_conversation    ${client_id}
+    # Wait for conversation job to be created (max 30s, poll every 2s)
+    ${jobs}=    Wait Until Keyword Succeeds    30s    2s
+    ...    Wait For New Job To Appear    open_conversation    ${client_id}    0
     Should Not Be Empty    ${jobs}    At least one conversation job should exist
-    ${conversation_id}=    Evaluate    ${jobs}[0]['meta'].get('conversation_id', '')
+    ${conv_meta}=    Set Variable    ${jobs}[0][meta]
+    ${conversation_id}=    Evaluate    $conv_meta.get('conversation_id', '')
     Should Not Be Equal    ${conversation_id}    ${EMPTY}    Conversation ID should be set
 
     # Disconnect WebSocket (triggers conversation close with websocket_disconnect end_reason)

@@ -24,19 +24,19 @@ ${COMPOSE_FILE}             docker-compose-test.yml
 *** Keywords ***
 
 Restart Backend Service
+    [Arguments]    ${wait_timeout}=20s
     [Documentation]    Restart the backend service to test persistence
     Log    Restarting backend service to test job persistence
 
-    # Stop backend container
-    Run Process    docker    compose    -f    ${COMPOSE_FILE}    stop    chronicle-backend-test
-    ...    cwd=${BACKEND_DIR}    timeout=30s
+    # Get COMPOSE_PROJECT_NAME from environment
+    ${project_name}=    Get Environment Variable    COMPOSE_PROJECT_NAME    default=advanced-backend-test
 
-    # Start backend container again
-    Run Process    docker    compose    -f    ${COMPOSE_FILE}    start    chronicle-backend-test
-    ...    cwd=${BACKEND_DIR}    timeout=60s
+    # Restart backend container (handles dependencies properly)
+    Run Process    docker    compose    -f    ${COMPOSE_FILE}    restart    chronicle-backend-test
+    ...    cwd=${BACKEND_DIR}    timeout=60s    shell=True    env:COMPOSE_PROJECT_NAME=${project_name}
 
-    # Wait for backend to be ready again
-    Wait Until Keyword Succeeds    ${TEST_TIMEOUT}    5s
+    # Wait for backend to be ready again (configurable timeout for slow tests)
+    Wait Until Keyword Succeeds    ${wait_timeout}    5s
     ...    Health Check    ${API_URL}
 
     Log    Backend service restarted successfully
@@ -67,7 +67,8 @@ Test RQ Job Enqueuing
 
 Test Job Persistence Through Backend Restart
     [Documentation]    Test that RQ jobs persist when backend service restarts
-    [Tags]    queue
+    [Tags]    queue	slow
+    [Timeout]    120s
 
     # Find test conversation
     ${conversation}=    Find Test Conversation
@@ -80,8 +81,8 @@ Test Job Persistence Through Backend Restart
         ${jobs_before}=    Get job queue
         ${jobs_count_before}=    Get Length    ${jobs_before}
 
-        # Restart backend service
-        Restart Backend Service
+        # Restart backend service with longer timeout for slow test
+        Restart Backend Service    wait_timeout=90s
 
         # Verify queue is still accessible and jobs persist
         ${jobs_after}=    Get job queue
@@ -97,7 +98,8 @@ Test Job Persistence Through Backend Restart
 
 Test Multiple Jobs Persistence
     [Documentation]    Test that specific jobs persist through backend restart
-    [Tags]    queue
+    [Tags]    queue	slow
+    [Timeout]    120s
 
     # Find Test Conversation now returns the oldest conversation (most stable)
     ${conversation}=    Find Test Conversation
@@ -121,8 +123,8 @@ Test Multiple Jobs Persistence
         Log    Job ${job_id} status before restart: ${job_status}
     END
 
-    # Restart backend
-    Restart Backend Service
+    # Restart backend with longer timeout for slow test
+    Restart Backend Service    wait_timeout=90s
 
     # Verify our specific jobs still exist after restart
     ${persisted_count}=    Set Variable    ${0}

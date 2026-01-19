@@ -124,7 +124,8 @@ class StreamingTranscriptionConsumer:
 
             self.active_sessions[session_id] = {
                 "last_activity": time.time(),
-                "sample_rate": sample_rate
+                "sample_rate": sample_rate,
+                "audio_offset_seconds": 0.0  # Track cumulative audio duration for timestamp adjustment
             }
 
             logger.info(f"🎙️ Started Deepgram WebSocket stream for session: {session_id}")
@@ -249,7 +250,11 @@ class StreamingTranscriptionConsumer:
 
     async def store_final_result(self, session_id: str, result: Dict, chunk_id: str = None):
         """
-        Store final transcription result to Redis Stream.
+        Store final transcription result to Redis Stream with cumulative timestamp adjustment.
+
+        Transcription providers return word timestamps that reset to 0 for each chunk.
+        We maintain a running audio_offset_seconds to make timestamps cumulative across
+        the session, enabling accurate speech duration calculation for speech detection.
 
         Args:
             session_id: Session ID
@@ -258,6 +263,39 @@ class StreamingTranscriptionConsumer:
         """
         try:
             stream_name = f"transcription:results:{session_id}"
+
+            # Get cumulative audio offset for this session
+            audio_offset = 0.0
+            chunk_duration = 0.0
+            if session_id in self.active_sessions:
+                audio_offset = self.active_sessions[session_id].get("audio_offset_seconds", 0.0)
+
+            # Adjust word timestamps by cumulative offset
+            words = result.get("words", [])
+            adjusted_words = []
+            if words:
+                for word in words:
+                    adjusted_word = word.copy()
+                    adjusted_word["start"] = word.get("start", 0.0) + audio_offset
+                    adjusted_word["end"] = word.get("end", 0.0) + audio_offset
+                    adjusted_words.append(adjusted_word)
+
+                # Calculate chunk duration from last word's end time
+                if adjusted_words:
+                    last_word_end = words[-1].get("end", 0.0)  # Use unadjusted for duration calc
+                    chunk_duration = last_word_end
+
+                logger.debug(f"➡️ [STREAMING] Adjusted {len(adjusted_words)} words by +{audio_offset:.1f}s (chunk_duration={chunk_duration:.1f}s)")
+
+            # Adjust segment timestamps too
+            segments = result.get("segments", [])
+            adjusted_segments = []
+            if segments:
+                for seg in segments:
+                    adjusted_seg = seg.copy()
+                    adjusted_seg["start"] = seg.get("start", 0.0) + audio_offset
+                    adjusted_seg["end"] = seg.get("end", 0.0) + audio_offset
+                    adjusted_segments.append(adjusted_seg)
 
             # Prepare result entry - MUST match aggregator's expected schema
             # All keys and values must be bytes to match consumer.py format
@@ -270,19 +308,23 @@ class StreamingTranscriptionConsumer:
                 b"timestamp": str(time.time()).encode(),
             }
 
-            # Add optional JSON fields
-            words = result.get("words", [])
-            if words:
-                entry[b"words"] = json.dumps(words).encode()
+            # Add adjusted JSON fields
+            if adjusted_words:
+                entry[b"words"] = json.dumps(adjusted_words).encode()
 
-            segments = result.get("segments", [])
-            if segments:
-                entry[b"segments"] = json.dumps(segments).encode()
+            if adjusted_segments:
+                entry[b"segments"] = json.dumps(adjusted_segments).encode()
 
             # Write to Redis Stream
             await self.redis_client.xadd(stream_name, entry)
 
-            logger.info(f"💾 Stored final result to {stream_name}: {result.get('text', '')[:50]}...")
+            # Update cumulative offset for next chunk
+            if session_id in self.active_sessions and chunk_duration > 0:
+                self.active_sessions[session_id]["audio_offset_seconds"] += chunk_duration
+                new_offset = self.active_sessions[session_id]["audio_offset_seconds"]
+                logger.info(f"💾 Stored final result to {stream_name}: {result.get('text', '')[:50]}... (offset: {audio_offset:.1f}s → {new_offset:.1f}s)")
+            else:
+                logger.info(f"💾 Stored final result to {stream_name}: {result.get('text', '')[:50]}...")
 
         except Exception as e:
             logger.error(f"Error storing final result for {session_id}: {e}", exc_info=True)

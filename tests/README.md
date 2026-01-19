@@ -5,15 +5,17 @@
 Start containers and run tests:
 ```bash
 cd tests
-make test           # Start containers + run all tests
+make test           # Start containers + run all tests (excludes slow/sdk)
 ```
 
 Or step by step:
 ```bash
 make start          # Start test containers
-make test-all       # Run all tests
+make test-all       # Run all tests (excludes slow/sdk)
 make stop           # Stop containers
 ```
+
+**Note**: Default test runs exclude `slow` tests (backend restarts, long timeouts) and `sdk` tests (unreleased SDK features) for faster feedback. Run these explicitly with `make test-slow` or `make test-sdk` when needed.
 
 ## Test Suites
 
@@ -23,6 +25,31 @@ Run specific test suites:
 make test-endpoints     # API endpoint tests (~40 tests, fast)
 make test-integration   # End-to-end workflows (~15 tests, slower)
 make test-infra         # Infrastructure resilience tests (~5 tests)
+```
+
+### Special Test Categories
+
+**Slow Tests** (excluded by default for faster feedback):
+```bash
+make test-slow    # Run ONLY slow tests (backend restarts, long timeouts)
+```
+- Backend restart tests (service stop/start cycles)
+- Connection resilience tests
+- Tests requiring >30s timeouts
+- Excluded from default `make test` runs
+
+**SDK Tests** (excluded until SDK is released):
+```bash
+make test-sdk     # Run ONLY SDK tests (unreleased features)
+```
+- SDK client library tests
+- SDK authentication tests
+- SDK upload/retrieval tests
+- Excluded from default `make test` runs until SDK is published
+
+**All Tests Including Excluded**:
+```bash
+make test-all-with-slow-and-sdk    # Run everything including slow and SDK tests
 ```
 
 ## Container Management
