@@ -10,6 +10,9 @@ BACKEND_DIR="$TESTS_DIR/../backends/advanced"
 
 cd "$BACKEND_DIR"
 
+# Set COMPOSE_PROJECT_NAME for test containers
+export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-advanced-backend-test}"
+
 echo "🚀 Starting test containers..."
 
 # Check if .env.test exists, create from template if needed

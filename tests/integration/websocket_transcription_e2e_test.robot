@@ -60,8 +60,7 @@ WebSocket Stream Produces Final Transcripts In Redis
     ${stream_length}=    Redis Command    XLEN    ${stream_name}
 
     Should Be True    ${stream_length} > 0
-    ...    Redis stream ${stream_name} is empty - no final transcripts received!
-    ...    This means end_marker was not sent or CloseStream failed.
+    ...    Redis stream ${stream_name} is empty - no final transcripts received! This means end_marker was not sent or CloseStream failed.
 
     Log    ✅ Redis stream has ${stream_length} final transcript(s)
 
@@ -103,12 +102,10 @@ Speech Detection Receives Transcription From Stream
 
     # Critical assertion: Job should NOT have "no_speech_detected"
     # This would indicate the Redis stream was empty
-    Should Not Contain    ${result}    no_speech_detected
-    ...    Speech detection failed with no_speech_detected - Redis stream was empty!
+    Should Not Contain    ${result}    no_speech_detected    Speech detection failed with no_speech_detected - Redis stream was empty!
 
     # Job should have created a conversation
-    Should Contain    ${result}    conversation_job_id
-    ...    Speech detection did not create conversation_job_id
+    Should Contain    ${result}    conversation_job_id    Speech detection did not create conversation_job_id
 
     Log    ✅ Speech detection successfully received transcription from Redis stream
 
@@ -134,8 +131,7 @@ Conversation Created With Valid Transcript
     ${conv_meta}=    Set Variable    ${conv_job}[meta]
     ${conversation_id}=    Evaluate    $conv_meta.get('conversation_id', '')
 
-    Should Not Be Empty    ${conversation_id}
-    ...    Conversation ID not found in open_conversation job metadata
+    Should Not Be Empty    ${conversation_id}    Conversation ID not found in open_conversation job metadata
 
     # Wait for conversation to complete processing (inactivity timeout)
     Wait For Job Status    ${conv_job}[job_id]    completed    timeout=60s    interval=2s
@@ -154,8 +150,7 @@ Conversation Created With Valid Transcript
     ...    ELSE    Set Variable    ${transcript}
 
     ${transcript_length}=    Get Length    ${transcript_text}
-    Should Be True    ${transcript_length} >= 50
-    ...    Transcript too short: ${transcript_length} characters (expected 50+)
+    Should Be True    ${transcript_length} >= 50    Transcript too short: ${transcript_length} characters (expected 50+)
 
     Log    ✅ Conversation created with valid transcript: ${transcript_length} characters
 
@@ -206,9 +201,7 @@ Stream Close Sends End Marker To Redis Stream
         END
     END
 
-    Should Be True    ${found_end_marker}
-    ...    end_marker NOT found in Redis stream ${audio_stream_name}!
-    ...    Producer.finalize_session() did not send end_marker.
+    Should Be True    ${found_end_marker}    end_marker NOT found in Redis stream ${audio_stream_name}! Producer.finalize_session() did not send end_marker.
 
     Log    ✅ end_marker successfully sent to Redis stream
 
@@ -234,12 +227,9 @@ Streaming Consumer Closes Deepgram Connection On End Marker
     ${logs}=    Get Backend Logs    since=30s
 
     # Should NOT contain Deepgram timeout error
-    Should Not Contain    ${logs}    error 1011
-    ...    Deepgram timeout error found - CloseStream was not sent!
-    ...    This indicates end_marker was not processed by streaming consumer.
+    Should Not Contain    ${logs}    error 1011    Deepgram timeout error found - CloseStream was not sent! This indicates end_marker was not processed by streaming consumer.
 
-    Should Not Contain    ${logs}    Deepgram did not receive audio data or a text message within the timeout window
-    ...    Deepgram timeout found - stream was not closed properly
+    Should Not Contain    ${logs}    Deepgram did not receive audio data or a text message within the timeout window    Deepgram timeout found - stream was not closed properly
 
     Log    ✅ No Deepgram timeout errors - streaming consumer processed end_marker correctly
 
