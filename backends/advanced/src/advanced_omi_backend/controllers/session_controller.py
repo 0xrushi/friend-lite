@@ -199,7 +199,7 @@ async def get_streaming_status(request):
         transcription_queue,
         memory_queue,
         default_queue,
-        all_jobs_complete_for_session
+        all_jobs_complete_for_client
     )
 
     try:
@@ -229,7 +229,8 @@ async def get_streaming_status(request):
 
             # Separate active and completed sessions
             # Check if all jobs are complete (including failed jobs)
-            all_jobs_done = all_jobs_complete_for_session(session_id)
+            # Note: session_id == client_id in streaming context, but using client_id explicitly
+            all_jobs_done = all_jobs_complete_for_client(session_obj.get("client_id"))
 
             # Session is finished if:
             # 1. Redis status says finished AND all jobs done, OR

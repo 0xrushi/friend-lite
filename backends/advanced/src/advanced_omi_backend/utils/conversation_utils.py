@@ -438,32 +438,52 @@ async def track_speech_activity(
     speech_analysis: Dict[str, Any], last_word_count: int, conversation_id: str, redis_client
 ) -> tuple[float, int]:
     """
-    Track new speech activity and update last speech timestamp.
+    Track new speech activity and update last speech timestamp using audio timestamps.
 
-    Uses word count instead of chunk count to avoid false positives from noise/silence.
+    Uses word count to detect new speech, and audio timestamps (speech_end) to track
+    when the last speech occurred in the audio stream (not wall-clock time).
 
     Args:
-        speech_analysis: Speech analysis results from analyze_speech()
+        speech_analysis: Speech analysis results from analyze_speech() with:
+            - word_count: Number of words detected
+            - speech_end: Audio timestamp of last word (if available)
+            - fallback: True if using text-only analysis without timing
         last_word_count: Previous word count
         conversation_id: Conversation ID for Redis key
         redis_client: Redis client instance
 
     Returns:
         Tuple of (last_meaningful_speech_time, new_word_count)
+        Note: last_meaningful_speech_time is audio timestamp, NOT wall-clock time
     """
     current_word_count = speech_analysis.get("word_count", 0)
 
     if current_word_count > last_word_count:
-        last_meaningful_speech_time = time.time()
+        # Use audio timestamp (speech_end) when available
+        speech_end = speech_analysis.get("speech_end")
+        is_fallback = speech_analysis.get("fallback", False)
+
+        if speech_end is not None and speech_end > 0:
+            # Preferred: Use audio timestamp from word-level timing
+            last_meaningful_speech_time = speech_end
+            logger.debug(
+                f"🗣️ New speech detected (word count: {current_word_count}), "
+                f"audio timestamp: {speech_end:.2f}s"
+            )
+        else:
+            # Fallback: Use wall-clock time when word-level timing unavailable
+            # This happens with text-only transcription or missing timing data
+            last_meaningful_speech_time = time.time()
+            logger.warning(
+                f"⚠️ Using wall-clock time for speech tracking (no audio timestamps available). "
+                f"Word count: {current_word_count}, fallback={is_fallback}"
+            )
 
         # Store timestamp in Redis for visibility/debugging
         await redis_client.set(
             f"conversation:last_speech:{conversation_id}",
             last_meaningful_speech_time,
             ex=86400,  # 24 hour TTL
-        )
-        logger.debug(
-            f"🗣️ New speech detected (word count: {current_word_count}), updated last_speech timestamp"
         )
 
         return last_meaningful_speech_time, current_word_count

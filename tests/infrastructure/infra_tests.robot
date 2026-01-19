@@ -26,8 +26,7 @@ Suite Setup      Suite Setup
 Suite Teardown   Suite Teardown
 Test Setup       Test Cleanup
 *** Variables ***
-# Container names are now dynamically loaded from test_env.py based on COMPOSE_PROJECT_NAME
-# This allows tests to work with different docker-compose project names
+# Container names are loaded from test_env.py (hardcoded to match docker-compose-test.yml project name)
 
 *** Keywords ***
 

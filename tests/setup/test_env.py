@@ -81,12 +81,10 @@ TEST_CONFIG = {
     "default_timeout": 30
 }
 
-# Docker Container Names (dynamically based on COMPOSE_PROJECT_NAME)
-# Default to 'advanced' if not set (which is the directory name)
-COMPOSE_PROJECT_NAME = os.getenv('COMPOSE_PROJECT_NAME', 'advanced')
-BACKEND_CONTAINER = f"{COMPOSE_PROJECT_NAME}-chronicle-backend-test-1"
-WORKERS_CONTAINER = f"{COMPOSE_PROJECT_NAME}-workers-test-1"
-MONGO_CONTAINER = f"{COMPOSE_PROJECT_NAME}-mongo-test-1"
-REDIS_CONTAINER = f"{COMPOSE_PROJECT_NAME}-redis-test-1"
-QDRANT_CONTAINER = f"{COMPOSE_PROJECT_NAME}-qdrant-test-1"
-WEBUI_CONTAINER = f"{COMPOSE_PROJECT_NAME}-webui-test-1"
+# Docker Container Names (based on docker-compose-test.yml project name: backend-test)
+BACKEND_CONTAINER = "backend-test-chronicle-backend-test-1"
+WORKERS_CONTAINER = "backend-test-workers-test-1"
+MONGO_CONTAINER = "backend-test-mongo-test-1"
+REDIS_CONTAINER = "backend-test-redis-test-1"
+QDRANT_CONTAINER = "backend-test-qdrant-test-1"
+WEBUI_CONTAINER = "backend-test-webui-test-1"

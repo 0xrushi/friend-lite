@@ -20,9 +20,6 @@ print_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 SCRIPT_DIR="$(dirname "$0")"
 cd "$SCRIPT_DIR/../backends/advanced" || exit 1
 
-# Note: Project name 'backend-test' is set in docker-compose-test.yml
-# No need to export COMPOSE_PROJECT_NAME - it's handled by the compose file
-
 # Load environment variables for tests
 if [ -f "$SCRIPT_DIR/setup/.env.test" ]; then
     print_info "Loading test environment..."

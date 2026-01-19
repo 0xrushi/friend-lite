@@ -289,9 +289,9 @@ async def open_conversation_job(
     # Inactivity timeout configuration
     inactivity_timeout_seconds = float(os.getenv("SPEECH_INACTIVITY_THRESHOLD_SECONDS", "60"))
     inactivity_timeout_minutes = inactivity_timeout_seconds / 60
-    last_meaningful_speech_time = time.time()  # Initialize with conversation start
+    last_meaningful_speech_time = 0.0  # Initialize with audio time 0 (will be updated with first speech)
     timeout_triggered = False  # Track if closure was due to timeout
-    last_inactivity_log_time = time.time()  # Track when we last logged inactivity
+    last_inactivity_log_time = time.time()  # Track when we last logged inactivity (wall-clock for logging)
     last_word_count = 0  # Track word count to detect actual new speech
 
     # Test mode: wait for audio queue to drain before timing out
@@ -407,8 +407,21 @@ async def open_conversation_job(
             last_meaningful_speech_time=last_meaningful_speech_time,
         )
 
-        # Check inactivity timeout and log every 10 seconds
-        inactivity_duration = time.time() - last_meaningful_speech_time
+        # Check inactivity timeout using audio time (not wall-clock time)
+        # Get current audio time from latest transcription
+        current_audio_time = speech_analysis.get("speech_end", 0.0)
+
+        # Calculate inactivity based on audio timestamps
+        # Only check if we have valid audio timing data
+        if current_audio_time > 0 and last_meaningful_speech_time > 0:
+            inactivity_duration = current_audio_time - last_meaningful_speech_time
+        else:
+            # Fallback: No audio timestamps available (text-only transcription)
+            # Can't reliably detect inactivity, so skip timeout check this iteration
+            inactivity_duration = 0
+            if speech_analysis.get("fallback", False):
+                logger.debug("⚠️ Skipping inactivity check (no audio timestamps available)")
+
         current_time = time.time()
 
         # Log inactivity every 10 seconds

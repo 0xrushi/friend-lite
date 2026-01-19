@@ -47,8 +47,9 @@ services:
       # Speaker recognition controlled by config.yml (disabled in test config for CI performance)
       - SPEAKER_SERVICE_URL=http://speaker-service-test:8085
       - CORS_ORIGINS=http://localhost:3001,http://localhost:8001,https://localhost:3001,https://localhost:8001
-      # Set low inactivity timeout for tests (2 seconds instead of 60)
-      - SPEECH_INACTIVITY_THRESHOLD_SECONDS=2
+      # Set inactivity timeout for tests (20 seconds of audio time)
+      # This is audio duration, not wall-clock time
+      - SPEECH_INACTIVITY_THRESHOLD_SECONDS=20
       # Set low speech detection thresholds for tests
       - SPEECH_DETECTION_MIN_DURATION=2.0  # 2 seconds instead of 10
       - SPEECH_DETECTION_MIN_WORDS=5  # 5 words instead of 10
@@ -194,8 +195,9 @@ services:
       - MYCELIA_DB=mycelia_test
       # Speaker recognition controlled by config.yml (disabled in test config for CI performance)
       - SPEAKER_SERVICE_URL=http://speaker-service-test:8085
-      # Set low inactivity timeout for tests (2 seconds instead of 60)
-      - SPEECH_INACTIVITY_THRESHOLD_SECONDS=2
+      # Set inactivity timeout for tests (20 seconds of audio time)
+      # This is audio duration, not wall-clock time
+      - SPEECH_INACTIVITY_THRESHOLD_SECONDS=20
       # Set low speech detection thresholds for tests
       - SPEECH_DETECTION_MIN_DURATION=2.0  # 2 seconds instead of 10
       - SPEECH_DETECTION_MIN_WORDS=5  # 5 words instead of 10

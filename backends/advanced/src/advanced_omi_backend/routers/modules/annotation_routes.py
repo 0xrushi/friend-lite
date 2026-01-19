@@ -124,7 +124,7 @@ async def create_transcript_annotation(
             raise HTTPException(status_code=404, detail="Conversation not found")
 
         # Validate segment index
-        active_transcript = conversation.get_active_transcript()
+        active_transcript = conversation.active_transcript
         if (
             not active_transcript
             or annotation_data.segment_index >= len(active_transcript.segments)
@@ -288,7 +288,7 @@ async def update_annotation_status(
                         Conversation.user_id == annotation.user_id
                     )
                     if conversation:
-                        transcript = conversation.get_active_transcript()
+                        transcript = conversation.active_transcript
                         if (
                             transcript
                             and annotation.segment_index < len(transcript.segments)

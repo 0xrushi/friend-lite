@@ -103,21 +103,22 @@ Conversation Job Created After Speech Detection
 
 
 Conversation Closes On Inactivity Timeout And Restarts Speech Detection
-    [Documentation]    Verify that after SPEECH_INACTIVITY_THRESHOLD_SECONDS of silence,
+    [Documentation]    Verify that after SPEECH_INACTIVITY_THRESHOLD_SECONDS of silence (audio time),
     ...                the open_conversation job closes with timeout_triggered=True,
     ...                a new speech_detection job is created for the next conversation,
     ...                and post-conversation jobs are enqueued (speaker, memory, title).
     ...                Note: Streaming conversations use streaming transcript (no batch transcription).
     ...
-    ...                Test environment sets SPEECH_INACTIVITY_THRESHOLD_SECONDS=5 in docker-compose-test.yml.
-    [Tags]    audio-streaming	queue	conversation
+    ...                Test environment sets SPEECH_INACTIVITY_THRESHOLD_SECONDS=20 in docker-compose-test.yml.
+    [Tags]    audio-streaming	queue	conversation	slow
 
     ${device_name}=    Set Variable    test-post
     ${client_id}=    Get Client ID From Device Name    ${device_name}
 
     # Open stream and send enough audio to trigger speech detection and conversation
     ${stream_id}=    Open Audio Stream    device_name=${device_name}
-    Send Audio Chunks To Stream    ${stream_id}    ${TEST_AUDIO_FILE}    num_chunks=200
+    # Use realtime pacing so Deepgram can finalize transcription segments as audio streams in
+    Send Audio Chunks To Stream    ${stream_id}    ${TEST_AUDIO_FILE}    num_chunks=200    realtime_pacing=True
 
     # Wait for conversation job to be created (transcription + speech analysis takes time)
     ${conv_jobs}=    Wait Until Keyword Succeeds    60s    3s
@@ -138,8 +139,8 @@ Conversation Closes On Inactivity Timeout And Restarts Speech Detection
     Log To Console    Waiting for inactivity timeout to trigger conversation close...
 
     # Wait for conversation job to complete (status changes from 'started' to 'finished')
-    # Timeout value should be > SPEECH_INACTIVITY_THRESHOLD_SECONDS + buffer
-    Wait For Job Status    ${conv_job_id}    finished    timeout=30s    interval=2s
+    # Timeout needs: (audio send time ~60s) + (silence timeout 20s) + (buffer 10s) = 90s
+    Wait For Job Status    ${conv_job_id}    finished    timeout=90s    interval=2s
     Log To Console    Conversation job finished (timeout triggered)
 
     # Verify a NEW speech detection job (2nd one) was created for next conversation

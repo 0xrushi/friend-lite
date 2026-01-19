@@ -28,12 +28,10 @@ Restart Backend Service
     [Documentation]    Restart the backend service to test persistence
     Log    Restarting backend service to test job persistence
 
-    # Get COMPOSE_PROJECT_NAME from environment
-    ${project_name}=    Get Environment Variable    COMPOSE_PROJECT_NAME    default=advanced-backend-test
-
     # Restart backend container (handles dependencies properly)
+    # Project name 'backend-test' is set in docker-compose-test.yml
     Run Process    docker    compose    -f    ${COMPOSE_FILE}    restart    chronicle-backend-test
-    ...    cwd=${BACKEND_DIR}    timeout=60s    shell=True    env:COMPOSE_PROJECT_NAME=${project_name}
+    ...    cwd=${BACKEND_DIR}    timeout=60s    shell=True
 
     # Wait for backend to be ready again (configurable timeout for slow tests)
     Wait Until Keyword Succeeds    ${wait_timeout}    5s

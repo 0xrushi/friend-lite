@@ -88,9 +88,6 @@ TEST_DEVICE_NAME=robot-test
 
 # Note: No API keys required for this test mode
 # OPENAI_API_KEY and DEEPGRAM_API_KEY are not needed
-
-# Note: Project name 'backend-test' is set in docker-compose-test.yml
-# COMPOSE_PROJECT_NAME is no longer needed
 EOF
     print_success "Created setup/.env.test"
 fi

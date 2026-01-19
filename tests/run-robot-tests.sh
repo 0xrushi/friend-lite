@@ -139,9 +139,6 @@ DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY}
 # Test Configuration
 TEST_TIMEOUT=120
 TEST_DEVICE_NAME=robot-test
-
-# Note: Project name 'backend-test' is set in docker-compose-test.yml
-# COMPOSE_PROJECT_NAME is no longer needed
 EOF
     print_success "Created setup/.env.test"
 fi
