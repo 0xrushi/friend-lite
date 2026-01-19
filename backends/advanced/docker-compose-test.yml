@@ -2,6 +2,8 @@
 # Isolated test environment for integration tests
 # Uses different ports to avoid conflicts with development environment
 
+name: backend-test
+
 services:
   chronicle-backend-test:
     build:

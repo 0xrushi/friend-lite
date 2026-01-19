@@ -80,8 +80,8 @@ Clear Test Databases
     # Don't delete plugin database files - database is cleared via Clear Plugin Events keyword
     # Run Process    bash    -c    docker exec ${BACKEND_CONTAINER} find /app/debug_dir -name "*" -type f -delete || true    shell=True
 
-    # Clear Redis queues and job registries (preserve worker registrations, failed and completed jobs)
-    # Delete all rq:* keys except worker registrations (rq:worker:*), failed jobs (rq:failed:*), and completed jobs (rq:finished:*)
+    # Clear Redis queues and job registries (preserve worker registrations, failed and finished jobs)
+    # Delete all rq:* keys except worker registrations (rq:worker:*), failed jobs (rq:failed:*), and finished jobs (rq:finished:*)
     ${redis_clear_script}=    Set Variable    redis-cli --scan --pattern "rq:*" | grep -Ev "^rq:(worker|failed|finished)" | xargs -r redis-cli DEL; redis-cli --scan --pattern "audio:*" | xargs -r redis-cli DEL; redis-cli --scan --pattern "consumer:*" | xargs -r redis-cli DEL
     Run Process    docker    exec    ${REDIS_CONTAINER}    sh    -c    ${redis_clear_script}    shell=True
     Log To Console    Redis queues and job registries cleared (worker registrations preserved)

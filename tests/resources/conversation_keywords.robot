@@ -48,7 +48,7 @@ Reprocess Transcript
     ${initial_status}=    Set Variable    ${reprocess_data}[status]
 
     Log    Reprocess job created: ${job_id} with status: ${initial_status}    INFO
-    Should Be True    '${initial_status}' in ['queued', 'processing']    Status should be 'queued' or 'processing', got: ${initial_status}
+    Should Be True    '${initial_status}' in ['queued', 'started']    Status should be 'queued' or 'started', got: ${initial_status}
 
     RETURN    ${response.json()}
 
@@ -123,7 +123,7 @@ Update Transcript Segment
 
 
 Create Test Conversation
-    [Documentation]    Create a test conversation by processing a test audio file
+    [Documentation]    Create a test conversation by started a test audio file
     [Arguments]     ${device_name}=test-device
 
     # Upload test audio file to create a conversation
@@ -154,7 +154,7 @@ Find Test Conversation
     Log    No conversations found, creating one by uploading test audio
     ${conversation}=    Upload Audio File    ${TEST_AUDIO_FILE}    ${TEST_DEVICE_NAME}
 
-    # Wait for initial processing to complete
+    # Wait for initial started to complete
     Sleep    5s
 
     RETURN    ${conversation}

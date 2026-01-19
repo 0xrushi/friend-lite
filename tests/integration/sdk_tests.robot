@@ -44,7 +44,7 @@ SDK Can Upload Audio File
     ...    ${CURDIR}/../scripts/sdk_test_upload.py
     ...    ${BACKEND_URL}    ${ADMIN_EMAIL}    ${ADMIN_PASSWORD}    ${test_audio}
     Should Be Equal As Integers    ${result.rc}    0    SDK upload should succeed
-    Should Contain    ${result.stdout}    STATUS:processing    File should be in processing status
+    Should Contain    ${result.stdout}    STATUS:started    File should be in started status
 
 SDK Can Retrieve Conversations
     [Documentation]    Test SDK conversation retrieval

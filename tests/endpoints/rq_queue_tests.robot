@@ -136,7 +136,7 @@ Test Multiple Jobs Persistence
         END
     END
 
-    # At least some jobs should persist (they may have completed during restart)
+    # At least some jobs should persist (they may have finished during restart)
     Should Be True    ${persisted_count} >= 0
     Log    ${persisted_count} out of ${job_count} jobs persisted through restart
 
@@ -161,25 +161,25 @@ Test Queue Stats Accuracy
 
     # Verify stats API returns valid structure
     ${stats}=    Get Queue Stats
-    Dictionary Should Contain Key    ${stats}    processing_jobs
+    Dictionary Should Contain Key    ${stats}    started_jobs
     Dictionary Should Contain Key    ${stats}    queued_jobs
-    Dictionary Should Contain Key    ${stats}    completed_jobs
+    Dictionary Should Contain Key    ${stats}    finished_jobs
     Dictionary Should Contain Key    ${stats}    failed_jobs
 
     # Verify all stats are non-negative integers
-    Should Be True    ${stats}[processing_jobs] >= 0
+    Should Be True    ${stats}[started_jobs] >= 0
     Should Be True    ${stats}[queued_jobs] >= 0
-    Should Be True    ${stats}[completed_jobs] >= 0
+    Should Be True    ${stats}[finished_jobs] >= 0
     Should Be True    ${stats}[failed_jobs] >= 0
 
     Log    Queue stats API is working correctly: ${stats}
 
     # Wait for OUR specific jobs to complete (don't rely on global counts)
     FOR    ${job_id}    IN    @{created_jobs}
-        Wait For Job Status    ${job_id}    completed    timeout=60s    interval=2s
+        Wait For Job Status    ${job_id}    finished    timeout=60s    interval=2s
     END
 
-    Log    All ${job_count} created jobs completed successfully
+    Log    All ${job_count} created jobs finished successfully
 
 Test Queue API Authentication
     [Documentation]    Test that queue endpoints properly enforce authentication

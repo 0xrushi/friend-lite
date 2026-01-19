@@ -203,7 +203,7 @@ async def upload_and_process_audio_files(
 
                 processed_files.append({
                     "filename": file.filename,
-                    "status": "processing",
+                    "status": "started",  # RQ standard: job has been enqueued
                     "conversation_id": conversation_id,
                     "transcript_job_id": transcription_job.id,
                     "speaker_job_id": job_ids['speaker_recognition'],
@@ -233,7 +233,7 @@ async def upload_and_process_audio_files(
                     "error": str(e),
                 })
 
-        successful_files = [f for f in processed_files if f.get("status") == "processing"]
+        successful_files = [f for f in processed_files if f.get("status") == "started"]
         failed_files = [f for f in processed_files if f.get("status") == "error"]
 
         return {
@@ -242,7 +242,7 @@ async def upload_and_process_audio_files(
             "files": processed_files,
             "summary": {
                 "total": len(files),
-                "processing": len(successful_files),
+                "started": len(successful_files),  # RQ standard
                 "failed": len(failed_files),
             },
         }

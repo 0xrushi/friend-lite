@@ -95,7 +95,7 @@ Speech Detection Receives Transcription From Stream
     ${job_id}=    Set Variable    ${speech_job}[job_id]
 
     # Wait for job to complete
-    Wait For Job Status    ${job_id}    completed    timeout=60s    interval=2s
+    Wait For Job Status    ${job_id}    finished    timeout=60s    interval=2s
 
     # Get job result
     ${result}=    Get Job Result    ${job_id}
@@ -133,8 +133,8 @@ Conversation Created With Valid Transcript
 
     Should Not Be Empty    ${conversation_id}    Conversation ID not found in open_conversation job metadata
 
-    # Wait for conversation to complete processing (inactivity timeout)
-    Wait For Job Status    ${conv_job}[job_id]    completed    timeout=60s    interval=2s
+    # Wait for conversation to complete started (inactivity timeout)
+    Wait For Job Status    ${conv_job}[job_id]    finished    timeout=60s    interval=2s
 
     # Retrieve the conversation
     ${conversation}=    Get Conversation By ID    ${conversation_id}
@@ -177,31 +177,16 @@ Stream Close Sends End Marker To Redis Stream
     Sleep    2s
 
     # Read all messages from audio stream to find end_marker
-    ${messages}=    Redis Command    XRANGE    ${audio_stream_name}    -    +
+    # Note: Redis Command returns string output from redis-cli, not a list
+    ${xrange_output}=    Redis Command    XRANGE    ${audio_stream_name}    -    +
 
-    # Search for end_marker in messages
-    ${found_end_marker}=    Set Variable    ${False}
-    FOR    ${message}    IN    @{messages}
-        # Message format: [message_id, [field1, value1, field2, value2, ...]]
-        ${fields}=    Set Variable    ${message}[1]
+    # Search for end_marker in the redis-cli output string
+    # redis-cli XRANGE returns text with field names, so we just check if end_marker appears
+    ${found_end_marker}=    Run Keyword And Return Status
+    ...    Should Contain    ${xrange_output}    end_marker
+    ...    ignore_case=True
 
-        # Check if 'end_marker' field exists
-        ${field_count}=    Get Length    ${fields}
-        FOR    ${index}    IN RANGE    0    ${field_count}    2
-            ${field_name}=    Set Variable    ${fields}[${index}]
-            IF    '${field_name}' == 'end_marker' or b'end_marker' in str($field_name)
-                ${found_end_marker}=    Set Variable    ${True}
-                Log    Found end_marker in audio stream at message ${message}[0]
-                BREAK
-            END
-        END
-
-        IF    ${found_end_marker}
-            BREAK
-        END
-    END
-
-    Should Be True    ${found_end_marker}    end_marker NOT found in Redis stream ${audio_stream_name}! Producer.finalize_session() did not send end_marker.
+    Should Be True    ${found_end_marker}    end_marker NOT found in Redis stream ${audio_stream_name}! Producer.finalize_session() did not send end_marker. XRANGE output: ${xrange_output}
 
     Log    ✅ end_marker successfully sent to Redis stream
 

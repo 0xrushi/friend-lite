@@ -44,7 +44,7 @@ async def check_job_alive(redis_client, current_job, session_id: Optional[str] =
             if session_id:
                 session_key = f"audio:session:{session_id}"
                 session_status = await redis_client.hget(session_key, "status")
-                if session_status and session_status.decode() in ["finalizing", "complete", "closed"]:
+                if session_status and session_status.decode() in ["finalizing", "finished"]:
                     # Session ended naturally - not a zombie, just natural cleanup
                     logger.debug(f"📋 Job {current_job.id} ending naturally (session closed)")
                     return False

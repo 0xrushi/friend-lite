@@ -27,10 +27,10 @@ import { queueApi } from '../services/api';
 interface QueueStats {
   total_jobs: number;
   queued_jobs: number;
-  processing_jobs: number;
-  completed_jobs: number;
+  started_jobs: number;  // RQ standard, not "processing_jobs"
+  finished_jobs: number;  // RQ standard, not "completed_jobs"
   failed_jobs: number;
-  cancelled_jobs: number;
+  canceled_jobs: number;  // RQ standard (US spelling), not "cancelled_jobs"
   deferred_jobs: number;
   timestamp: string;
 }
@@ -131,10 +131,10 @@ const Queue: React.FC = () => {
   const [showFlushModal, setShowFlushModal] = useState(false);
   const [flushSettings, setFlushSettings] = useState({
     older_than_hours: 24,
-    statuses: ['completed', 'failed'],
+    statuses: ['finished', 'failed'],  // RQ standard status names
     flush_all: false,
     include_failed: false,  // For flush_all mode
-    include_completed: false  // For flush_all mode
+    include_completed: false  // For flush_all mode (note: API expects include_completed for backward compat)
   });
   const [flushing, setFlushing] = useState(false);
   const [expandedConversations, setExpandedConversations] = useState<Set<string>>(new Set());
@@ -186,19 +186,19 @@ const Queue: React.FC = () => {
       const response = await queueApi.getDashboard(expandedConversationIds);
       const dashboardData = response.data;
 
-      // Extract jobs from response
+      // Extract jobs from response (using RQ standard status names)
       const queuedJobs = dashboardData.jobs.queued || [];
-      const processingJobs = dashboardData.jobs.processing || [];
-      const completedJobs = dashboardData.jobs.completed || [];
+      const startedJobs = dashboardData.jobs.started || [];  // RQ standard, not "processing"
+      const finishedJobs = dashboardData.jobs.finished || [];  // RQ standard, not "completed"
       const failedJobs = dashboardData.jobs.failed || [];
 
       // Combine all jobs
-      const allFetchedJobs = [...queuedJobs, ...processingJobs, ...completedJobs, ...failedJobs];
+      const allFetchedJobs = [...queuedJobs, ...startedJobs, ...finishedJobs, ...failedJobs];
 
       console.log(`📊 Fetched ${allFetchedJobs.length} total jobs via consolidated endpoint`);
       console.log(`  - Queued: ${queuedJobs.length}`);
-      console.log(`  - Processing: ${processingJobs.length}`);
-      console.log(`  - Completed: ${completedJobs.length}`);
+      console.log(`  - Started: ${startedJobs.length}`);  // RQ standard
+      console.log(`  - Finished: ${finishedJobs.length}`);  // RQ standard
       console.log(`  - Failed: ${failedJobs.length}`);
 
       // Debug: Log open_conversation_job details
@@ -266,7 +266,7 @@ const Queue: React.FC = () => {
       // Find all conversations with active open_conversation_job
       Object.entries(jobsByConversation).forEach(([_conversationId, jobs]) => {
         const openConvJob = jobs.find((j: any) => j.job_type === 'open_conversation_job');
-        if (openConvJob && openConvJob.status === 'processing') {
+        if (openConvJob && openConvJob.status === 'started') {
           const conversationId = openConvJob.meta?.conversation_id;
           if (conversationId && !expandedConversations.has(conversationId)) {
             newExpanded.add(conversationId);
@@ -441,12 +441,12 @@ const Queue: React.FC = () => {
   const getStatusIcon = (status: string) => {
     switch (status) {
       case 'queued': return <Clock className="w-4 h-4" />;
-      case 'processing': return <Play className="w-4 h-4 animate-pulse" />;
-      case 'completed': return <CheckCircle className="w-4 h-4" />;
+      case 'started': return <Play className="w-4 h-4 animate-pulse" />;  // RQ standard
+      case 'finished': return <CheckCircle className="w-4 h-4" />;  // RQ standard
       case 'failed': return <XCircle className="w-4 h-4" />;
-      case 'cancelled': return <StopCircle className="w-4 h-4" />;
+      case 'canceled': return <StopCircle className="w-4 h-4" />;  // RQ standard (US spelling)
       case 'deferred': return <Pause className="w-4 h-4" />;
-      case 'waiting': return <Pause className="w-4 h-4" />;
+      case 'scheduled': return <Pause className="w-4 h-4" />;  // RQ standard, not "waiting"
       default: return <Clock className="w-4 h-4" />;
     }
   };
@@ -454,12 +454,12 @@ const Queue: React.FC = () => {
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'queued': return 'text-yellow-600 bg-yellow-100';
-      case 'processing': return 'text-blue-600 bg-blue-100';
-      case 'completed': return 'text-green-600 bg-green-100';
+      case 'started': return 'text-blue-600 bg-blue-100';  // RQ standard
+      case 'finished': return 'text-green-600 bg-green-100';  // RQ standard
       case 'failed': return 'text-red-600 bg-red-100';
-      case 'cancelled': return 'text-gray-600 bg-gray-100';
+      case 'canceled': return 'text-gray-600 bg-gray-100';  // RQ standard (US spelling)
       case 'deferred': return 'text-blue-600 bg-blue-100';
-      case 'waiting': return 'text-blue-600 bg-blue-100';
+      case 'scheduled': return 'text-blue-600 bg-blue-100';  // RQ standard, not "waiting"
       default: return 'text-gray-600 bg-gray-100';
     }
   };
@@ -536,7 +536,7 @@ const Queue: React.FC = () => {
       borderColor = 'border-red-600';
     }
     // Processing jobs - add pulse animation
-    else if (status === 'processing') {
+    else if (status === 'started') {
       bgColor = bgColor + ' animate-pulse';
     }
 
@@ -634,7 +634,7 @@ const Queue: React.FC = () => {
     // For failed/finished jobs, use completed_at or ended_at. For running jobs, use current time.
     const end = job.completed_at || job.ended_at
       ? new Date((job.completed_at || job.ended_at)!).getTime()
-      : (job.status === 'processing' ? Date.now() : start); // Don't show increasing time for failed jobs
+      : (job.status === 'started' ? Date.now() : start); // Don't show increasing time for failed jobs
     const durationMs = end - start;
 
     if (durationMs < 1000) return `${durationMs}ms`;
@@ -758,10 +758,10 @@ const Queue: React.FC = () => {
 
           <div className="bg-white rounded-lg border p-4">
             <div className="flex items-center space-x-2">
-              <Play className={`w-5 h-5 text-blue-600 ${stats.processing_jobs > 0 ? 'animate-pulse' : ''}`} />
+              <Play className={`w-5 h-5 text-blue-600 ${stats.started_jobs > 0 ? 'animate-pulse' : ''}`} />
               <div>
-                <p className="text-sm text-gray-600">Processing</p>
-                <p className="text-xl font-semibold text-blue-600">{stats.processing_jobs}</p>
+                <p className="text-sm text-gray-600">Started</p>
+                <p className="text-xl font-semibold text-blue-600">{stats.started_jobs}</p>
               </div>
             </div>
           </div>
@@ -770,8 +770,8 @@ const Queue: React.FC = () => {
             <div className="flex items-center space-x-2">
               <CheckCircle className="w-5 h-5 text-green-600" />
               <div>
-                <p className="text-sm text-gray-600">Completed</p>
-                <p className="text-xl font-semibold text-green-600">{stats.completed_jobs}</p>
+                <p className="text-sm text-gray-600">Finished</p>
+                <p className="text-xl font-semibold text-green-600">{stats.finished_jobs}</p>
               </div>
             </div>
           </div>
@@ -790,8 +790,8 @@ const Queue: React.FC = () => {
             <div className="flex items-center space-x-2">
               <StopCircle className="w-5 h-5 text-gray-600" />
               <div>
-                <p className="text-sm text-gray-600">Cancelled</p>
-                <p className="text-xl font-semibold text-gray-600">{stats.cancelled_jobs}</p>
+                <p className="text-sm text-gray-600">Canceled</p>
+                <p className="text-xl font-semibold text-gray-600">{stats.canceled_jobs}</p>
               </div>
             </div>
           </div>
@@ -890,7 +890,7 @@ const Queue: React.FC = () => {
                   const allListenJobs = allJobs.filter((job: any) =>
                     job && job.job_type === 'stream_speech_detection_job' &&
                     job.meta?.client_id === clientId &&
-                    job.status !== 'completed' &&
+                    job.status !== 'finished' &&
                     job.status !== 'failed'
                   );
 
@@ -1092,7 +1092,7 @@ const Queue: React.FC = () => {
                   // Filter to only show conversations where at least one job is NOT completed
                   const conversationMap = new Map<string, any[]>();
                   allConversationJobs.forEach((jobs, conversationId) => {
-                    const hasActiveJob = jobs.some(j => j.status !== 'completed' && j.status !== 'failed');
+                    const hasActiveJob = jobs.some(j => j.status !== 'finished' && j.status !== 'failed');
                     if (hasActiveJob) {
                       conversationMap.set(conversationId, jobs);
                     }
@@ -1211,7 +1211,7 @@ const Queue: React.FC = () => {
                                       const startTime = new Date(job.started_at!).getTime();
                                       const endTime = job.completed_at || job.ended_at
                                         ? new Date((job.completed_at || job.ended_at)!).getTime()
-                                        : (job.status === 'processing' ? Date.now() : startTime);
+                                        : (job.status === 'started' ? Date.now() : startTime);
 
                                       return {
                                         job,
@@ -1299,7 +1299,7 @@ const Queue: React.FC = () => {
                                               <div className="flex-1 relative h-6 bg-gray-100 rounded">
                                                 {/* Job Bar */}
                                                 <div
-                                                  className={`absolute h-6 rounded ${barColor} ${job.status === 'processing' ? 'animate-pulse' : ''} flex items-center justify-center`}
+                                                  className={`absolute h-6 rounded ${barColor} ${job.status === 'started' ? 'animate-pulse' : ''} flex items-center justify-center`}
                                                   style={{
                                                     left: `${startPercent}%`,
                                                     width: `${widthPercent}%`
@@ -1533,7 +1533,7 @@ const Queue: React.FC = () => {
                   // Filter to only show conversations where ALL jobs are completed or failed
                   const conversationMap = new Map<string, any[]>();
                   allConversationJobs.forEach((jobs, conversationId) => {
-                    const allJobsComplete = jobs.every(j => j.status === 'completed' || j.status === 'failed');
+                    const allJobsComplete = jobs.every(j => j.status === 'finished' || j.status === 'failed');
                     if (allJobsComplete) {
                       conversationMap.set(conversationId, jobs);
                     }
@@ -1604,7 +1604,7 @@ const Queue: React.FC = () => {
                         const summary = transcriptionMeta.summary || null;
 
                         // Check job statuses
-                        const allComplete = jobs.every(j => j.status === 'completed');
+                        const allComplete = jobs.every(j => j.status === 'finished');
                         const hasFailedJob = jobs.some(j => j.status === 'failed');
                         const failedJobCount = jobs.filter(j => j.status === 'failed').length;
 
@@ -1730,7 +1730,7 @@ const Queue: React.FC = () => {
                                         const startTime = new Date(job.started_at!).getTime();
                                         const endTime = job.completed_at || job.ended_at
                                           ? new Date((job.completed_at || job.ended_at)!).getTime()
-                                          : (job.status === 'processing' ? Date.now() : startTime);
+                                          : (job.status === 'started' ? Date.now() : startTime);
 
                                         return {
                                           job,
@@ -1818,7 +1818,7 @@ const Queue: React.FC = () => {
                                                 <div className="flex-1 relative h-6 bg-gray-100 rounded">
                                                   {/* Job Bar */}
                                                   <div
-                                                    className={`absolute h-6 rounded ${barColor} ${job.status === 'processing' ? 'animate-pulse' : ''} flex items-center justify-center`}
+                                                    className={`absolute h-6 rounded ${barColor} ${job.status === 'started' ? 'animate-pulse' : ''} flex items-center justify-center`}
                                                     style={{
                                                       left: `${startPercent}%`,
                                                       width: `${widthPercent}%`
@@ -2034,10 +2034,10 @@ const Queue: React.FC = () => {
             >
               <option value="">All Statuses</option>
               <option value="queued">Queued</option>
-              <option value="processing">Processing</option>
-              <option value="completed">Completed</option>
+              <option value="started">Started</option>
+              <option value="finished">Finished</option>
               <option value="failed">Failed</option>
-              <option value="cancelled">Cancelled</option>
+              <option value="canceled">Canceled</option>
               <option value="deferred">Deferred</option>
             </select>
           </div>
@@ -2158,7 +2158,7 @@ const Queue: React.FC = () => {
                       >
                         <Eye className="w-4 h-4" />
                       </button>
-                      {(job.status === 'queued' || job.status === 'processing') && (
+                      {(job.status === 'queued' || job.status === 'started') && (
                         <button
                           onClick={() => cancelJob(job.job_id)}
                           className="text-red-600 hover:text-red-900"
@@ -2167,7 +2167,7 @@ const Queue: React.FC = () => {
                           <StopCircle className="w-4 h-4" />
                         </button>
                       )}
-                      {job.status === 'completed' && (
+                      {job.status === 'finished' && (
                         <button
                           onClick={() => cancelJob(job.job_id)}
                           className="text-gray-400 hover:text-gray-600"
@@ -2500,7 +2500,7 @@ const Queue: React.FC = () => {
                       <div>
                         <label className="block text-xs text-gray-600 mb-1">Job statuses to remove:</label>
                         <div className="space-y-1">
-                          {['completed', 'failed', 'cancelled'].map(status => (
+                          {['finished', 'failed', 'canceled'].map(status => (
                             <label key={status} className="flex items-center space-x-2">
                               <input
                                 type="checkbox"

@@ -176,14 +176,12 @@ async def get_status(job_id: str, current_user: User = Depends(current_active_us
         status = job.get_status()
         if status == "started":
             status = "running"
-        if status == "canceled":
-            status = "cancelled"
-            
+
         # Get metadata
         meta = job.meta or {}
-        
+
         # If meta has status, prefer it (for granular updates)
-        if "status" in meta and meta["status"] in ("running", "completed", "failed", "cancelled"):
+        if "status" in meta and meta["status"] in ("running", "finished", "failed", "canceled"):
              status = meta["status"]
 
         total = meta.get("total_files", 0)

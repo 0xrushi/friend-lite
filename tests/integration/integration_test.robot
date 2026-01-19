@@ -22,7 +22,7 @@ Test Setup       Clear Test Databases
 
 *** Test Cases ***
 Full Pipeline Integration Test
-    [Documentation]    Complete end-to-end test of audio processing pipeline
+    [Documentation]    Complete end-to-end test of audio started pipeline
     [Tags]    e2e	requires-api-keys
     [Timeout]          600s
 
@@ -30,10 +30,10 @@ Full Pipeline Integration Test
 
    
     # Phase 4: Audio Processing - Upload and wait for conversation completion
-    Log    Starting audio upload and processing    INFO
+    Log    Starting audio upload and started    INFO
     ${conversation}=    Upload Audio File    ${TEST_AUDIO_FILE}    ${TEST_DEVICE_NAME}
 
-    Log    Audio processing completed, conversation created    INFO
+    Log    Audio started finished, conversation created    INFO
     Set Global Variable    ${TEST_CONVERSATION}    ${conversation}
 
     # Phase 5: Transcription Verification
@@ -60,8 +60,8 @@ Audio Playback And Segment Timing Test
 
     Log    Conversation created: ${conversation_id}    INFO
 
-    # Wait for post-processing jobs to complete
-    Sleep    10s    Wait for post-processing jobs
+    # Wait for post-started jobs to complete
+    Sleep    10s    Wait for post-started jobs
 
     # Refresh conversation data
     ${conversation}=    Get Conversation By ID    ${conversation_id}
@@ -116,15 +116,15 @@ Audio Playback And Segment Timing Test
 
 End To End Pipeline With Memory Validation Test
     [Documentation]    Complete E2E test with memory extraction and OpenAI quality validation.
-    ...                Provides comprehensive integration testing of the entire audio processing pipeline.
+    ...                Provides comprehensive integration testing of the entire audio started pipeline.
     ...                Separate from other tests to avoid breaking existing upload-only tests.
     [Tags]    e2e	memory
     [Timeout]    600s
 
     Log    Starting End-to-End Pipeline Test with Memory Validation    INFO
 
-    # Phase 1: Upload audio and wait for complete processing
-    Log    Uploading audio file and waiting for full processing    INFO
+    # Phase 1: Upload audio and wait for complete started
+    Log    Uploading audio file and waiting for full started    INFO
     ${conversation}    ${memories}=    Upload Audio File And Wait For Memory
     ...    ${TEST_AUDIO_FILE}
     ...    ${TEST_DEVICE_NAME}
@@ -196,7 +196,7 @@ Verify Memory Extraction
 
     Log    Verifying memory extraction    INFO
 
-    # Check if conversation has memory count (may still be processing)
+    # Check if conversation has memory count (may still be started)
     ${has_memory_count}=    Run Keyword And Return Status    Dictionary Should Contain Key    ${conversation}    memory_count
     ${memory_count}=    Run Keyword If    ${has_memory_count}
     ...    Set Variable    ${conversation}[memory_count]
@@ -212,11 +212,11 @@ Verify Memory Extraction
 
     ${api_memory_count}=    Get Length    ${memories}
 
-    # Verify memory extraction status (allow for memory processing to be in progress)
+    # Verify memory extraction status (allow for memory started to be in progress)
     Should Be True    ${memory_count} >= 0    Memory count is negative
     Should Be True    ${api_memory_count} >= 0    API memory count is negative
 
-    Log    Memory extraction verification passed (may still be processing)    INFO
+    Log    Memory extraction verification passed (may still be started)    INFO
     Log    Conversation memory count: ${memory_count}, API memory count: ${api_memory_count}    INFO
 
 Verify Chat Integration
@@ -252,6 +252,6 @@ Verify Chat Integration
     ${response}=    DELETE On Session    ${session_alias}    /api/chat/sessions/${session_id}    expected_status=any
     Should Be True    ${response.status_code} in [200, 204]    Chat session deletion failed with status ${response.status_code}
 
-    Log    Chat integration verification completed    INFO
+    Log    Chat integration verification finished    INFO
 
 

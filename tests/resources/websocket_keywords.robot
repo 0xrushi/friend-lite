@@ -138,7 +138,7 @@ Cleanup All Audio Streams
 
 Stream And Wait For Conversation
     [Documentation]    Send audio chunks to stream, wait for conversation to be created and closed.
-    ...                Returns the conversation_id of the completed conversation.
+    ...                Returns the conversation_id of the finished conversation.
     ...                Works correctly even with existing conversations by tracking new conversation creation.
     [Arguments]    ${stream_id}    ${audio_file_path}    ${device_name}    ${num_chunks}=100
 
@@ -169,7 +169,7 @@ Stream And Wait For Conversation
     Log    New conversation created: ${conversation_id}
 
     # Wait for conversation to close via inactivity timeout (with queue drain, can take 45+ seconds)
-    Wait For Job Status    ${new_job}[job_id]    completed    timeout=60s    interval=2s
+    Wait For Job Status    ${new_job}[job_id]    finished    timeout=60s    interval=2s
     Log    Conversation closed: ${conversation_id}
 
     RETURN    ${conversation_id}

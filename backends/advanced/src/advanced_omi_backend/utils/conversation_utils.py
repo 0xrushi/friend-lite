@@ -81,6 +81,10 @@ def analyze_speech(transcript_data: dict) -> dict:
     settings = get_speech_detection_settings()
     words = transcript_data.get("words", [])
 
+    logger.info(f"🔬 analyze_speech: words_list_length={len(words)}, settings={settings}")
+    if words and len(words) > 0:
+        logger.info(f"📝 First 3 words: {words[:3]}")
+
     # Method 1: Word-level analysis (preferred - has confidence scores and timing)
     if words:
         # Filter by confidence threshold
@@ -98,6 +102,12 @@ def analyze_speech(transcript_data: dict) -> dict:
                 speech_end = valid_words[-1].get("end", 0)
                 speech_duration = speech_end - speech_start
 
+                # Debug logging for timestamp investigation
+                logger.info(
+                    f"🕐 Speech timing: start={speech_start:.2f}s, end={speech_end:.2f}s, "
+                    f"duration={speech_duration:.2f}s (first_word={valid_words[0]}, last_word={valid_words[-1]})"
+                )
+
                 # If no timing data (duration = 0), fall back to text-only analysis
                 # This happens with some streaming transcription services
                 if speech_duration == 0:
@@ -106,6 +116,7 @@ def analyze_speech(transcript_data: dict) -> dict:
                 else:
                     # Check minimum duration threshold when we have timing data
                     min_duration = settings.get("min_duration", 10.0)
+                    logger.info(f"📏 Comparing duration {speech_duration:.1f}s vs threshold {min_duration:.1f}s")
                     if speech_duration < min_duration:
                         return {
                             "has_speech": False,

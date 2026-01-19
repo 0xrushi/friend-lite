@@ -110,7 +110,7 @@ Multiple Audio Files Upload Test
     # Verify summary
     Dictionary Should Contain Key    ${upload_response}    summary
     Should Be Equal As Integers    ${upload_response}[summary][total]    2    msg=Expected 2 files uploaded
-    Should Be Equal As Integers    ${upload_response}[summary][processing]    2    msg=Expected 2 files processing
+    Should Be Equal As Integers    ${upload_response}[summary][started]    2    msg=Expected 2 files started
 
     # Verify both files are in response
     ${files}=    Set Variable    ${upload_response}[files]
@@ -120,8 +120,8 @@ Multiple Audio Files Upload Test
     # Wait for both transcriptions to complete
     FOR    ${file}    IN    @{files}
         ${transcript_job_id}=    Set Variable    ${file}[transcript_job_id]
-        Wait Until Keyword Succeeds    60s    5s    Check Job Status    ${transcript_job_id}    completed
-        Log To Console    ✅ File ${file}[filename] transcription completed
+        Wait Until Keyword Succeeds    60s    5s    Check Job Status    ${transcript_job_id}    finished
+        Log To Console    ✅ File ${file}[filename] transcription finished
     END
 
     Log To Console    ✅ Uploaded and processed ${file_count} audio files
@@ -157,7 +157,7 @@ Invalid File Upload Test
 
     # Verify file was rejected
     Should Be Equal As Integers    ${upload_response}[summary][failed]    1    msg=Expected 1 file to fail
-    Should Be Equal As Integers    ${upload_response}[summary][processing]    0    msg=Expected 0 files processing
+    Should Be Equal As Integers    ${upload_response}[summary][started]    0    msg=Expected 0 files started
 
     # Verify error message mentions WAV files
     ${error_msg}=    Set Variable    ${upload_response}[files][0][error]
@@ -243,5 +243,5 @@ Audio Upload Job Tracking Test
     Should Be True    ${segment_count} > 0    msg=Should have at least one segment
 
     Log To Console    ✅ Job chain verified
-    Log To Console    📝 Transcription: completed
+    Log To Console    📝 Transcription: finished
     Log To Console    💬 Segments: ${segment_count}

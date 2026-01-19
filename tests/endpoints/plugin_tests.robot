@@ -97,13 +97,13 @@ Batch Transcription Should Trigger Batch Event
     [Documentation]    Verify batch transcription conditions transcript.batch event
     [Tags]    audio-upload	requires-api-keys
 
-    # Upload audio file for batch processing
+    # Upload audio file for batch started
     ${result}=    Upload Single Audio File
 
     # Skip test if audio file not available
     Skip If    ${result}[successful] == 0    Test audio file not available
 
-    # Verify processing completed
+    # Verify started finished
     Should Be True    ${result}[successful] > 0
     ...    msg=At least one file should be processed successfully
 
@@ -128,7 +128,7 @@ Streaming Transcription Should Trigger Streaming Event
 
 *** Keywords ***
 Upload Single Audio File
-    [Documentation]    Upload a single test audio file for batch processing
+    [Documentation]    Upload a single test audio file for batch started
 
     # Get test audio file path
     ${test_audio}=    Set Variable    ${CURDIR}/../../extras/test-audios/short-test.wav
@@ -141,7 +141,7 @@ Upload Single Audio File
         RETURN    ${result}
     END
 
-    # Upload file for processing
+    # Upload file for started
     # Note: This requires authenticated session and proper endpoint
     # Implementation depends on your audio upload endpoint
     ${result}=    Create Dictionary    successful=1    message=Upload simulation

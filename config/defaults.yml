@@ -334,9 +334,9 @@ backend:
 
   # Speech detection thresholds
   speech_detection:
-    min_words: 10              # Minimum words to create conversation
-    min_confidence: 0.7        # Word confidence threshold
-    min_duration: 10.0         # Minimum speech duration in seconds
+    min_words: ${oc.decode:${oc.env:SPEECH_DETECTION_MIN_WORDS,10}}              # Minimum words to create conversation
+    min_confidence: ${oc.decode:${oc.env:SPEECH_DETECTION_MIN_CONFIDENCE,0.7}}        # Word confidence threshold
+    min_duration: ${oc.decode:${oc.env:SPEECH_DETECTION_MIN_DURATION,10.0}}         # Minimum speech duration in seconds
 
   # Conversation stop conditions
   conversation_stop:

@@ -3,8 +3,8 @@
 
 .PHONY: help all clean \
         containers-start containers-stop containers-restart containers-rebuild \
-        containers-clean containers-status containers-logs \
-        start stop restart rebuild status logs \
+        containers-start-rebuild containers-clean containers-status containers-logs \
+        start stop restart rebuild start-rebuild status logs \
         test test-quick test-slow test-sdk test-all-with-slow-and-sdk clean-all
 
 # Default output directory
@@ -16,11 +16,14 @@ help:
 	@echo "Chronicle Test Targets:"
 	@echo ""
 	@echo "Quick Commands:"
-	@echo "  make test        - Start containers + run all tests (excludes slow/sdk)"
-	@echo "  make test-quick  - Run tests on existing containers"
-	@echo "  make start       - Start test containers"
-	@echo "  make stop        - Stop containers (keep volumes)"
-	@echo "  make status      - Show container status"
+	@echo "  make test          - Start containers + run all tests (excludes slow/sdk)"
+	@echo "  make test-quick    - Run tests on existing containers"
+	@echo "  make start         - Start test containers"
+	@echo "  make stop          - Stop containers (keep volumes)"
+	@echo "  make restart       - Restart containers (for .env changes)"
+	@echo "  make rebuild       - Rebuild images only (doesn't start)"
+	@echo "  make start-rebuild - Stop + rebuild + start (for code changes)"
+	@echo "  make status        - Show container status"
 	@echo ""
 	@echo "Running Tests:"
 	@echo "  make all         - Run all tests (excludes slow/sdk)"
@@ -34,13 +37,14 @@ help:
 	@echo "  make test-all-with-slow-and-sdk   - Run ALL tests including excluded"
 	@echo ""
 	@echo "Container Management:"
-	@echo "  make containers-start    - Start test containers"
-	@echo "  make containers-stop     - Stop containers (keep volumes)"
-	@echo "  make containers-restart  - Restart containers"
-	@echo "  make containers-rebuild  - Rebuild + restart containers"
-	@echo "  make containers-clean    - Save logs + remove everything"
-	@echo "  make containers-status   - Show container health"
-	@echo "  make containers-logs     - View service logs (use SERVICE=name)"
+	@echo "  make containers-start         - Start test containers"
+	@echo "  make containers-stop          - Stop containers (keep volumes)"
+	@echo "  make containers-restart       - Restart containers (config changes)"
+	@echo "  make containers-rebuild       - Rebuild images only"
+	@echo "  make containers-start-rebuild - Stop + rebuild + start (code changes)"
+	@echo "  make containers-clean         - Save logs + remove everything"
+	@echo "  make containers-status        - Show container health"
+	@echo "  make containers-logs          - View service logs (use SERVICE=name)"
 	@echo ""
 	@echo "Utilities:"
 	@echo "  make clean       - Remove test output files"
@@ -51,8 +55,9 @@ help:
 	@echo "  SERVICE          - Service name for logs (default: chronicle-backend-test)"
 	@echo ""
 	@echo "Examples:"
-	@echo "  make test                              # Full workflow"
-	@echo "  make endpoints                         # Only endpoint tests"
+	@echo "  make test                                  # Full workflow"
+	@echo "  make endpoints                             # Only endpoint tests"
+	@echo "  make start-rebuild                         # After code changes"
 	@echo "  make containers-logs SERVICE=workers-test  # View worker logs"
 
 # Run all tests (excludes slow and sdk tests for faster feedback)
@@ -117,9 +122,13 @@ containers-stop:
 containers-restart:
 	@./bin/restart-containers.sh
 
-# Rebuild test containers
+# Rebuild test containers (images only)
 containers-rebuild:
 	@./bin/rebuild-containers.sh
+
+# Stop, rebuild, and start test containers
+containers-start-rebuild:
+	@./bin/start-rebuild-containers.sh
 
 # Clean test containers (ALWAYS saves logs first!)
 containers-clean:
@@ -141,6 +150,7 @@ start: containers-start
 stop: containers-stop
 restart: containers-restart
 rebuild: containers-rebuild
+start-rebuild: containers-start-rebuild
 status: containers-status
 logs: containers-logs
 

@@ -612,7 +612,7 @@ async def stream_speech_detection_job(
 
         # Check if session has closed
         session_status = await redis_client.hget(session_key, "status")
-        session_closed = session_status and session_status.decode() in ["complete", "closed"]
+        session_closed = session_status and session_status.decode() in ["finalizing", "finished"]
 
         if session_closed and session_closed_at is None:
             # Session just closed - start grace period for final transcription

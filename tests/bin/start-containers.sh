@@ -10,8 +10,8 @@ BACKEND_DIR="$TESTS_DIR/../backends/advanced"
 
 cd "$BACKEND_DIR"
 
-# Set COMPOSE_PROJECT_NAME for test containers
-export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-advanced-backend-test}"
+# Note: Project name 'backend-test' is set in docker-compose-test.yml
+# No need to export COMPOSE_PROJECT_NAME - it's handled by the compose file
 
 echo "🚀 Starting test containers..."
 

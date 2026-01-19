@@ -17,7 +17,7 @@ from typing import Dict, Any, Optional
 
 import redis
 from rq import Queue, Worker
-from rq.job import Job
+from rq.job import Job, JobStatus
 from rq.registry import ScheduledJobRegistry, DeferredJobRegistry
 
 from advanced_omi_backend.models.job import JobPriority
@@ -29,6 +29,52 @@ logger = logging.getLogger(__name__)
 # Redis connection configuration
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 redis_conn = redis.from_url(REDIS_URL)
+
+
+def get_job_status_from_rq(job: Job) -> str:
+    """
+    Get job status using RQ's native method.
+
+    Uses job.get_status() which is the Redis Queue standard approach.
+    Returns RQ's standard status names.
+
+    Returns one of: queued, started, finished, failed, deferred, scheduled, canceled, stopped
+
+    Raises:
+        RuntimeError: If job status is unexpected (should never happen with RQ's method)
+    """
+    rq_status = job.get_status()
+
+    # RQ returns status as JobStatus enum or string
+    # Convert to string if it's an enum
+    if isinstance(rq_status, JobStatus):
+        status_str = rq_status.value
+    else:
+        status_str = str(rq_status)
+
+    # Validate it's a known RQ status
+    valid_statuses = {
+        JobStatus.QUEUED.value,
+        JobStatus.STARTED.value,
+        JobStatus.FINISHED.value,
+        JobStatus.FAILED.value,
+        JobStatus.DEFERRED.value,
+        JobStatus.SCHEDULED.value,
+        JobStatus.CANCELED.value,
+        JobStatus.STOPPED.value,
+    }
+
+    if status_str not in valid_statuses:
+        logger.error(
+            f"Job {job.id} has unexpected RQ status: {status_str}. "
+            f"This indicates RQ library added a new status we don't know about."
+        )
+        raise RuntimeError(
+            f"Job {job.id} has unknown RQ status: {status_str}. "
+            f"Please update get_job_status_from_rq() to handle this new status."
+        )
+
+    return status_str
 
 # Queue name constants
 TRANSCRIPTION_QUEUE = "transcription"
@@ -61,34 +107,34 @@ def get_queue(queue_name: str = DEFAULT_QUEUE) -> Queue:
 
 
 def get_job_stats() -> Dict[str, Any]:
-    """Get statistics about jobs in all queues matching frontend expectations."""
+    """Get statistics about jobs in all queues using RQ standard status names."""
     total_jobs = 0
     queued_jobs = 0
-    processing_jobs = 0
-    completed_jobs = 0
+    started_jobs = 0  # RQ standard: "started" not "processing"
+    finished_jobs = 0  # RQ standard: "finished" not "completed"
     failed_jobs = 0
-    cancelled_jobs = 0
+    canceled_jobs = 0  # RQ standard: "canceled" not "cancelled"
     deferred_jobs = 0  # Jobs waiting for dependencies (depends_on)
 
     for queue_name in QUEUE_NAMES:
         queue = get_queue(queue_name)
 
         queued_jobs += len(queue)
-        processing_jobs += len(queue.started_job_registry)
-        completed_jobs += len(queue.finished_job_registry)
+        started_jobs += len(queue.started_job_registry)
+        finished_jobs += len(queue.finished_job_registry)
         failed_jobs += len(queue.failed_job_registry)
-        cancelled_jobs += len(queue.canceled_job_registry)
+        canceled_jobs += len(queue.canceled_job_registry)
         deferred_jobs += len(queue.deferred_job_registry)
 
-    total_jobs = queued_jobs + processing_jobs + completed_jobs + failed_jobs + cancelled_jobs + deferred_jobs
+    total_jobs = queued_jobs + started_jobs + finished_jobs + failed_jobs + canceled_jobs + deferred_jobs
 
     return {
         "total_jobs": total_jobs,
         "queued_jobs": queued_jobs,
-        "processing_jobs": processing_jobs,
-        "completed_jobs": completed_jobs,
+        "started_jobs": started_jobs,
+        "finished_jobs": finished_jobs,
         "failed_jobs": failed_jobs,
-        "cancelled_jobs": cancelled_jobs,
+        "canceled_jobs": canceled_jobs,
         "deferred_jobs": deferred_jobs,
         "timestamp": datetime.utcnow().isoformat()
     }
@@ -124,11 +170,11 @@ def get_jobs(
     for qname in queues_to_check:
         queue = get_queue(qname)
 
-        # Collect jobs from all registries
+        # Collect jobs from all registries (using RQ standard status names)
         registries = [
             (queue.job_ids, "queued"),
-            (queue.started_job_registry.get_job_ids(), "processing"),
-            (queue.finished_job_registry.get_job_ids(), "completed"),
+            (queue.started_job_registry.get_job_ids(), "started"),  # RQ standard, not "processing"
+            (queue.finished_job_registry.get_job_ids(), "finished"),  # RQ standard, not "completed"
             (queue.failed_job_registry.get_job_ids(), "failed"),
             (queue.deferred_job_registry.get_job_ids(), "deferred"),  # Jobs waiting for dependencies
         ]

@@ -13,17 +13,9 @@ mkdir -p "$LOG_DIR"
 
 echo "📝 Saving container logs to logs/$TIMESTAMP/"
 
-# Get project name from .env.test or use default
-ENV_FILE="$SCRIPT_DIR/../setup/.env.test"
-PROJECT_NAME="advanced-backend-test"  # Default
-
-if [ -f "$ENV_FILE" ]; then
-    # Try to read COMPOSE_PROJECT_NAME from .env.test
-    FOUND_NAME=$(grep COMPOSE_PROJECT_NAME "$ENV_FILE" | cut -d= -f2)
-    if [ -n "$FOUND_NAME" ]; then
-        PROJECT_NAME="$FOUND_NAME"
-    fi
-fi
+# Get project name (from docker-compose-test.yml)
+# The project name is set in the compose file as 'backend-test'
+PROJECT_NAME="backend-test"
 
 # Service list (based on docker-compose-test.yml)
 SERVICES="chronicle-backend-test workers-test mongo-test redis-test qdrant-test speaker-service-test"

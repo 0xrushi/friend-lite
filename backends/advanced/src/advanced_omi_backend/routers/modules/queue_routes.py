@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from typing import List, Optional
 
 from advanced_omi_backend.auth import current_active_user
-from advanced_omi_backend.controllers.queue_controller import get_jobs, get_job_stats, redis_conn, QUEUE_NAMES
+from advanced_omi_backend.controllers.queue_controller import get_jobs, get_job_stats, redis_conn, QUEUE_NAMES, get_job_status_from_rq
 from advanced_omi_backend.users import User
 from rq.job import Job
 import redis.asyncio as aioredis
@@ -65,18 +65,12 @@ async def get_job_status(
             if job_user_id != str(current_user.user_id):
                 raise HTTPException(status_code=403, detail="Access forbidden")
 
-        # Determine status from registries
-        status = "unknown"
-        if job.is_queued:
-            status = "queued"
-        elif job.is_started:
-            status = "processing"
-        elif job.is_finished:
-            status = "completed"
-        elif job.is_failed:
-            status = "failed"
-        elif job.is_deferred:
-            status = "deferred"
+        # Get status using RQ's native method
+        try:
+            status = get_job_status_from_rq(job)
+        except RuntimeError as e:
+            logger.error(f"Failed to determine status for job {job_id}: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
 
         return {
             "job_id": job.id,
@@ -106,18 +100,12 @@ async def get_job(
             if job_user_id != str(current_user.user_id):
                 raise HTTPException(status_code=403, detail="Access forbidden")
 
-        # Determine status from registries
-        status = "unknown"
-        if job.is_queued:
-            status = "queued"
-        elif job.is_started:
-            status = "processing"
-        elif job.is_finished:
-            status = "completed"
-        elif job.is_failed:
-            status = "failed"
-        elif job.is_deferred:
-            status = "deferred"
+        # Get status using RQ's native method
+        try:
+            status = get_job_status_from_rq(job)
+        except RuntimeError as e:
+            logger.error(f"Failed to determine status for job {job_id}: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
 
         return {
             "job_id": job.id,
@@ -157,18 +145,18 @@ async def cancel_job(
             if job_user_id != str(current_user.user_id):
                 raise HTTPException(status_code=403, detail="Access forbidden")
 
-        # Cancel if queued or processing, delete if completed/failed
+        # Cancel if queued or started, delete if finished/failed
         if job.is_queued or job.is_started or job.is_deferred or job.is_scheduled:
             # Cancel the job
             job.cancel()
             logger.info(f"Cancelled job {job_id}")
             return {
                 "job_id": job_id,
-                "action": "cancelled",
-                "message": f"Job {job_id} has been cancelled"
+                "action": "canceled",
+                "message": f"Job {job_id} has been canceled"
             }
         else:
-            # Delete completed/failed jobs
+            # Delete finished/failed jobs
             job.delete()
             logger.info(f"Deleted job {job_id}")
             return {
@@ -182,7 +170,7 @@ async def cancel_job(
         raise
     except Exception as e:
         logger.error(f"Failed to cancel/delete job {job_id}: {e}")
-        raise HTTPException(status_code=404, detail=f"Job not found or could not be cancelled: {str(e)}")
+        raise HTTPException(status_code=404, detail=f"Job not found or could not be canceled: {str(e)}")
 
 
 @router.get("/jobs/by-client/{client_id}")
@@ -201,21 +189,14 @@ async def get_jobs_by_client(
         queues = QUEUE_NAMES
 
         def get_job_status(job, registries_map):
-            """Determine job status from registries."""
-            if job.is_queued:
-                return "queued"
-            elif job.is_started:
-                return "processing"
-            elif job.is_finished:
-                return "completed"
-            elif job.is_failed:
-                return "failed"
-            elif job.is_deferred:
-                return "deferred"
-            elif job.is_scheduled:
-                return "waiting"
-            else:
-                return "unknown"
+            """Determine job status using RQ's native method."""
+            try:
+                return get_job_status_from_rq(job)
+            except RuntimeError:
+                # In nested function, can't raise HTTP exception
+                # Log and re-raise to be handled by outer scope
+                logger.error(f"Job {job.id} status determination failed")
+                raise
 
         def process_job_and_dependents(job, queue_name, base_status):
             """Process a job and recursively find all its dependents."""
@@ -270,15 +251,15 @@ async def get_jobs_by_client(
         for queue_name in queues:
             queue = get_queue(queue_name)
 
-            # Check all registries
+            # Check all registries (using RQ standard status names)
             registries = [
                 ("queued", queue.job_ids),
-                ("processing", StartedJobRegistry(queue=queue).get_job_ids()),
-                ("completed", FinishedJobRegistry(queue=queue).get_job_ids()),
+                ("started", StartedJobRegistry(queue=queue).get_job_ids()),  # RQ standard
+                ("finished", FinishedJobRegistry(queue=queue).get_job_ids()),  # RQ standard
                 ("failed", FailedJobRegistry(queue=queue).get_job_ids()),
-                ("cancelled", CanceledJobRegistry(queue=queue).get_job_ids()),
-                ("waiting", DeferredJobRegistry(queue=queue).get_job_ids()),
-                ("waiting", ScheduledJobRegistry(queue=queue).get_job_ids())
+                ("canceled", CanceledJobRegistry(queue=queue).get_job_ids()),  # RQ standard (US spelling)
+                ("deferred", DeferredJobRegistry(queue=queue).get_job_ids()),
+                ("scheduled", ScheduledJobRegistry(queue=queue).get_job_ids())
             ]
 
             for status_name, job_ids in registries:
@@ -329,7 +310,7 @@ async def get_queue_stats_endpoint(
 
     except Exception as e:
         logger.error(f"Failed to get queue stats: {e}")
-        return {"total_jobs": 0, "queued_jobs": 0, "processing_jobs": 0, "completed_jobs": 0, "failed_jobs": 0, "cancelled_jobs": 0, "deferred_jobs": 0}
+        return {"total_jobs": 0, "queued_jobs": 0, "started_jobs": 0, "finished_jobs": 0, "failed_jobs": 0, "canceled_jobs": 0, "deferred_jobs": 0}
 
 
 @router.get("/worker-details")
@@ -480,13 +461,13 @@ async def get_stream_stats(
 
 class FlushJobsRequest(BaseModel):
     older_than_hours: int = 24
-    statuses: List[str] = ["completed", "failed", "cancelled"]
+    statuses: List[str] = ["finished", "failed", "canceled"]  # RQ standard status names
 
 
 class FlushAllJobsRequest(BaseModel):
     confirm: bool
     include_failed: bool = False  # By default, preserve failed jobs for debugging
-    include_completed: bool = False  # By default, preserve completed jobs for debugging
+    include_finished: bool = False  # By default, preserve finished jobs for debugging
 
 
 @router.post("/flush")
@@ -512,8 +493,8 @@ async def flush_jobs(
         for queue_name in queues:
             queue = get_queue(queue_name)
 
-            # Flush from appropriate registries based on requested statuses
-            if "completed" in request.statuses:
+            # Flush from appropriate registries based on requested statuses (RQ standard names)
+            if "finished" in request.statuses:  # RQ standard, not "completed"
                 registry = FinishedJobRegistry(queue=queue)
                 for job_id in registry.get_job_ids():
                     try:
@@ -535,7 +516,7 @@ async def flush_jobs(
                     except Exception as e:
                         logger.error(f"Error deleting job {job_id}: {e}")
 
-            if "cancelled" in request.statuses:
+            if "canceled" in request.statuses:  # RQ standard (US spelling), not "cancelled"
                 registry = CanceledJobRegistry(queue=queue)
                 for job_id in registry.get_job_ids():
                     try:
@@ -564,8 +545,8 @@ async def flush_all_jobs(
 ):
     """
     Flush jobs from queues and registries.
-    By default preserves failed and completed jobs for debugging.
-    Set include_failed=true or include_completed=true to flush those as well.
+    By default preserves failed and finished jobs for debugging.
+    Set include_failed=true or include_finished=true to flush those as well.
     """
     if not current_user.is_superuser:
         raise HTTPException(status_code=403, detail="Admin access required")
@@ -607,7 +588,7 @@ async def flush_all_jobs(
             # Conditionally add failed and finished registries
             if request.include_failed:
                 registries.append(("failed", FailedJobRegistry(queue=queue)))
-            if request.include_completed:
+            if request.include_finished:
                 registries.append(("finished", FinishedJobRegistry(queue=queue)))
 
             for registry_name, registry in registries:
@@ -691,8 +672,8 @@ async def flush_all_jobs(
         preserved = []
         if not request.include_failed:
             preserved.append("failed jobs")
-        if not request.include_completed:
-            preserved.append("completed jobs")
+        if not request.include_finished:
+            preserved.append("finished jobs")
 
         preserved_msg = f" (preserved {', '.join(preserved)})" if preserved else ""
         logger.info(f"Flushed {total_removed} jobs and {deleted_keys} Redis keys from all queues{preserved_msg}")
@@ -833,7 +814,7 @@ async def get_dashboard_data(
     """Get all data needed for the Queue dashboard in a single API call.
 
     Returns:
-    - Jobs grouped by status (queued, processing, completed, failed)
+    - Jobs grouped by status (queued, started, finished, failed)
     - Queue statistics
     - Streaming status
     - Client jobs for expanded clients
@@ -858,12 +839,12 @@ async def get_dashboard_data(
                 for queue_name in queues:
                     queue = get_queue(queue_name)
 
-                    # Get job IDs based on status
+                    # Get job IDs based on status (using RQ standard status names)
                     if status_name == "queued":
                         job_ids = queue.job_ids[:limit]
-                    elif status_name == "processing":
+                    elif status_name == "started":  # RQ standard, not "processing"
                         job_ids = list(StartedJobRegistry(queue=queue).get_job_ids())[:limit]
-                    elif status_name == "completed":
+                    elif status_name == "finished":  # RQ standard, not "completed"
                         job_ids = list(FinishedJobRegistry(queue=queue).get_job_ids())[:limit]
                     elif status_name == "failed":
                         job_ids = list(FailedJobRegistry(queue=queue).get_job_ids())[:limit]
@@ -917,7 +898,7 @@ async def get_dashboard_data(
                 return get_job_stats()
             except Exception as e:
                 logger.error(f"Error fetching stats: {e}")
-                return {"total_jobs": 0, "queued_jobs": 0, "processing_jobs": 0, "completed_jobs": 0, "failed_jobs": 0}
+                return {"total_jobs": 0, "queued_jobs": 0, "started_jobs": 0, "finished_jobs": 0, "failed_jobs": 0}
 
         async def fetch_streaming_status():
             """Fetch streaming status."""
@@ -941,17 +922,12 @@ async def get_dashboard_data(
                 queues = QUEUE_NAMES
 
                 def get_job_status(job):
-                    if job.is_queued:
-                        return "queued"
-                    elif job.is_started:
-                        return "processing"
-                    elif job.is_finished:
-                        return "completed"
-                    elif job.is_failed:
-                        return "failed"
-                    elif job.is_deferred:
-                        return "deferred"
-                    else:
+                    """Get job status using RQ's native method."""
+                    try:
+                        return get_job_status_from_rq(job)
+                    except RuntimeError:
+                        logger.error(f"Job {job.id} status determination failed")
+                        # Return unknown as fallback in dashboard context
                         return "unknown"
 
                 # Find all jobs for this session
@@ -966,8 +942,8 @@ async def get_dashboard_data(
 
                     registries = [
                         ("queued", queue.job_ids),
-                        ("processing", StartedJobRegistry(queue=queue).get_job_ids()),
-                        ("completed", FinishedJobRegistry(queue=queue).get_job_ids()),
+                        ("started", StartedJobRegistry(queue=queue).get_job_ids()),  # RQ standard
+                        ("finished", FinishedJobRegistry(queue=queue).get_job_ids()),  # RQ standard
                         ("failed", FailedJobRegistry(queue=queue).get_job_ids())
                     ]
 
@@ -1016,10 +992,10 @@ async def get_dashboard_data(
                 logger.error(f"Error fetching jobs for client {client_id}: {e}")
                 return {"client_id": client_id, "jobs": []}
 
-        # Execute all fetches in parallel
+        # Execute all fetches in parallel (using RQ standard status names)
         queued_jobs_task = fetch_jobs_by_status("queued", limit=100)
-        processing_jobs_task = fetch_jobs_by_status("processing", limit=100)
-        completed_jobs_task = fetch_jobs_by_status("completed", limit=50)
+        started_jobs_task = fetch_jobs_by_status("started", limit=100)  # RQ standard, not "processing"
+        finished_jobs_task = fetch_jobs_by_status("finished", limit=50)  # RQ standard, not "completed"
         failed_jobs_task = fetch_jobs_by_status("failed", limit=50)
         stats_task = fetch_stats()
         streaming_status_task = fetch_streaming_status()
@@ -1027,8 +1003,8 @@ async def get_dashboard_data(
 
         results = await asyncio.gather(
             queued_jobs_task,
-            processing_jobs_task,
-            completed_jobs_task,
+            started_jobs_task,
+            finished_jobs_task,
             failed_jobs_task,
             stats_task,
             streaming_status_task,
@@ -1037,8 +1013,8 @@ async def get_dashboard_data(
         )
 
         queued_jobs = results[0] if not isinstance(results[0], Exception) else []
-        processing_jobs = results[1] if not isinstance(results[1], Exception) else []
-        completed_jobs = results[2] if not isinstance(results[2], Exception) else []
+        started_jobs = results[1] if not isinstance(results[1], Exception) else []  # RQ standard
+        finished_jobs = results[2] if not isinstance(results[2], Exception) else []  # RQ standard
         failed_jobs = results[3] if not isinstance(results[3], Exception) else []
         stats = results[4] if not isinstance(results[4], Exception) else {"total_jobs": 0}
         streaming_status = results[5] if not isinstance(results[5], Exception) else {"active_sessions": []}
@@ -1066,8 +1042,8 @@ async def get_dashboard_data(
         return {
             "jobs": {
                 "queued": queued_jobs,
-                "processing": processing_jobs,
-                "completed": completed_jobs,
+                "started": started_jobs,  # RQ standard status name
+                "finished": finished_jobs,  # RQ standard status name
                 "failed": failed_jobs
             },
             "stats": stats,

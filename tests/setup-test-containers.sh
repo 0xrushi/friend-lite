@@ -20,10 +20,10 @@ print_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 SCRIPT_DIR="$(dirname "$0")"
 cd "$SCRIPT_DIR/../backends/advanced" || exit 1
 
-# Set default COMPOSE_PROJECT_NAME (can be overridden by .env.test)
-export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-advanced-backend-test}"
+# Note: Project name 'backend-test' is set in docker-compose-test.yml
+# No need to export COMPOSE_PROJECT_NAME - it's handled by the compose file
 
-# Load environment variables for tests (may override COMPOSE_PROJECT_NAME)
+# Load environment variables for tests
 if [ -f "$SCRIPT_DIR/setup/.env.test" ]; then
     print_info "Loading test environment..."
     set -a
@@ -53,10 +53,9 @@ if [ "$FRESH_BUILD" = "false" ]; then
     fi
 fi
 
-# Clean up any existing test containers from ANY project name to avoid port conflicts
+# Clean up any existing test containers to avoid port conflicts
 print_info "Cleaning up any existing test containers..."
 docker compose -f docker-compose-test.yml down 2>/dev/null || true
-COMPOSE_PROJECT_NAME=advanced docker compose -f docker-compose-test.yml down 2>/dev/null || true
 
 # Remove any stale "Created" containers that might be holding ports
 docker ps -a --filter "name=backend-test" --filter "status=created" --format "{{.Names}}" | xargs -r docker rm -f 2>/dev/null || true

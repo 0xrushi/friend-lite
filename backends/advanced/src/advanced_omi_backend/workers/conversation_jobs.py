@@ -315,7 +315,7 @@ async def open_conversation_job(
             status = await redis_client.hget(session_key, "status")
             status_str = status.decode() if status else None
 
-            if status_str in ["finalizing", "complete"]:
+            if status_str in ["finalizing", "finished"]:
                 finalize_received = True
 
                 # Get completion reason (guaranteed to exist with unified API)

@@ -219,16 +219,12 @@ if [ -d "./data/test_audio_chunks/" ] || [ -d "./data/test_data/" ] || [ -d "./d
     docker run --rm -v "$(pwd)/data:/data" alpine sh -c 'rm -rf /data/test_*' 2>/dev/null || true
 fi
 
-# Use unique project name to avoid conflicts with development environment
-export COMPOSE_PROJECT_NAME="advanced-backend-test"
+# Note: Project name 'backend-test' is set in docker-compose-test.yml
+# No need to export COMPOSE_PROJECT_NAME - it's handled by the compose file
 
 # Stop any existing test containers
 print_info "Stopping existing test containers..."
-# Try cleanup with current project name
 docker compose -f docker-compose-test.yml down -v || true
-
-# Also try cleanup with default project name (in case containers were started without COMPOSE_PROJECT_NAME)
-COMPOSE_PROJECT_NAME=advanced docker compose -f docker-compose-test.yml down -v 2>/dev/null || true
 
 # Run integration tests
 print_info "Running integration tests..."
@@ -268,8 +264,6 @@ else
     if [ "${CLEANUP_CONTAINERS:-true}" != "false" ]; then
         print_info "Cleaning up test containers after failure..."
         docker compose -f docker-compose-test.yml down -v || true
-        # Also cleanup with default project name
-        COMPOSE_PROJECT_NAME=advanced docker compose -f docker-compose-test.yml down -v 2>/dev/null || true
         docker system prune -f || true
     else
         print_warning "Skipping cleanup (CLEANUP_CONTAINERS=false) - containers left running for debugging"
@@ -282,8 +276,6 @@ fi
 if [ "${CLEANUP_CONTAINERS:-true}" != "false" ]; then
     print_info "Cleaning up test containers..."
     docker compose -f docker-compose-test.yml down -v || true
-    # Also cleanup with default project name
-    COMPOSE_PROJECT_NAME=advanced docker compose -f docker-compose-test.yml down -v 2>/dev/null || true
     docker system prune -f || true
 else
     print_warning "Skipping cleanup (CLEANUP_CONTAINERS=false) - containers left running"

@@ -57,11 +57,11 @@ async def mark_session_complete(
     """
     session_key = f"audio:session:{session_id}"
     await redis_client.hset(session_key, mapping={
-        "status": "complete",
+        "status": "finished",
         "completed_at": str(time.time()),
         "completion_reason": reason
     })
-    logger.info(f"✅ Session {session_id[:12]} marked complete: {reason}")
+    logger.info(f"✅ Session {session_id[:12]} marked finished: {reason}")
 
 
 async def get_session_info(redis_client, session_id: str) -> Optional[Dict]:
@@ -231,15 +231,15 @@ async def get_streaming_status(request):
             # Check if all jobs are complete (including failed jobs)
             all_jobs_done = all_jobs_complete_for_session(session_id)
 
-            # Session is completed if:
-            # 1. Redis status says complete/finalized AND all jobs done, OR
-            # 2. All jobs are done (even if status isn't complete yet)
-            # This ensures sessions with failed jobs move to completed
-            if status in ["complete", "completed", "finalized"] or all_jobs_done:
+            # Session is finished if:
+            # 1. Redis status says finished AND all jobs done, OR
+            # 2. All jobs are done (even if status isn't finished yet)
+            # This ensures sessions with failed jobs move to finished
+            if status == "finished" or all_jobs_done:
                 if all_jobs_done:
-                    # All jobs complete - this is truly a completed session
-                    # Update Redis status if it wasn't already marked complete
-                    if status not in ["complete", "completed", "finalized"]:
+                    # All jobs finished - this is truly a finished session
+                    # Update Redis status if it wasn't already marked finished
+                    if status != "finished":
                         await mark_session_complete(redis_client, session_id, "all_jobs_complete")
 
                     # Get additional session data for completed sessions
@@ -251,7 +251,7 @@ async def get_streaming_status(request):
                         "client_id": session_obj.get("client_id", ""),
                         "conversation_id": session_data.get(b"conversation_id", b"").decode() if session_data and b"conversation_id" in session_data else None,
                         "has_conversation": bool(session_data and session_data.get(b"conversation_id", b"")),
-                        "action": session_data.get(b"action", b"complete").decode() if session_data and b"action" in session_data else "complete",
+                        "action": session_data.get(b"action", b"finished").decode() if session_data and b"action" in session_data else "finished",
                         "reason": session_data.get(b"reason", b"").decode() if session_data and b"reason" in session_data else "",
                         "completed_at": session_obj.get("last_chunk_at", 0),
                         "audio_file": session_data.get(b"audio_file", b"").decode() if session_data and b"audio_file" in session_data else "",
@@ -450,26 +450,26 @@ async def get_streaming_status(request):
         rq_stats = {
             "transcription_queue": {
                 "queued": transcription_queue.count,
-                "processing": len(transcription_queue.started_job_registry),
-                "completed": len(transcription_queue.finished_job_registry),
+                "started": len(transcription_queue.started_job_registry),
+                "finished": len(transcription_queue.finished_job_registry),
                 "failed": len(transcription_queue.failed_job_registry),
-                "cancelled": len(transcription_queue.canceled_job_registry),
+                "canceled": len(transcription_queue.canceled_job_registry),
                 "deferred": len(transcription_queue.deferred_job_registry)
             },
             "memory_queue": {
                 "queued": memory_queue.count,
-                "processing": len(memory_queue.started_job_registry),
-                "completed": len(memory_queue.finished_job_registry),
+                "started": len(memory_queue.started_job_registry),
+                "finished": len(memory_queue.finished_job_registry),
                 "failed": len(memory_queue.failed_job_registry),
-                "cancelled": len(memory_queue.canceled_job_registry),
+                "canceled": len(memory_queue.canceled_job_registry),
                 "deferred": len(memory_queue.deferred_job_registry)
             },
             "default_queue": {
                 "queued": default_queue.count,
-                "processing": len(default_queue.started_job_registry),
-                "completed": len(default_queue.finished_job_registry),
+                "started": len(default_queue.started_job_registry),
+                "finished": len(default_queue.finished_job_registry),
                 "failed": len(default_queue.failed_job_registry),
-                "cancelled": len(default_queue.canceled_job_registry),
+                "canceled": len(default_queue.canceled_job_registry),
                 "deferred": len(default_queue.deferred_job_registry)
             }
         }

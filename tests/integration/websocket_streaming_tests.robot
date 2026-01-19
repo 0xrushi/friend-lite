@@ -72,7 +72,7 @@ Conversation Job Created After Speech Detection
     Send Audio Chunks To Stream    ${stream_id}    ${TEST_AUDIO_FILE}    num_chunks=200    realtime_pacing=True
 
     # Wait for open_conversation job to be created (transcription + speech analysis takes time)
-    # Deepgram/OpenAI API calls + job processing can take 30-60s with queue
+    # Deepgram/OpenAI API calls + job started can take 30-60s with queue
     Wait Until Keyword Succeeds    60s    3s
     ...    Job Type Exists For Client    open_conversation    ${client_id}
 
@@ -137,10 +137,10 @@ Conversation Closes On Inactivity Timeout And Restarts Speech Detection
     # The conversation should auto-close after SPEECH_INACTIVITY_THRESHOLD_SECONDS
     Log To Console    Waiting for inactivity timeout to trigger conversation close...
 
-    # Wait for conversation job to complete (status changes from 'started' to 'completed')
+    # Wait for conversation job to complete (status changes from 'started' to 'finished')
     # Timeout value should be > SPEECH_INACTIVITY_THRESHOLD_SECONDS + buffer
-    Wait For Job Status    ${conv_job_id}    completed    timeout=30s    interval=2s
-    Log To Console    Conversation job completed (timeout triggered)
+    Wait For Job Status    ${conv_job_id}    finished    timeout=30s    interval=2s
+    Log To Console    Conversation job finished (timeout triggered)
 
     # Verify a NEW speech detection job (2nd one) was created for next conversation
     # The handle_end_of_conversation function creates a new speech_detection job
@@ -152,7 +152,7 @@ Conversation Closes On Inactivity Timeout And Restarts Speech Detection
     Log To Console    New speech detection job created for next conversation
 
     # Verify post-conversation jobs were enqueued (linked by conversation_id, not client_id)
-    # These jobs process the completed conversation: speaker recognition, memory, title
+    # These jobs process the finished conversation: speaker recognition, memory, title
     # Note: Streaming conversations no longer have batch transcription - transcript comes from streaming
     Log To Console    Verifying post-conversation jobs (speaker, memory, title)...
 

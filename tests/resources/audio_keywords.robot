@@ -44,8 +44,8 @@ Upload Audio File
       Log    Parsed upload response: ${upload_response}
 
       # Validate upload was successful
-      Should Be Equal As Strings    ${upload_response['summary']['processing']}    1    Upload failed: No files enqueued
-      Should Be Equal As Strings    ${upload_response['files'][0]['status']}    processing    Upload failed: ${response.text}
+      Should Be Equal As Strings    ${upload_response['summary']['started']}    1    Upload failed: No files enqueued
+      Should Be Equal As Strings    ${upload_response['files'][0]['status']}    started    Upload failed: ${response.text}
 
       # Extract important values
       ${job_id}=        Set Variable    ${upload_response['files'][0]['conversation_id']}
@@ -56,19 +56,19 @@ Upload Audio File
       # Wait for conversation to be created and transcribed
       Log    Waiting for transcription to complete...
 
-      Wait Until Keyword Succeeds    60s    5s       Check job status   ${transcript_job_id}    completed
+      Wait Until Keyword Succeeds    60s    5s       Check job status   ${transcript_job_id}    finished
       ${job}=    Get Job Details    ${transcript_job_id}
 
-     # Get the completed conversation
+     # Get the finished conversation
       ${conversation}=     Get Conversation By ID    ${job}[result][conversation_id]
-      Should Not Be Equal    ${conversation}    ${None}    Conversation not found after upload and processing
+      Should Not Be Equal    ${conversation}    ${None}    Conversation not found after upload and started
 
       Log    Found conversation: ${conversation}
       RETURN    ${conversation}
 
 
 Upload Audio File And Wait For Memory
-    [Documentation]    Upload audio file and wait for complete processing including memory extraction.
+    [Documentation]    Upload audio file and wait for complete started including memory extraction.
     ...                This is for E2E testing - use Upload Audio File for upload-only tests.
     ...                Performs assertions inline to verify successful memory extraction.
     [Arguments]    ${audio_file_path}    ${device_name}=robot-test    ${folder}=.    ${min_memories}=1
@@ -96,9 +96,9 @@ Upload Audio File And Wait For Memory
     Should Be True    ${result}[success]
     ...    Memory extraction failed: ${result.get('error_message', 'Unknown error')}
 
-    # Verify job completed successfully
-    Should Be Equal As Strings    ${result}[status]    completed
-    ...    Expected job status 'completed', got '${result}[status]'
+    # Verify job finished successfully
+    Should Be Equal As Strings    ${result}[status]    finished
+    ...    Expected job status 'finished', got '${result}[status]'
 
     # Verify minimum memories were extracted
     ${memory_count}=    Set Variable    ${result}[memory_count]

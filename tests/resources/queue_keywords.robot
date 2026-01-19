@@ -59,7 +59,7 @@ Get Job Status
 
 Check job status
     [Documentation]    Check the status of a specific job by ID
-    ...                Fails immediately if job is in 'failed' state when expecting 'completed'
+    ...                Fails immediately if job is in 'failed' state when expecting 'finished'
     [Arguments]    ${job_id}    ${expected_status}
 
     ${job}=    Get Job status    ${job_id}
@@ -70,8 +70,8 @@ Check job status
     ${actual_status}=    Set Variable    ${job}[status]
     Log    Job ${job_id} status: ${actual_status} (expected: ${expected_status})
 
-    # Fail fast if job is in failed state when we're expecting completed
-    IF    '${actual_status}' == 'failed' and '${expected_status}' == 'completed'
+    # Fail fast if job is in failed state when we're expecting finished
+    IF    '${actual_status}' == 'failed' and '${expected_status}' == 'finished'
         ${error_msg}=    Evaluate    $job.get('error_message') or $job.get('exc_info') or $job.get('error', 'Unknown error')
         Fail    Job ${job_id} failed: ${error_msg}
     END
@@ -249,12 +249,13 @@ Cancel All Running Jobs
     END
 
 Flush In Progress Jobs
-    [Documentation]    Flush only queued and in-progress jobs (preserves completed/failed jobs)
-    ...                Use in test cleanup to reset queue state without losing job history
+    [Documentation]    Flush queued, in-progress, and finished jobs (preserves only failed jobs for debugging)
+    ...                Use in test cleanup to reset queue state between tests
+    ...                Includes finished jobs to prevent test contamination from previous runs
 
     Log To Console    Flushing in-progress and queued jobs...
     TRY
-        ${payload}=    Create Dictionary    confirm=${True}
+        ${payload}=    Create Dictionary    confirm=${True}    include_finished=${True}
         ${response}=    POST On Session    api    /api/queue/flush-all    json=${payload}    expected_status=200
         ${result}=    Set Variable    ${response.json()}
         Log To Console    Successfully flushed ${result}[total_removed] jobs
@@ -319,16 +320,16 @@ Get Conversation ID From Job Meta
     RETURN    ${conversation_id}
 
 Job Should Be Complete
-    [Documentation]    Check if job has reached a completed state (completed, finished, or failed)
+    [Documentation]    Check if job has reached a terminal state (finished or failed)
     [Arguments]    ${job_id}
 
     ${job}=    Get Job status    ${job_id}
     ${status}=    Set Variable    ${job}[status]
-    Should Be True    '${status}' in ['completed', 'finished', 'failed']    Job status: ${status}
+    Should Be True    '${status}' in ['finished', 'failed']    Job status: ${status}
 
 
 Get Job Result
-    [Documentation]    Get the result field of a completed job
+    [Documentation]    Get the result field of a finished job
     ...                Useful for checking job output/return values
     [Arguments]    ${job_id}
 

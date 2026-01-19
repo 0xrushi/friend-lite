@@ -210,7 +210,7 @@ async def audio_streaming_persistence_job(
 
         # Check if session is finalizing
         session_status = await redis_client.hget(session_key, "status")
-        if session_status and session_status.decode() in ["finalizing", "complete"]:
+        if session_status and session_status.decode() in ["finalizing", "finished"]:
             logger.info(f"🛑 Session finalizing detected, flushing final chunks...")
             await asyncio.sleep(0.5)  # Brief wait for in-flight chunks
 

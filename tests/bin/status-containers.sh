@@ -7,12 +7,9 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ENV_FILE="$SCRIPT_DIR/../setup/.env.test"
 
-# Get project name
-if [ -f "$ENV_FILE" ]; then
-    PROJECT_NAME=$(grep COMPOSE_PROJECT_NAME "$ENV_FILE" | cut -d= -f2 || echo "advanced-backend-test")
-else
-    PROJECT_NAME="advanced-backend-test"
-fi
+# Get project name (from docker-compose-test.yml)
+# The project name is set in the compose file as 'backend-test'
+PROJECT_NAME="backend-test"
 
 echo "📊 Test Container Status"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

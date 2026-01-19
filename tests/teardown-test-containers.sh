@@ -19,10 +19,10 @@ print_warning() { echo -e "${YELLOW}[WARNING]${NC} $1"; }
 SCRIPT_DIR="$(dirname "$0")"
 cd "$SCRIPT_DIR/../backends/advanced" || exit 1
 
-# Set default COMPOSE_PROJECT_NAME (can be overridden by .env.test)
-export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-advanced-backend-test}"
+# Note: Project name 'backend-test' is set in docker-compose-test.yml
+# No need to export COMPOSE_PROJECT_NAME - it's handled by the compose file
 
-# Load .env.test if available to get consistent project name
+# Load .env.test if available for other environment variables
 if [ -f "$SCRIPT_DIR/setup/.env.test" ]; then
     set -a
     source "$SCRIPT_DIR/setup/.env.test"
