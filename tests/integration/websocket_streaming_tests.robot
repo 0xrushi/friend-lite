@@ -96,7 +96,10 @@ Conversation Job Created After Speech Detection
         END
     END
     Should Be True    ${found_linked_job}    msg=No speech_detection job has conversation_job_id set
-    [Teardown]    Close Audio Stream    ${stream_id}
+
+    # Close stream after test completes
+    ${total_chunks}=    Close Audio Stream    ${stream_id}
+    Log    Closed stream, sent ${total_chunks} total chunks
 
 
 Conversation Closes On Inactivity Timeout And Restarts Speech Detection

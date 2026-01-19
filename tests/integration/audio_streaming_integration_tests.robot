@@ -58,7 +58,10 @@ Redis Session Schema Contains All Required Fields
     Should Be Equal    ${session_data}[status]    active
 
     Log    ✅ Redis session schema verified
-    [Teardown]    Close Audio Stream    ${stream_id}
+
+    # Close stream after test completes
+    ${total_chunks}=    Close Audio Stream    ${stream_id}
+    Log    Closed stream, sent ${total_chunks} total chunks
 
 
 Chunk Count Increments In Redis Session
@@ -85,7 +88,10 @@ Chunk Count Increments In Redis Session
     Should Be True    ${count2} >= 8
 
     Log    ✅ Chunk count tracked in Redis: ${count1} → ${count2}
-    [Teardown]    Close Audio Stream    ${stream_id}
+
+    # Close stream after test completes
+    ${total_chunks}=    Close Audio Stream    ${stream_id}
+    Log    Closed stream, sent ${total_chunks} total chunks
 
 
 Job IDs Stored In Redis Session
@@ -110,7 +116,9 @@ Job IDs Stored In Redis Session
     Log    ✅ Speech detection job: ${session_data}[speech_detection_job_id]
     Log    ✅ Audio persistence job: ${session_data}[audio_persistence_job_id]
 
-    [Teardown]    Close Audio Stream    ${stream_id}
+    # Close stream after test completes
+    ${total_chunks}=    Close Audio Stream    ${stream_id}
+    Log    Closed stream, sent ${total_chunks} total chunks
 
 
 Generic Transcription Provider Works
@@ -134,7 +142,9 @@ Generic Transcription Provider Works
     Should Not Be Empty    ${session_data}[provider]
     Log    ✅ Transcription provider: ${session_data}[provider]
 
-    [Teardown]    Close Audio Stream    ${stream_id}
+    # Close stream after test completes
+    ${total_chunks}=    Close Audio Stream    ${stream_id}
+    Log    Closed stream, sent ${total_chunks} total chunks
 
 
 Session Cleaned Up After Stream Close
@@ -186,4 +196,7 @@ User Email Tracked In Session
     Should Contain    ${session_data}[user_email]    @    Email should contain @
 
     Log    ✅ User email tracked: ${session_data}[user_email]
-    [Teardown]    Close Audio Stream    ${stream_id}
+
+    # Close stream after test completes
+    ${total_chunks}=    Close Audio Stream    ${stream_id}
+    Log    Closed stream, sent ${total_chunks} total chunks

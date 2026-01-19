@@ -303,9 +303,19 @@ class AudioStreamClient:
     async def close(self) -> None:
         """Close the WebSocket connection."""
         if self.ws:
-            await self.ws.close()
-            self.ws = None
-            logger.info("WebSocket connection closed")
+            try:
+                # Add timeout to WebSocket close to prevent hanging
+                await asyncio.wait_for(self.ws.close(), timeout=2.0)
+                logger.info("WebSocket connection closed cleanly")
+            except asyncio.TimeoutError:
+                logger.warning("WebSocket close timed out after 2s, forcing close")
+                # Force close without waiting for handshake
+                if hasattr(self.ws, 'transport') and self.ws.transport:
+                    self.ws.transport.close()
+            except Exception as e:
+                logger.error(f"Error during WebSocket close: {e}")
+            finally:
+                self.ws = None
 
     async def __aenter__(self) -> "AudioStreamClient":
         """Async context manager entry."""
