@@ -38,11 +38,11 @@ models:
   description: Qdrant vector database (local)
   model_params:
     collection_name: omi_memories
-    host: ${QDRANT_BASE_URL:-qdrant}
-    port: ${QDRANT_PORT:-6333}
+    host: ${oc.env:QDRANT_BASE_URL,qdrant}
+    port: ${oc.env:QDRANT_PORT,6333}
   model_provider: qdrant
   model_type: vector_store
-  model_url: http://${QDRANT_BASE_URL:-qdrant}:${QDRANT_PORT:-6333}
+  model_url: http://${oc.env:QDRANT_BASE_URL,qdrant}:${oc.env:QDRANT_PORT,6333}
   name: vs-qdrant
 speaker_recognition:
   enabled: false

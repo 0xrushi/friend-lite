@@ -23,7 +23,7 @@ memory:
   timeout_seconds: 1200
 models:
 - api_family: openai
-  api_key: ${OPENAI_API_KEY:-}
+  api_key: ${oc.env:OPENAI_API_KEY,}
   description: OpenAI GPT-4o-mini
   model_name: gpt-4o-mini
   model_output: json
@@ -35,7 +35,7 @@ models:
   model_url: https://api.openai.com/v1
   name: openai-llm
 - api_family: openai
-  api_key: ${OPENAI_API_KEY:-}
+  api_key: ${oc.env:OPENAI_API_KEY,}
   description: OpenAI text-embedding-3-small
   embedding_dimensions: 1536
   model_name: text-embedding-3-small
@@ -48,14 +48,14 @@ models:
   description: Qdrant vector database
   model_params:
     collection_name: omi_memories
-    host: ${QDRANT_BASE_URL:-qdrant}
-    port: ${QDRANT_PORT:-6333}
+    host: ${oc.env:QDRANT_BASE_URL,qdrant}
+    port: ${oc.env:QDRANT_PORT,6333}
   model_provider: qdrant
   model_type: vector_store
-  model_url: http://${QDRANT_BASE_URL:-qdrant}:${QDRANT_PORT:-6333}
+  model_url: http://${oc.env:QDRANT_BASE_URL,qdrant}:${oc.env:QDRANT_PORT,6333}
   name: vs-qdrant
 - api_family: http
-  api_key: ${DEEPGRAM_API_KEY:-}
+  api_key: ${oc.env:DEEPGRAM_API_KEY,}
   description: Deepgram Nova 3 (batch)
   model_provider: deepgram
   model_type: stt
@@ -64,7 +64,7 @@ models:
   operations:
     stt_transcribe:
       headers:
-        Authorization: Token ${DEEPGRAM_API_KEY:-}
+        Authorization: Token ${oc.env:DEEPGRAM_API_KEY,}
         Content-Type: audio/raw
       method: POST
       path: /listen
@@ -84,7 +84,7 @@ models:
           words: results.channels[0].alternatives[0].words
         type: json
 - api_family: websocket
-  api_key: ${DEEPGRAM_API_KEY:-}
+  api_key: ${oc.env:DEEPGRAM_API_KEY,}
   description: Deepgram Nova 3 (streaming)
   model_provider: deepgram
   model_type: stt_stream
