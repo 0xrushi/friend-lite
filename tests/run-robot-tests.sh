@@ -46,15 +46,9 @@ print_info "============================"
 CLEANUP_CONTAINERS="${CLEANUP_CONTAINERS:-false}"  # Changed default: keep containers running for faster re-runs
 OUTPUTDIR="${OUTPUTDIR:-results}"
 
-# Set default CONFIG_FILE if not provided
-# Use test config by default (disables speaker recognition for CI performance)
-# Override: CONFIG_FILE=../config/config.yml ./run-robot-tests.sh
-export CONFIG_FILE="${CONFIG_FILE:-configs/deepgram-openai.yml}"
-
-# Convert CONFIG_FILE to absolute path (Docker Compose resolves relative paths from compose file location)
-if [[ ! "$CONFIG_FILE" = /* ]]; then
-    CONFIG_FILE="$(cd "$(dirname "$CONFIG_FILE")" && pwd)/$(basename "$CONFIG_FILE")"
-fi
+# Use Deepgram + OpenAI config for full API tests
+# Set TEST_CONFIG_FILE to point to deepgram-openai.yml inside the container
+export TEST_CONFIG_FILE="/app/test-configs/deepgram-openai.yml"
 
 # Load environment variables (CI or local)
 if [ -f "setup/.env.test" ] && [ -z "$DEEPGRAM_API_KEY" ]; then

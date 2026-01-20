@@ -49,14 +49,10 @@ CLEANUP_CONTAINERS="${CLEANUP_CONTAINERS:-false}"
 OUTPUTDIR="${OUTPUTDIR:-results-no-api}"
 
 # Use mock services config (no API keys needed)
-export CONFIG_FILE="${CONFIG_FILE:-configs/mock-services.yml}"
+# Set TEST_CONFIG_FILE to point to mock-services.yml inside the container
+export TEST_CONFIG_FILE="/app/test-configs/mock-services.yml"
 
-# Convert CONFIG_FILE to absolute path
-if [[ ! "$CONFIG_FILE" = /* ]]; then
-    CONFIG_FILE="$(cd "$(dirname "$CONFIG_FILE")" && pwd)/$(basename "$CONFIG_FILE")"
-fi
-
-print_info "Using config file: $CONFIG_FILE"
+print_info "Using config file: ${TEST_CONFIG_FILE}"
 print_warning "Memory extraction and transcription are disabled in this mode"
 
 # Load environment variables if available (but don't require them)
