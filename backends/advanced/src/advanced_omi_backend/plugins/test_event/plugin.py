@@ -115,11 +115,21 @@ class TestEventPlugin(BasePlugin):
         Returns:
             PluginResult indicating success
         """
-        try:
-            conversation_id = context.data.get('conversation_id', 'unknown')
-            duration = context.data.get('duration', 0)
+        conversation_id = context.data.get('conversation_id', 'unknown')
+        duration = context.data.get('duration', 0)
 
-            # Log to storage
+        # Add at start
+        logger.info(
+            f"📝 HANDLER: on_conversation_complete called for {conversation_id[:12]}"
+        )
+        logger.debug(f"   Event: {context.event}")
+        logger.debug(f"   Metadata: {context.metadata}")
+        logger.debug(f"   Duration: {duration}s")
+
+        try:
+            # Add before storage
+            logger.info(f"   💾 Storing event to SQLite database...")
+
             row_id = await self.storage.log_event(
                 event=context.event,  # 'conversation.complete'
                 user_id=context.user_id,
@@ -127,27 +137,28 @@ class TestEventPlugin(BasePlugin):
                 metadata=context.metadata
             )
 
-            self.event_count += 1
+            # Add after storage
+            logger.info(f"   ✓ Event stored successfully (row_id={row_id})")
 
-            logger.info(
-                f"📝 Logged conversation.complete event (row_id={row_id}): "
-                f"user={context.user_id}, "
-                f"conversation={conversation_id}, "
-                f"duration={duration:.2f}s"
-            )
+            self.event_count += 1
 
             return PluginResult(
                 success=True,
                 message=f"Conversation event logged (row_id={row_id})",
-                should_continue=True
+                data={"row_id": row_id},
+                should_continue=True,
             )
 
         except Exception as e:
-            logger.error(f"Error logging conversation event: {e}", exc_info=True)
+            # Enhance error logging
+            logger.error(
+                f"   ✗ Storage FAILED for {conversation_id[:12]}: {e}",
+                exc_info=True
+            )
             return PluginResult(
                 success=False,
                 message=f"Failed to log conversation event: {e}",
-                should_continue=True
+                should_continue=True,
             )
 
     async def on_memory_processed(self, context: PluginContext) -> Optional[PluginResult]:

@@ -31,9 +31,9 @@ from rq import Worker
 
 # Import orchestrator components
 from src.advanced_omi_backend.workers.orchestrator import (
+    HealthMonitor,
     OrchestratorConfig,
     ProcessManager,
-    HealthMonitor,
     build_worker_definitions,
 )
 
@@ -213,7 +213,7 @@ class WorkerOrchestrator:
             await self.shutdown_event.wait()
 
         except Exception as e:
-            logger.error(f"❌ Orchestrator error: {e}", exc_info=True)
+            logger.exception(f"❌ Orchestrator error: {e}")
             raise
         finally:
             # Always perform shutdown
@@ -233,7 +233,7 @@ async def main():
         sys.exit(0)
 
     except Exception as e:
-        logger.error(f"Fatal error: {e}", exc_info=True)
+        logger.exception(f"Fatal error: {e}")
         sys.exit(1)
 
 

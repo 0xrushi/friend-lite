@@ -122,23 +122,37 @@ class PluginRouter:
         Returns:
             List of plugin results
         """
+        # Add at start
+        logger.info(f"🔌 ROUTER: Dispatching '{event}' event (user={user_id})")
+
         results = []
 
         # Get plugins subscribed to this event
         plugin_ids = self._plugins_by_event.get(event, [])
 
+        # Add subscription check
+        if not plugin_ids:
+            logger.warning(f"🔌 ROUTER: No plugins subscribed to event '{event}'")
+            return results
+
+        logger.info(f"🔌 ROUTER: Found {len(plugin_ids)} subscribed plugin(s): {plugin_ids}")
+
         for plugin_id in plugin_ids:
             plugin = self.plugins[plugin_id]
 
             if not plugin.enabled:
+                logger.info(f"   ⊘ Skipping '{plugin_id}': disabled")
                 continue
 
             # Check execution condition (wake_word, etc.)
+            logger.info(f"   → Checking execution condition for '{plugin_id}'")
             if not await self._should_execute(plugin, data):
+                logger.info(f"   ⊘ Skipping '{plugin_id}': condition not met")
                 continue
 
             # Execute plugin
             try:
+                logger.info(f"   ▶ Executing '{plugin_id}' for event '{event}'")
                 context = PluginContext(
                     user_id=user_id,
                     event=event,
@@ -149,15 +163,30 @@ class PluginRouter:
                 result = await self._execute_plugin(plugin, event, context)
 
                 if result:
+                    status_icon = "✓" if result.success else "✗"
+                    logger.info(
+                        f"   {status_icon} Plugin '{plugin_id}' completed: "
+                        f"success={result.success}, message={result.message}"
+                    )
                     results.append(result)
 
                     # If plugin says stop processing, break
                     if not result.should_continue:
-                        logger.info(f"Plugin '{plugin_id}' stopped further processing")
+                        logger.info(f"   ⊗ Plugin '{plugin_id}' stopped further processing")
                         break
 
             except Exception as e:
-                logger.error(f"Error executing plugin '{plugin_id}': {e}", exc_info=True)
+                # CRITICAL: Log exception details
+                logger.error(
+                    f"   ✗ Plugin '{plugin_id}' FAILED with exception: {e}",
+                    exc_info=True
+                )
+
+        # Add at end
+        logger.info(
+            f"🔌 ROUTER: Dispatch complete for '{event}': "
+            f"{len(results)} plugin(s) executed successfully"
+        )
 
         return results
 

@@ -118,29 +118,55 @@ class EventStorage:
         Returns:
             Row ID of inserted event
         """
+        # Add at start
+        logger.debug(f"💾 STORAGE: Logging event '{event}' for user {user_id}")
+
         if not self.db:
+            logger.error("💾 STORAGE: Database connection not initialized!")
             raise RuntimeError("Event storage not initialized")
 
         timestamp = datetime.utcnow().isoformat()
-        data_json = json.dumps(data)
-        metadata_json = json.dumps(metadata) if metadata else None
 
-        cursor = await self.db.execute(
-            """
-            INSERT INTO plugin_events (timestamp, event, user_id, data, metadata)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (timestamp, event, user_id, data_json, metadata_json)
-        )
+        # Add before serialization
+        logger.debug(f"💾 STORAGE: Serializing event data...")
+        try:
+            data_json = json.dumps(data)
+            metadata_json = json.dumps(metadata) if metadata else None
+        except Exception as e:
+            logger.error(
+                f"💾 STORAGE: JSON serialization failed for event '{event}': {e}",
+                exc_info=True
+            )
+            raise
 
-        await self.db.commit()
-        row_id = cursor.lastrowid
+        # Add before database operation
+        logger.debug(f"💾 STORAGE: Inserting into plugin_events table...")
 
-        logger.debug(
-            f"Logged event: {event} for user {user_id} (row_id={row_id})"
-        )
+        try:
+            cursor = await self.db.execute(
+                """
+                INSERT INTO plugin_events (timestamp, event, user_id, data, metadata)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (timestamp, event, user_id, data_json, metadata_json)
+            )
 
-        return row_id
+            await self.db.commit()
+            row_id = cursor.lastrowid
+
+            # Add success log
+            logger.info(
+                f"💾 STORAGE: Event '{event}' inserted successfully (row_id={row_id})"
+            )
+
+            return row_id
+
+        except Exception as e:
+            logger.error(
+                f"💾 STORAGE: Database operation failed for event '{event}': {e}",
+                exc_info=True
+            )
+            raise
 
     async def get_events_by_type(self, event: str) -> List[Dict[str, Any]]:
         """

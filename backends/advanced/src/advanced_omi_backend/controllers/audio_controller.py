@@ -94,7 +94,8 @@ async def upload_and_process_audio_files(
                     audio_data, sample_rate, sample_width, channels, duration = await validate_and_prepare_audio(
                         audio_data=content,
                         expected_sample_rate=16000,  # Expecting 16kHz
-                        convert_to_mono=True  # Convert stereo to mono
+                        convert_to_mono=True,  # Convert stereo to mono
+                        auto_resample=True  # Auto-resample if sample rate doesn't match
                     )
                 except AudioValidationError as e:
                     processed_files.append({

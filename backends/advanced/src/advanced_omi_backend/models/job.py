@@ -44,7 +44,7 @@ async def _ensure_beanie_initialized():
             mongodb_uri = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
 
             # Create MongoDB client
-            mongodb_database = os.getenv("MONGODB_DATABASE", "friend-lite")
+            mongodb_database = os.getenv("MONGODB_DATABASE", "chronicle")
             client = AsyncIOMotorClient(mongodb_uri)
             try:
                 database = client.get_default_database(mongodb_database)

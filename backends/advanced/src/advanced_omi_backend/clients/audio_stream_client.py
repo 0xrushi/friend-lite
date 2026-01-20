@@ -555,6 +555,39 @@ class StreamManager:
         logger.info(f"Stream {stream_id} stopped, sent {total_chunks} chunks")
         return total_chunks
 
+    def close_stream_without_stop(self, stream_id: str) -> int:
+        """Close WebSocket connection without sending audio-stop event.
+
+        This simulates abrupt disconnection (network failure, client crash)
+        and should trigger websocket_disconnect end_reason.
+
+        Args:
+            stream_id: Stream session ID
+
+        Returns:
+            Total chunks sent during this session
+        """
+        session = self._sessions.get(stream_id)
+        if not session:
+            raise ValueError(f"Unknown stream_id: {stream_id}")
+
+        async def _close_abruptly():
+            # Just close the connection without audio-stop
+            await session.client.close()
+
+        future = asyncio.run_coroutine_threadsafe(_close_abruptly(), session.loop)
+        future.result(timeout=10)
+
+        # Stop the event loop
+        session.loop.call_soon_threadsafe(session.loop.stop)
+        session.thread.join(timeout=5)
+
+        total_chunks = session.chunk_count
+        del self._sessions[stream_id]
+
+        logger.info(f"Stream {stream_id} closed abruptly (no audio-stop), sent {total_chunks} chunks")
+        return total_chunks
+
     def get_session(self, stream_id: str) -> Optional[StreamSession]:
         """Get session info for a stream."""
         return self._sessions.get(stream_id)

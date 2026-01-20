@@ -8,7 +8,7 @@ import asyncio
 import logging
 import time, os
 from datetime import datetime
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from rq.job import Job
 from rq.exceptions import NoSuchJobError
 
@@ -482,11 +482,20 @@ async def open_conversation_job(
                             'word_count': speech_analysis.get('word_count', 0),
                         }
 
+                        logger.info(
+                            f"🔌 DISPATCH: transcript.streaming event "
+                            f"(conversation={conversation_id[:12]}, segment_id={session_id}_{current_count})"
+                        )
+
                         plugin_results = await plugin_router.dispatch_event(
                             event='transcript.streaming',
                             user_id=user_id,
                             data=plugin_data,
                             metadata={'client_id': client_id}
+                        )
+
+                        logger.info(
+                            f"🔌 RESULT: transcript.streaming dispatched to {len(plugin_results) if plugin_results else 0} plugins"
                         )
 
                         if plugin_results:
@@ -509,17 +518,18 @@ async def open_conversation_job(
     )
 
     # Determine end reason based on how we exited the loop
-    # Check session completion_reason from Redis (set by WebSocket controller on disconnect)
+    # Check session completion_reason from Redis (set atomically with status by finalize_session)
     completion_reason = await redis_client.hget(session_key, "completion_reason")
     completion_reason_str = completion_reason.decode() if completion_reason else None
 
     # Determine end_reason with proper precedence:
-    # 1. websocket_disconnect (explicit disconnect from client)
+    # 1. completion_reason from Redis (set by WebSocket controller: websocket_disconnect, user_stopped)
     # 2. inactivity_timeout (no speech for SPEECH_INACTIVITY_THRESHOLD_SECONDS)
     # 3. max_duration (conversation exceeded max runtime)
-    # 4. user_stopped (user manually stopped recording)
-    if completion_reason_str == "websocket_disconnect":
-        end_reason = "websocket_disconnect"
+    # 4. user_stopped (fallback for any other exit condition)
+    if completion_reason_str:
+        end_reason = completion_reason_str
+        logger.info(f"📊 Using completion_reason from session: {end_reason}")
     elif timeout_triggered:
         end_reason = "inactivity_timeout"
     elif time.time() - start_time > max_runtime:
@@ -676,41 +686,38 @@ async def open_conversation_job(
     # Wait a moment to ensure jobs are registered in RQ
     await asyncio.sleep(0.5)
 
-    # Trigger conversation-level plugins
+    # Enqueue conversation.complete event dispatch job
+    # This unifies the dispatch path for both WebSocket and file upload processing
     try:
-        plugin_router = get_plugin_router()
-        if plugin_router:
-            # Get conversation data for plugin context
-            conversation_model = await Conversation.find_one(
-                Conversation.conversation_id == conversation_id
-            )
+        from rq import Queue
 
-            plugin_data = {
-                'conversation': {
-                    'conversation_id': conversation_id,
-                    'client_id': client_id,
-                    'user_id': user_id,
-                },
-                'transcript': conversation_model.transcript if conversation_model else "",
-                'duration': time.time() - start_time,
-                'conversation_id': conversation_id,
-            }
+        default_queue = Queue('default', connection=redis_conn)
 
-            plugin_results = await plugin_router.dispatch_event(
-                event='conversation.complete',
-                user_id=user_id,
-                data=plugin_data,
-                metadata={'end_reason': end_reason}
-            )
+        dispatch_job = default_queue.enqueue(
+            dispatch_conversation_complete_event_job,
+            conversation_id,
+            client_id,
+            user_id,
+            end_reason,  # Pass the end_reason we determined earlier
+            job_timeout=120,
+            result_ttl=600,
+            job_id=f"event_complete_{conversation_id[:12]}",
+            description=f"Dispatch conversation complete event ({end_reason})",
+            meta={"client_id": client_id}
+        )
 
-            if plugin_results:
-                logger.info(f"📌 Triggered {len(plugin_results)} conversation-level plugins")
-                for result in plugin_results:
-                    if result.message:
-                        logger.info(f"  Plugin result: {result.message}")
+        logger.info(
+            f"📥 Enqueued conversation.complete dispatch job {dispatch_job.id} "
+            f"for {conversation_id[:12]} (end_reason={end_reason})"
+        )
 
     except Exception as e:
-        logger.warning(f"⚠️ Error triggering conversation-level plugins: {e}")
+        logger.error(
+            f"❌ Failed to enqueue conversation.complete dispatch job "
+            f"for {conversation_id[:12]}: {e}",
+            exc_info=True
+        )
+        # Don't fail the entire job - conversation is saved, just plugins won't be notified
 
     # Call shared cleanup/restart logic
     return await handle_end_of_conversation(
@@ -858,20 +865,23 @@ async def dispatch_conversation_complete_event_job(
     conversation_id: str,
     client_id: str,
     user_id: str,
+    end_reason: Optional[str] = None,
     *,
     redis_client=None
 ) -> Dict[str, Any]:
     """
-    Dispatch conversation.complete plugin event for file upload processing.
+    Dispatch conversation.complete plugin event for all conversation sources.
 
-    This job runs at the end of the post-conversation job chain to ensure
-    plugins receive the conversation.complete event for uploaded audio files.
-    WebSocket streaming dispatches this event in open_conversation_job instead.
+    This job runs at the end of conversation processing to ensure plugins
+    receive the conversation.complete event with the correct end_reason.
+    Used by both file upload and WebSocket streaming paths.
 
     Args:
         conversation_id: Conversation ID
         client_id: Client ID
         user_id: User ID
+        end_reason: Reason the conversation ended (e.g., 'file_upload', 'websocket_disconnect', 'user_stopped')
+                   Defaults to 'file_upload' for backward compatibility
         redis_client: Redis client (injected by decorator)
 
     Returns:
@@ -898,22 +908,40 @@ async def dispatch_conversation_complete_event_job(
     try:
         # Get or initialize plugin router (same pattern as transcription_jobs.py)
         plugin_router = get_plugin_router()
+
         if not plugin_router:
-            logger.info("🔧 Initializing plugin router in worker process...")
+            logger.warning("🔧 Plugin router not found in worker process - attempting initialization...")
             plugin_router = init_plugin_router()
 
-            # Initialize all plugins asynchronously (same as app_factory.py)
             if plugin_router:
+                logger.info(f"🔧 Plugin router initialized with {len(plugin_router.plugins)} plugin(s)")
+
+                # Initialize all plugins
                 for plugin_id, plugin in plugin_router.plugins.items():
                     try:
+                        logger.info(f"   Initializing plugin '{plugin_id}'...")
                         await plugin.initialize()
-                        logger.info(f"✅ Plugin '{plugin_id}' initialized")
+                        logger.info(f"   ✓ Plugin '{plugin_id}' initialized")
                     except Exception as e:
-                        logger.error(f"Failed to initialize plugin '{plugin_id}': {e}")
+                        logger.error(f"   ✗ Failed to initialize plugin '{plugin_id}': {e}", exc_info=True)
+            else:
+                logger.error("🔧 Plugin router initialization FAILED - router is None")
 
+        # CRITICAL CHECK: Fail loudly if no router
         if not plugin_router:
-            logger.warning("⚠️ Plugin router could not be initialized, skipping event dispatch")
-            return {"success": True, "skipped": True, "reason": "No plugin router"}
+            error_msg = (
+                f"❌ Plugin router could not be initialized in worker process. "
+                f"conversation.complete event for {conversation_id[:12]} will NOT be dispatched!"
+            )
+            logger.error(error_msg)
+
+            return {
+                "success": False,
+                "skipped": True,
+                "reason": "No plugin router",
+                "conversation_id": conversation_id,
+                "error": error_msg
+            }
 
         plugin_data = {
             'conversation': {
@@ -925,16 +953,28 @@ async def dispatch_conversation_complete_event_job(
             'conversation_id': conversation_id,
         }
 
+        # Use provided end_reason or default to 'file_upload' for backward compatibility
+        actual_end_reason = end_reason or 'file_upload'
+
+        logger.info(
+            f"🔌 DISPATCH: conversation.complete event for {conversation_id[:12]} "
+            f"(end_reason={actual_end_reason}, user={user_id}, client={client_id})"
+        )
+
         plugin_results = await plugin_router.dispatch_event(
             event='conversation.complete',
             user_id=user_id,
             data=plugin_data,
-            metadata={'end_reason': 'file_upload'}
+            metadata={'end_reason': actual_end_reason}
         )
 
+        logger.info(
+            f"🔌 RESULT: conversation.complete dispatched to {len(plugin_results) if plugin_results else 0} plugins"
+        )
         if plugin_results:
             logger.info(f"📌 Triggered {len(plugin_results)} conversation-level plugins")
             for result in plugin_results:
+                logger.info(f"   Plugin result: success={result.success}, message={result.message}")
                 if result.message:
                     logger.info(f"  Plugin result: {result.message}")
 

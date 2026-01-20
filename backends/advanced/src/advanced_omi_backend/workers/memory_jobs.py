@@ -271,6 +271,11 @@ async def process_memory_job(conversation_id: str, *, redis_client=None) -> Dict
                         'conversation_id': conversation_id,
                     }
 
+                    logger.info(
+                        f"🔌 DISPATCH: memory.processed event "
+                        f"(conversation={conversation_id[:12]}, memories={len(created_memory_ids)})"
+                    )
+
                     plugin_results = await plugin_router.dispatch_event(
                         event='memory.processed',
                         user_id=user_id,
@@ -279,6 +284,10 @@ async def process_memory_job(conversation_id: str, *, redis_client=None) -> Dict
                             'processing_time': processing_time,
                             'memory_provider': str(memory_provider),
                         }
+                    )
+
+                    logger.info(
+                        f"🔌 RESULT: memory.processed dispatched to {len(plugin_results) if plugin_results else 0} plugins"
                     )
 
                     if plugin_results:

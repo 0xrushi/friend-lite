@@ -3,15 +3,18 @@
 ###############################################################################
 
 import asyncio
+import io
 import logging
 import os
 import time
 import uuid as uuid_lib
+import wave
 from pathlib import Path
 
 # Type import to avoid circular imports
 from typing import TYPE_CHECKING, Optional
 
+import numpy as np
 from wyoming.audio import AudioChunk
 
 if TYPE_CHECKING:
@@ -30,10 +33,85 @@ class AudioValidationError(Exception):
     pass
 
 
+async def resample_audio_with_ffmpeg(
+    audio_data: bytes,
+    input_sample_rate: int,
+    input_channels: int,
+    input_sample_width: int,
+    target_sample_rate: int,
+    target_channels: int = 1
+) -> bytes:
+    """
+    Resample audio using FFmpeg with stdin/stdout pipes (no disk I/O).
+
+    Args:
+        audio_data: Raw PCM audio bytes
+        input_sample_rate: Input sample rate in Hz
+        input_channels: Number of input channels
+        input_sample_width: Input sample width in bytes (2 for 16-bit, 4 for 32-bit)
+        target_sample_rate: Target sample rate in Hz
+        target_channels: Target number of channels (default: 1 for mono)
+
+    Returns:
+        Resampled PCM audio bytes (16-bit signed little-endian)
+
+    Raises:
+        RuntimeError: If FFmpeg resampling fails
+    """
+    # Determine FFmpeg format based on sample width
+    if input_sample_width == 2:
+        input_format = "s16le"  # 16-bit signed little-endian
+    elif input_sample_width == 4:
+        input_format = "s32le"  # 32-bit signed little-endian
+    else:
+        raise AudioValidationError(
+            f"Unsupported sample width: {input_sample_width} bytes (only 2 or 4 supported)"
+        )
+
+    # FFmpeg command for resampling via pipes
+    # pipe:0 = stdin, pipe:1 = stdout
+    cmd = [
+        "ffmpeg",
+        "-f", input_format,
+        "-ar", str(input_sample_rate),
+        "-ac", str(input_channels),
+        "-i", "pipe:0",  # Read from stdin
+        "-ar", str(target_sample_rate),
+        "-ac", str(target_channels),
+        "-f", "s16le",  # Always output 16-bit
+        "pipe:1",  # Write to stdout
+    ]
+
+    # Run FFmpeg with piped I/O
+    process = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+
+    # Send input data and get output
+    stdout, stderr = await process.communicate(input=audio_data)
+
+    if process.returncode != 0:
+        error_msg = stderr.decode() if stderr else "Unknown error"
+        audio_logger.error(f"FFmpeg resampling failed: {error_msg}")
+        raise RuntimeError(f"Audio resampling failed: {error_msg}")
+
+    audio_logger.info(
+        f"Resampled audio: {input_sample_rate}Hz/{input_channels}ch → "
+        f"{target_sample_rate}Hz/{target_channels}ch "
+        f"({len(audio_data)} → {len(stdout)} bytes)"
+    )
+
+    return stdout
+
+
 async def validate_and_prepare_audio(
     audio_data: bytes,
     expected_sample_rate: int = 16000,
-    convert_to_mono: bool = True
+    convert_to_mono: bool = True,
+    auto_resample: bool = False
 ) -> tuple[bytes, int, int, int, float]:
     """
     Validate WAV audio data and prepare it for processing.
@@ -42,6 +120,7 @@ async def validate_and_prepare_audio(
         audio_data: Raw WAV file bytes
         expected_sample_rate: Expected sample rate (default: 16000 Hz)
         convert_to_mono: Whether to convert stereo to mono (default: True)
+        auto_resample: Whether to automatically resample audio if sample rate doesn't match (default: False)
 
     Returns:
         Tuple of (processed_audio_data, sample_rate, sample_width, channels, duration)
@@ -49,10 +128,6 @@ async def validate_and_prepare_audio(
     Raises:
         AudioValidationError: If audio validation fails
     """
-    import io
-    import wave
-    import numpy as np
-
     try:
         # Parse WAV file
         with wave.open(io.BytesIO(audio_data), "rb") as wav_file:
@@ -68,13 +143,36 @@ async def validate_and_prepare_audio(
     except Exception as e:
         raise AudioValidationError(f"Invalid WAV file: {str(e)}")
 
-    # Validate sample rate
+    # Handle sample rate mismatch
     if sample_rate != expected_sample_rate:
-        raise AudioValidationError(
-            f"Sample rate must be {expected_sample_rate}Hz, got {sample_rate}Hz"
-        )
+        if auto_resample:
+            audio_logger.info(
+                f"Auto-resampling audio from {sample_rate}Hz to {expected_sample_rate}Hz"
+            )
+            # Resample audio using FFmpeg (with pipes, no disk I/O)
+            processed_audio = await resample_audio_with_ffmpeg(
+                audio_data=processed_audio,
+                input_sample_rate=sample_rate,
+                input_channels=channels,
+                input_sample_width=sample_width,
+                target_sample_rate=expected_sample_rate,
+                target_channels=1 if convert_to_mono else channels
+            )
+            # Update metadata after resampling
+            sample_rate = expected_sample_rate
+            sample_width = 2  # FFmpeg outputs 16-bit
+            if convert_to_mono:
+                channels = 1
+            # Recalculate duration
+            duration = len(processed_audio) / (sample_rate * sample_width * channels)
+            # Skip stereo-to-mono conversion since resampling already handled it
+            convert_to_mono = False
+        else:
+            raise AudioValidationError(
+                f"Sample rate must be {expected_sample_rate}Hz, got {sample_rate}Hz"
+            )
 
-    # Convert stereo to mono if requested
+    # Convert stereo to mono if requested and not already done
     if convert_to_mono and channels == 2:
         audio_logger.info(f"Converting stereo audio to mono")
 

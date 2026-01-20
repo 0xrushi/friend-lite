@@ -132,6 +132,17 @@ Close Audio Stream
     Log    Stopped stream ${stream_id}, total chunks: ${total_chunks}
     RETURN    ${total_chunks}
 
+Close Audio Stream Without Stop Event
+    [Documentation]    Close WebSocket connection without sending audio-stop event.
+    ...                This simulates abrupt disconnection (network failure, client crash)
+    ...                and should trigger websocket_disconnect end_reason.
+    [Arguments]    ${stream_id}
+
+    # Call the Python library method directly
+    ${total_chunks}=    Close Audio Stream Without Stop    ${stream_id}
+    Log    Closed stream ${stream_id} abruptly (no audio-stop), total chunks: ${total_chunks}
+    RETURN    ${total_chunks}
+
 Cleanup All Audio Streams
     [Documentation]    Stop all active streams (use in teardown)
     Cleanup All Streams

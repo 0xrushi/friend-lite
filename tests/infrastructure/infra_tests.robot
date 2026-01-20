@@ -87,14 +87,57 @@ Verify Workers Still Running In Container
 
 Restart Workers Container
     [Documentation]    Restart the workers container to restore registration
+    ...                Uses docker compose for more reliable restart
     Log To Console    \n🔄 Restarting workers container...
 
-    ${result}=    Run Process    docker    restart    ${WORKERS_CONTAINER}    shell=False
-    Should Be Equal As Integers    ${result.rc}    0
+    # Use docker compose restart for more reliable restart
+    ${result}=    Run Process    docker    compose    -f    docker-compose-test.yml    restart    workers-test
+    ...    cwd=${BACKEND_DIR}    shell=False
 
-    # Wait for workers to start
-    Sleep    5s    reason=Wait for workers to initialize
+    IF    ${result.rc} != 0
+        Log To Console    ⚠️ Docker compose restart failed, attempting docker restart...
+        Log To Console    stderr: ${result.stderr}
+        # Fallback to direct docker restart
+        ${result}=    Run Process    docker    restart    ${WORKERS_CONTAINER}    shell=False
+    END
+
+    Should Be Equal As Integers    ${result.rc}    0    msg=Failed to restart workers: ${result.stderr}
+
+    # Wait for workers to start and register
+    Sleep    10s    reason=Wait for workers to initialize and register
     Log To Console    ✅ Workers container restarted
+
+Verify Workers Healthy Or Restart
+    [Documentation]    Check if workers are healthy, restart if needed
+    ...                This ensures subsequent tests have a working environment
+    Log To Console    \n🧹 Cleanup: Verifying worker health...
+
+    TRY
+        ${worker_count}=    Get Worker Count From Health Endpoint
+        Log To Console    Current worker count: ${worker_count}
+
+        IF    ${worker_count} < 6
+            Log To Console    ⚠️ Only ${worker_count} workers detected, restarting to restore health...
+            Restart Workers Container
+
+            # Verify workers recovered after restart
+            Sleep    10s    reason=Wait for workers to fully initialize
+            ${new_count}=    Get Worker Count From Health Endpoint
+            Log To Console    Worker count after restart: ${new_count}
+
+            IF    ${new_count} < 6
+                Log To Console    ⚠️ WARNING: Only ${new_count} workers after restart (expected 6+)
+            ELSE
+                Log To Console    ✅ Workers healthy: ${new_count} workers registered
+            END
+        ELSE
+            Log To Console    ✅ Workers healthy: ${worker_count} workers registered (no restart needed)
+        END
+    EXCEPT    AS    ${error}
+        Log To Console    ⚠️ Failed to verify worker health: ${error}
+        Log To Console    Attempting emergency restart...
+        Restart Workers Container
+    END
 
 *** Test Cases ***
 Worker Registration Loss Detection Test
@@ -169,10 +212,7 @@ Worker Registration Loss Detection Test
         Fail    Self-healing mechanism not working: Workers did not re-register after 90 seconds
     END
 
-    # Cleanup: Always restart workers after this test to ensure subsequent tests work
-    [Teardown]    Run Keywords
-    ...    Log To Console    \n🧹 Cleanup: Restarting workers for subsequent tests
-    ...    AND    Restart Workers Container
+    [Teardown]    Verify Workers Healthy Or Restart
 
 Worker Count Validation Test
     [Documentation]    Verify the health endpoint accurately reports worker counts
@@ -277,6 +317,9 @@ WebSocket Disconnect Conversation End Reason Test
 
     # Send audio fast (no realtime pacing) to trigger conversation creation
     Send Audio Chunks To Stream    ${stream_id}    ${TEST_AUDIO_FILE}    num_chunks=200
+
+    # Initialize conversation_id to None (will be set when found)
+    ${conversation_id}=    Set Variable    ${None}
 
     # Keep sending audio in a loop to prevent inactivity timeout while waiting for conversation
     # We need to continuously send audio because SPEECH_INACTIVITY_THRESHOLD_SECONDS=2

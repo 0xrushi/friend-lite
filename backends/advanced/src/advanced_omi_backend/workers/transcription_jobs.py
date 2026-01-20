@@ -252,14 +252,21 @@ async def transcribe_full_audio_job(
                     'word_count': len(words),
                 }
 
-                logger.info(f"🔍 DEBUG: Dispatching transcript.batch event with user_id={user_id}, client_id={client_id}")
+                logger.info(
+                    f"🔌 DISPATCH: transcript.batch event "
+                    f"(conversation={conversation_id[:12]}, words={len(words)})"
+                )
+
                 plugin_results = await plugin_router.dispatch_event(
                     event='transcript.batch',
                     user_id=user_id,
                     data=plugin_data,
                     metadata={'client_id': client_id}
                 )
-                logger.info(f"🔍 DEBUG: Event dispatch returned {len(plugin_results) if plugin_results else 0} results")
+
+                logger.info(
+                    f"🔌 RESULT: transcript.batch dispatched to {len(plugin_results) if plugin_results else 0} plugins"
+                )
 
                 if plugin_results:
                     logger.info(f"✅ Triggered {len(plugin_results)} transcript plugins in batch mode")
@@ -414,7 +421,6 @@ async def transcribe_full_audio_job(
         "audio_file_size": len(wav_data),
         "segment_count": len(segments),
         "word_count": len(words),
-        "words": words,  # Store words for speaker recognition job to read
         "speaker_recognition": {"enabled": False, "reason": "handled_by_separate_job"},
     }
 

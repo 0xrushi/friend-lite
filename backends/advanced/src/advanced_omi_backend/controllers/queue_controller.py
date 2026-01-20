@@ -537,6 +537,7 @@ def start_post_conversation_jobs(
         conversation_id,
         client_id or "",
         user_id,
+        "file_upload",  # Explicit end_reason for file upload processing
         job_timeout=120,  # 2 minutes
         result_ttl=JOB_RESULT_TTL,
         depends_on=[memory_job, title_summary_job],  # Wait for both parallel jobs

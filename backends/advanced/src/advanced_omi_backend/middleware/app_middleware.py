@@ -60,6 +60,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         "/health",
         "/auth/health",
         "/readiness",
+        "/api/queue/dashboard",  # Auto-refresh endpoint, too noisy
     }
 
     # Binary content types to exclude

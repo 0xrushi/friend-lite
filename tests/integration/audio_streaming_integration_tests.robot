@@ -170,10 +170,10 @@ Session Cleaned Up After Stream Close
     # Wait for finalization
     Sleep    2s
 
-    # Verify session is finalized or complete (jobs may finish quickly for short streams)
+    # Verify session is finalized or finished (jobs may finish quickly for short streams)
     ${session_after}=    Get Redis Session Data    ${client_id}
-    Should Be True    '${session_after}[status]' in ['finalizing', 'complete']
-    ...    Session status should be finalizing or complete, got: ${session_after}[status]
+    Should Be True    '${session_after}[status]' in ['finalizing', 'finished']
+    ...    Session status should be finalizing or finished, got: ${session_after}[status]
 
     Log    ✅ Session status updated to ${session_after}[status]
 

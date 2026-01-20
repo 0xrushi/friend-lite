@@ -216,19 +216,29 @@ class AudioStreamProducer:
         })
         logger.info(f"🔌 Marked websocket disconnected for session {session_id}")
 
-    async def finalize_session(self, session_id: str):
+    async def finalize_session(self, session_id: str, completion_reason: str = None):
         """
         Mark session as finalizing, send end marker, and clean up buffer.
 
         Args:
             session_id: Session identifier
+            completion_reason: Optional reason for session completion (e.g., "websocket_disconnect", "user_stopped")
+                              This is set atomically with status to avoid race conditions.
         """
         session_key = f"audio:session:{session_id}"
 
-        await self.redis_client.hset(session_key, mapping={
+        # Build mapping with status and optional completion_reason
+        mapping = {
             "status": "finalizing",
             "finalized_at": str(time.time())
-        })
+        }
+
+        # Set completion_reason atomically with status to prevent race conditions
+        if completion_reason:
+            mapping["completion_reason"] = completion_reason
+            logger.info(f"📊 Finalizing session {session_id} with reason: {completion_reason}")
+
+        await self.redis_client.hset(session_key, mapping=mapping)
 
         # Send end_marker to Redis stream so streaming consumer can close the connection
         if session_id in self.session_buffers:

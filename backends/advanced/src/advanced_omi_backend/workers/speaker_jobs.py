@@ -207,9 +207,18 @@ async def recognise_speakers_job(
     actual_transcript_text = transcript_text or transcript_version.transcript or ""
     actual_words = words if words else []
 
-    # If words not provided, we need to get them from metadata
-    if not actual_words and transcript_version.metadata:
-        actual_words = transcript_version.metadata.get("words", [])
+    # If words not provided, extract from segments (single source of truth)
+    if not actual_words and transcript_version.segments:
+        actual_words = []
+        for seg in transcript_version.segments:
+            for word in seg.words:
+                actual_words.append({
+                    "word": word.word,
+                    "start": word.start,
+                    "end": word.end,
+                    "confidence": word.confidence
+                })
+        logger.info(f"🔤 Extracted {len(actual_words)} words from {len(transcript_version.segments)} segments")
 
     if not actual_transcript_text:
         logger.warning(f"🎤 No transcript text found in version {version_id}")
@@ -342,13 +351,27 @@ async def recognise_speakers_job(
                 continue
 
             speaker_name = seg.get("identified_as") or seg.get("speaker", "Unknown")
+
+            # Extract words from speaker service response (already matched to this segment)
+            words_data = seg.get("words", [])
+            segment_words = [
+                Conversation.Word(
+                    word=w.get("word", ""),
+                    start=w.get("start", 0.0),
+                    end=w.get("end", 0.0),
+                    confidence=w.get("confidence")
+                )
+                for w in words_data
+            ]
+
             updated_segments.append(
                 Conversation.SpeakerSegment(
                     start=seg.get("start", 0),
                     end=seg.get("end", 0),
                     text=text,
                     speaker=speaker_name,
-                    confidence=seg.get("confidence")
+                    confidence=seg.get("confidence"),
+                    words=segment_words  # Use words from speaker service
                 )
             )
 

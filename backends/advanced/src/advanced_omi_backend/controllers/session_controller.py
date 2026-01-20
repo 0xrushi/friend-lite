@@ -56,12 +56,13 @@ async def mark_session_complete(
         await mark_session_complete(redis, session_id, "all_jobs_complete")
     """
     session_key = f"audio:session:{session_id}"
+    mark_time = time.time()
     await redis_client.hset(session_key, mapping={
         "status": "finished",
-        "completed_at": str(time.time()),
+        "completed_at": str(mark_time),
         "completion_reason": reason
     })
-    logger.info(f"✅ Session {session_id[:12]} marked finished: {reason}")
+    logger.info(f"✅ Session {session_id[:12]} marked finished: {reason} [TIME: {mark_time:.3f}]")
 
 
 async def get_session_info(redis_client, session_id: str) -> Optional[Dict]:

@@ -436,13 +436,13 @@ async def diarize_identify_match(
                 word_start = word.get("start", 0.0)
                 word_end = word.get("end", 0.0)
                 word_mid = (word_start + word_end) / 2
-                
+
                 # Word belongs to this segment if its midpoint is within range
                 if start_time <= word_mid <= end_time:
-                    segment_words.append(word.get("word", ""))
-            
+                    segment_words.append(word)  # Keep full word object with timestamps
+
             # Create segment with matched text
-            segment_text = " ".join(segment_words).strip()
+            segment_text = " ".join(w.get("word", "") for w in segment_words).strip()
             
             if speaker_info and confidence >= similarity_threshold:
                 # Identified speaker
@@ -454,7 +454,8 @@ async def diarize_identify_match(
                     "identified_as": speaker_info["name"],
                     "speaker_id": speaker_info["id"],
                     "confidence": round(float(confidence), 3),
-                    "status": "identified"
+                    "status": "identified",
+                    "words": segment_words  # Include word-level timestamps
                 })
             else:
                 # Unknown speaker
@@ -466,7 +467,8 @@ async def diarize_identify_match(
                     "identified_as": None,
                     "speaker_id": None,
                     "confidence": round(float(confidence), 3) if confidence else 0.0,
-                    "status": "unknown"
+                    "status": "unknown",
+                    "words": segment_words  # Include word-level timestamps
                 })
         
         # Create summary

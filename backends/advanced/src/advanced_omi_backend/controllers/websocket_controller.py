@@ -238,6 +238,10 @@ async def cleanup_client_state(client_id: str):
         redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
         async_redis = redis.from_url(redis_url, decode_responses=False)
 
+        # Get audio stream producer for finalization
+        from advanced_omi_backend.services.audio_stream.producer import get_audio_stream_producer
+        audio_stream_producer = get_audio_stream_producer()
+
         # Find all session keys for this client and mark them complete
         pattern = f"audio:session:*"
         cursor = 0
@@ -250,8 +254,18 @@ async def cleanup_client_state(client_id: str):
                 # Check if this session belongs to this client
                 client_id_bytes = await async_redis.hget(key, "client_id")
                 if client_id_bytes and client_id_bytes.decode() == client_id:
-                    # Mark session as complete (WebSocket disconnected)
                     session_id = key.decode().replace("audio:session:", "")
+
+                    # Check session status
+                    status_bytes = await async_redis.hget(key, "status")
+                    status = status_bytes.decode() if status_bytes else None
+
+                    # If session is still active, finalize it first (sets status + completion_reason atomically)
+                    if status in ["active", None]:
+                        logger.info(f"📊 Finalizing active session {session_id[:12]} due to WebSocket disconnect")
+                        await audio_stream_producer.finalize_session(session_id, completion_reason="websocket_disconnect")
+
+                    # Mark session as complete (WebSocket disconnected)
                     await mark_session_complete(async_redis, session_id, "websocket_disconnect")
                     sessions_closed += 1
 
@@ -485,8 +499,8 @@ async def _finalize_streaming_session(
         # Send end-of-session signal to workers
         await audio_stream_producer.send_session_end_signal(session_id)
 
-        # Mark session as finalizing
-        await audio_stream_producer.finalize_session(session_id)
+        # Mark session as finalizing with user_stopped reason (audio-stop event)
+        await audio_stream_producer.finalize_session(session_id, completion_reason="user_stopped")
 
         # NOTE: Finalize job disabled - open_conversation_job now handles everything
         # The open_conversation_job will:

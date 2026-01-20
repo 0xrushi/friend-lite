@@ -29,8 +29,7 @@ class AppConfig:
     def __init__(self):
         # MongoDB Configuration
         self.mongodb_uri = os.getenv("MONGODB_URI", "mongodb://mongo:27017")
-        # default to legacy value to avoid breaking peoples .env
-        self.mongodb_database = os.getenv("MONGODB_DATABASE", "friend-lite")
+        self.mongodb_database = os.getenv("MONGODB_DATABASE", "chronicle")
         self.mongo_client = AsyncIOMotorClient(self.mongodb_uri)
         self.db = self.mongo_client.get_default_database(self.mongodb_database)
         self.users_col = self.db["users"]

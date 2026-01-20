@@ -334,7 +334,7 @@ Get Job Result
     [Arguments]    ${job_id}
 
     # Get full job details
-    ${response}=    GET On Session    api    /api/queue/job/${job_id}
+    ${response}=    GET On Session    api    /api/queue/jobs/${job_id}
     ...    expected_status=200
 
     ${job_data}=    Set Variable    ${response.json()}

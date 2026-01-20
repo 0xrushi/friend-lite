@@ -160,9 +160,9 @@ WebSocket Disconnect Should Trigger Conversation Complete Event
     ${conversation_id}=    Evaluate    $conv_meta.get('conversation_id', '')
     Should Not Be Equal    ${conversation_id}    ${EMPTY}    Conversation ID should be set
 
-    # Disconnect WebSocket (triggers conversation close with websocket_disconnect end_reason)
-    ${total_chunks}=    Close Audio Stream    ${stream_id}
-    Log    Closed WebSocket stream, sent ${total_chunks} total chunks
+    # Disconnect WebSocket abruptly without audio-stop (triggers websocket_disconnect end_reason)
+    ${total_chunks}=    Close Audio Stream Without Stop Event    ${stream_id}
+    Log    Closed WebSocket stream abruptly, sent ${total_chunks} total chunks
 
     # Wait for plugin event dispatch (polls every 2s, max 10s)
     ${new_events}=    Wait For Plugin Event    conversation.complete    ${baseline_count}    timeout=10s
