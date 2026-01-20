@@ -55,7 +55,14 @@ def load_config(force_reload: bool = False) -> DictConfig:
 
     config_dir = get_config_dir()
     defaults_path = config_dir / "defaults.yml"
-    config_path = config_dir / "config.yml"
+
+    # Support CONFIG_FILE env var for test configurations
+    config_file = os.getenv("CONFIG_FILE", "config.yml")
+    # Handle both absolute paths and relative filenames
+    if os.path.isabs(config_file):
+        config_path = Path(config_file)
+    else:
+        config_path = config_dir / config_file
 
     # Load defaults
     defaults = {}

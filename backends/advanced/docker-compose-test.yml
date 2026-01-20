@@ -18,7 +18,8 @@ services:
       - ./data/test_audio_chunks:/app/audio_chunks
       - ./data/test_debug_dir:/app/debug  # Fixed: mount to /app/debug for plugin database
       - ./data/test_data:/app/data
-      - ../../config:/app/config  # Mount config directory with defaults.yml and config.yml
+      - ../../config:/app/config  # Mount config directory with defaults.yml
+      - ../../tests/configs:/app/test-configs:ro  # Mount test-specific configs
       - ${PLUGINS_CONFIG:-../../tests/config/plugins.test.yml}:/app/config/plugins.yml  # Mount test plugins config to correct location
     environment:
       # Override with test-specific settings
@@ -27,6 +28,8 @@ services:
       - QDRANT_PORT=6333
       - REDIS_URL=redis://redis-test:6379/0
       - DEBUG_DIR=/app/debug  # Fixed: match plugin database mount path
+      # Test configuration file
+      - CONFIG_FILE=${TEST_CONFIG_FILE:-/app/test-configs/deepgram-openai.yml}
       # Import API keys from environment
       - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
@@ -171,7 +174,8 @@ services:
       - ./data/test_audio_chunks:/app/audio_chunks
       - ./data/test_debug_dir:/app/debug  # Fixed: mount to /app/debug for plugin database
       - ./data/test_data:/app/data
-      - ../../config:/app/config  # Mount config directory with defaults.yml and config.yml
+      - ../../config:/app/config  # Mount config directory with defaults.yml
+      - ../../tests/configs:/app/test-configs:ro  # Mount test-specific configs
       - ${PLUGINS_CONFIG:-../../tests/config/plugins.test.yml}:/app/config/plugins.yml  # Mount test plugins config to correct location
     environment:
       # Same environment as backend
@@ -180,6 +184,8 @@ services:
       - QDRANT_PORT=6333
       - REDIS_URL=redis://redis-test:6379/0
       - DEBUG_DIR=/app/debug  # Fixed: match plugin database mount path
+      # Test configuration file
+      - CONFIG_FILE=${TEST_CONFIG_FILE:-/app/test-configs/deepgram-openai.yml}
       - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - GROQ_API_KEY=${GROQ_API_KEY}
