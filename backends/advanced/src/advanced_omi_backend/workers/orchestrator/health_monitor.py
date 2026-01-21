@@ -236,7 +236,7 @@ class HealthMonitor:
             "(replicating old start-workers.sh behavior)"
         )
 
-        # Restart all RQ workers
+        # Restart all RQ workers (this method now handles timestamp update internally)
         success = self._restart_all_rq_workers()
 
         if success:
@@ -244,12 +244,9 @@ class HealthMonitor:
         else:
             logger.error("❌ Bulk restart encountered errors - check individual worker logs")
 
-        # Update recovery timestamp to start cooldown
-        self.last_registration_recovery = current_time
-
     def _restart_all_rq_workers(self) -> bool:
         """
-        Restart all RQ workers (bulk restart).
+        Restart all RQ workers (bulk restart) with timing measurements.
 
         This matches the old bash script's recovery mechanism:
         - Kill all RQ workers
@@ -269,18 +266,65 @@ class HealthMonitor:
             logger.warning("No RQ workers found to restart")
             return False
 
-        logger.info(f"Restarting {len(rq_workers)} RQ workers...")
+        # START TIMING
+        bulk_restart_start = time.time()
+        logger.warning(
+            f"⚠️  RQ worker registration lost! "
+            f"Starting bulk restart of {len(rq_workers)} workers at {time.strftime('%H:%M:%S')}"
+        )
 
         all_success = True
-        for worker in rq_workers:
-            logger.info(f"  ↻ Restarting {worker.name}...")
+        worker_times = []  # Track individual worker restart times
+
+        for i, worker in enumerate(rq_workers, 1):
+            worker_start = time.time()
+            logger.info(
+                f"  [{i}/{len(rq_workers)}] ↻ Restarting {worker.name} at {time.strftime('%H:%M:%S')}..."
+            )
+
             success = self.process_manager.restart_worker(worker.name)
 
+            worker_duration = time.time() - worker_start
+            worker_times.append((worker.name, worker_duration))
+
             if success:
-                logger.info(f"  ✓ {worker.name} restarted successfully")
+                logger.info(
+                    f"  [{i}/{len(rq_workers)}] ✓ {worker.name} restarted in {worker_duration:.2f}s"
+                )
             else:
-                logger.error(f"  ✗ {worker.name} restart failed")
+                logger.error(
+                    f"  [{i}/{len(rq_workers)}] ✗ {worker.name} restart failed after {worker_duration:.2f}s"
+                )
                 all_success = False
+
+        # END TIMING
+        total_duration = time.time() - bulk_restart_start
+
+        # Log timing summary
+        logger.info(f"\n⏱️  Bulk Restart Timing Summary:")
+        logger.info(f"  Total workers: {len(rq_workers)}")
+        logger.info(
+            f"  Total time: {total_duration:.2f}s ({total_duration/60:.1f} minutes)"
+        )
+        logger.info(f"  Average per worker: {total_duration/len(rq_workers):.2f}s")
+
+        if worker_times:
+            slowest = max(worker_times, key=lambda x: x[1])
+            fastest = min(worker_times, key=lambda x: x[1])
+            logger.info(f"  Slowest worker: {slowest[0]} ({slowest[1]:.2f}s)")
+            logger.info(f"  Fastest worker: {fastest[0]} ({fastest[1]:.2f}s)")
+
+        # Update recovery timestamp (moved here from _handle_registration_loss)
+        self.last_registration_recovery = time.time()
+
+        if all_success:
+            logger.info(
+                f"✅ Successfully restarted all {len(rq_workers)} RQ workers in {total_duration:.2f}s"
+            )
+        else:
+            logger.warning(
+                f"⚠️  Some workers failed to restart (took {total_duration:.2f}s total)"
+            )
 
         return all_success
 

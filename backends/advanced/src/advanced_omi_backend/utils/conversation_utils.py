@@ -525,6 +525,15 @@ async def update_job_progress_metadata(
     if "created_at" not in current_job.meta:
         current_job.meta["created_at"] = datetime.now().isoformat()
 
+    # Calculate inactivity based on audio-relative timestamps
+    # Both current_audio_time and last_meaningful_speech_time are seconds into the audio stream
+    current_audio_time = speech_analysis.get("speech_end", 0.0)
+    inactivity_seconds = (
+        current_audio_time - last_meaningful_speech_time
+        if current_audio_time > 0 and last_meaningful_speech_time > 0
+        else 0
+    )
+
     current_job.meta.update(
         {
             "conversation_id": conversation_id,
@@ -538,7 +547,7 @@ async def update_job_progress_metadata(
             "duration_seconds": speech_analysis.get("duration", 0),
             "has_speech": speech_analysis.get("has_speech", False),
             "last_update": datetime.now().isoformat(),
-            "inactivity_seconds": time.time() - last_meaningful_speech_time,
+            "inactivity_seconds": inactivity_seconds,
             "chunks_processed": combined["chunk_count"],
         }
     )

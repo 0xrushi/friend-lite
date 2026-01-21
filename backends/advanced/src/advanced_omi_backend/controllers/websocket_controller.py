@@ -202,35 +202,22 @@ async def create_client_state(client_id: str, user, device_name: Optional[str] =
 
 
 async def cleanup_client_state(client_id: str):
-    """Clean up and remove client state, including cancelling speech detection job and marking session complete."""
-    # Cancel the speech detection job for this client
-    from advanced_omi_backend.controllers.queue_controller import redis_conn
-    from rq.job import Job
+    """
+    Clean up and remove client state, marking session complete.
+
+    Note: We do NOT cancel the speech detection job here because:
+    1. The job needs to process all audio data that was already sent
+    2. If speech was detected, it should create a conversation
+    3. The job will complete naturally when it sees session status = "finalizing"
+    4. The job has a grace period (15s) to wait for final transcription
+    5. RQ's job_timeout (24h) prevents jobs from hanging forever
+    """
+    # Note: Previously we cancelled the speech detection job here, but this prevented
+    # conversations from being created when WebSocket disconnects mid-recording.
+    # The speech detection job now monitors session status and completes naturally.
     import redis.asyncio as redis
 
-    try:
-        job_id_key = f"speech_detection_job:{client_id}"
-        job_id_bytes = redis_conn.get(job_id_key)
-
-        if job_id_bytes:
-            job_id = job_id_bytes.decode()
-            logger.info(f"🛑 Cancelling speech detection job {job_id} for client {client_id}")
-
-            try:
-                # Fetch and cancel the job
-                job = Job.fetch(job_id, connection=redis_conn)
-                job.cancel()
-                logger.info(f"✅ Successfully cancelled speech detection job {job_id}")
-            except Exception as job_error:
-                logger.warning(f"⚠️ Failed to cancel job {job_id}: {job_error}")
-
-            # Clean up the tracking key
-            redis_conn.delete(job_id_key)
-            logger.info(f"🧹 Cleaned up job tracking key for client {client_id}")
-        else:
-            logger.debug(f"No speech detection job found for client {client_id}")
-    except Exception as e:
-        logger.warning(f"⚠️ Error during job cancellation for client {client_id}: {e}")
+    logger.info(f"🔄 Letting speech detection job complete naturally for client {client_id} (if running)")
 
     # Mark all active sessions for this client as complete AND delete Redis streams
     try:

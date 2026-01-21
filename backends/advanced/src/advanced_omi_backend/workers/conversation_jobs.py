@@ -674,7 +674,8 @@ async def open_conversation_job(
         conversation_id=conversation_id,
         user_id=user_id,
         transcript_version_id=version_id,  # Pass the streaming transcript version ID
-        client_id=client_id  # Pass client_id for UI tracking
+        client_id=client_id,  # Pass client_id for UI tracking
+        end_reason=end_reason  # Pass the determined end_reason (websocket_disconnect, inactivity_timeout, etc.)
     )
 
     logger.info(
@@ -686,38 +687,11 @@ async def open_conversation_job(
     # Wait a moment to ensure jobs are registered in RQ
     await asyncio.sleep(0.5)
 
-    # Enqueue conversation.complete event dispatch job
-    # This unifies the dispatch path for both WebSocket and file upload processing
-    try:
-        from rq import Queue
-
-        default_queue = Queue('default', connection=redis_conn)
-
-        dispatch_job = default_queue.enqueue(
-            dispatch_conversation_complete_event_job,
-            conversation_id,
-            client_id,
-            user_id,
-            end_reason,  # Pass the end_reason we determined earlier
-            job_timeout=120,
-            result_ttl=600,
-            job_id=f"event_complete_{conversation_id[:12]}",
-            description=f"Dispatch conversation complete event ({end_reason})",
-            meta={"client_id": client_id}
-        )
-
-        logger.info(
-            f"📥 Enqueued conversation.complete dispatch job {dispatch_job.id} "
-            f"for {conversation_id[:12]} (end_reason={end_reason})"
-        )
-
-    except Exception as e:
-        logger.error(
-            f"❌ Failed to enqueue conversation.complete dispatch job "
-            f"for {conversation_id[:12]}: {e}",
-            exc_info=True
-        )
-        # Don't fail the entire job - conversation is saved, just plugins won't be notified
+    # Note: conversation.complete event dispatch job is already enqueued by start_post_conversation_jobs
+    # It runs after memory and title/summary jobs complete, ensuring all data is ready
+    logger.info(
+        f"✅ Post-conversation pipeline started with event dispatch job (end_reason={end_reason})"
+    )
 
     # Call shared cleanup/restart logic
     return await handle_end_of_conversation(

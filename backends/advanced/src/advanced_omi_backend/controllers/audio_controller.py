@@ -237,7 +237,7 @@ async def upload_and_process_audio_files(
         successful_files = [f for f in processed_files if f.get("status") == "started"]
         failed_files = [f for f in processed_files if f.get("status") == "error"]
 
-        return {
+        response_body = {
             "message": f"Uploaded and processing {len(successful_files)} file(s)",
             "client_id": client_id,
             "files": processed_files,
@@ -247,6 +247,19 @@ async def upload_and_process_audio_files(
                 "failed": len(failed_files),
             },
         }
+
+        # Return appropriate HTTP status code based on results
+        if len(failed_files) == len(files):
+            # ALL files failed - return 400 Bad Request
+            audio_logger.error(f"All {len(files)} file(s) failed to upload")
+            return JSONResponse(status_code=400, content=response_body)
+        elif len(failed_files) > 0:
+            # SOME files failed (partial success) - return 207 Multi-Status
+            audio_logger.warning(f"Partial upload: {len(successful_files)} succeeded, {len(failed_files)} failed")
+            return JSONResponse(status_code=207, content=response_body)
+        else:
+            # All files succeeded - return 200 OK
+            return response_body
 
     except (OSError, IOError) as e:
         # File system errors during upload handling

@@ -240,7 +240,7 @@ class ProcessManager:
 
     def restart_worker(self, name: str, timeout: int = 30) -> bool:
         """
-        Restart a specific worker.
+        Restart a specific worker with timing measurements.
 
         Args:
             name: Worker name
@@ -254,23 +254,44 @@ class ProcessManager:
             logger.error(f"Worker '{name}' not found")
             return False
 
-        logger.info(f"Restarting worker: {name}")
+        restart_start = time.time()
+        logger.info(f"{name}: Starting restart at {time.strftime('%H:%M:%S')}")
 
-        # Ensure worker is fully stopped before attempting restart
+        # STOP phase with timing
+        stop_start = time.time()
         stop_success = worker.stop(timeout=timeout)
+        stop_duration = time.time() - stop_start
+
         if not stop_success:
-            logger.error(f"{name}: Failed to stop cleanly, restart aborted")
+            logger.error(
+                f"{name}: Failed to stop cleanly after {stop_duration:.2f}s "
+                f"(timeout was {timeout}s), restart aborted"
+            )
             worker.state = WorkerState.FAILED
             return False
 
-        # Attempt to start the worker
+        logger.info(
+            f"{name}: Stopped in {stop_duration:.2f}s (timeout was {timeout}s)"
+        )
+
+        # START phase with timing
+        start_start = time.time()
         success = worker.start()
+        start_duration = time.time() - start_start
+
+        total_restart_time = time.time() - restart_start
 
         if success:
             worker.restart_count += 1
-            logger.info(f"{name}: Restart #{worker.restart_count} successful")
+            logger.info(
+                f"{name}: Restart #{worker.restart_count} successful "
+                f"(stop: {stop_duration:.2f}s, start: {start_duration:.2f}s, total: {total_restart_time:.2f}s)"
+            )
         else:
-            logger.error(f"{name}: Restart failed")
+            logger.error(
+                f"{name}: Restart failed after {total_restart_time:.2f}s "
+                f"(stop: {stop_duration:.2f}s, start attempt: {start_duration:.2f}s)"
+            )
 
         return success
 

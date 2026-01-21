@@ -415,7 +415,8 @@ def start_post_conversation_jobs(
     user_id: str,
     transcript_version_id: Optional[str] = None,
     depends_on_job = None,
-    client_id: Optional[str] = None
+    client_id: Optional[str] = None,
+    end_reason: str = "file_upload"
 ) -> Dict[str, str]:
     """
     Start post-conversation processing jobs after conversation is created.
@@ -435,6 +436,7 @@ def start_post_conversation_jobs(
         transcript_version_id: Transcript version ID (auto-generated if None)
         depends_on_job: Optional job dependency for first job (e.g., transcription for file uploads)
         client_id: Client ID for UI tracking
+        end_reason: Reason conversation ended (e.g., 'file_upload', 'websocket_disconnect', 'user_stopped')
 
     Returns:
         Dict with job IDs for speaker_recognition, memory, title_summary, event_dispatch
@@ -537,18 +539,18 @@ def start_post_conversation_jobs(
         conversation_id,
         client_id or "",
         user_id,
-        "file_upload",  # Explicit end_reason for file upload processing
+        end_reason,  # Use the end_reason parameter (defaults to 'file_upload' for backward compatibility)
         job_timeout=120,  # 2 minutes
         result_ttl=JOB_RESULT_TTL,
         depends_on=[memory_job, title_summary_job],  # Wait for both parallel jobs
         job_id=event_job_id,
-        description=f"Dispatch conversation complete event for {conversation_id[:8]}",
+        description=f"Dispatch conversation complete event ({end_reason}) for {conversation_id[:8]}",
         meta=job_meta
     )
     logger.info(f"📥 RQ: Enqueued conversation complete event job {event_dispatch_job.id}, meta={event_dispatch_job.meta} (depends on {memory_job.id} and {title_summary_job.id})")
 
     return {
-        'speaker_recognition': speaker_job.id,
+        'speaker_recognition': speaker_job.id if speaker_job else None,
         'memory': memory_job.id,
         'title_summary': title_summary_job.id,
         'event_dispatch': event_dispatch_job.id

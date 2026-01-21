@@ -188,17 +188,27 @@ Audio Upload Client ID Generation Test
     Should Contain    ${client_id1}    ${device_name}    msg=Client ID should contain device name
     Should Match Regexp    ${client_id1}    ^[a-f0-9]{6}-${device_name}$    msg=Client ID should match format
 
-    # Verify conversation_id is in all job metadata (transcription, speaker, memory jobs)
+    # Verify conversation_id is in job metadata for all created jobs
+    # Note: Speaker job is only created if speaker recognition is enabled in config
+
+    # 1. Transcription job (always created)
     ${transcribe_job}=    Get Job Details    transcribe_${conversation_id1[:12]}
     ${transcribe_meta}=    Set Variable    ${transcribe_job}[meta]
     Dictionary Should Contain Key    ${transcribe_meta}    conversation_id    msg=Transcription job should have conversation_id in meta
     Should Be Equal    ${transcribe_meta}[conversation_id]    ${conversation_id1}    msg=Transcription job meta conversation_id should match
 
+    # 2. Speaker job (conditional - only if speaker recognition enabled)
     ${speaker_job}=    Get Job Details    speaker_${conversation_id1[:12]}
-    ${speaker_meta}=    Set Variable    ${speaker_job}[meta]
-    Dictionary Should Contain Key    ${speaker_meta}    conversation_id    msg=Speaker job should have conversation_id in meta
-    Should Be Equal    ${speaker_meta}[conversation_id]    ${conversation_id1}    msg=Speaker job meta conversation_id should match
+    IF    ${speaker_job} != ${None}
+        ${speaker_meta}=    Set Variable    ${speaker_job}[meta]
+        Dictionary Should Contain Key    ${speaker_meta}    conversation_id    msg=Speaker job should have conversation_id in meta
+        Should Be Equal    ${speaker_meta}[conversation_id]    ${conversation_id1}    msg=Speaker job meta conversation_id should match
+        Log To Console    ✅ Speaker job metadata verified
+    ELSE
+        Log To Console    Speaker recognition disabled - skipping speaker job check
+    END
 
+    # 3. Memory job (always created if memory extraction enabled)
     ${memory_job}=    Get Job Details    memory_${conversation_id1[:12]}
     ${memory_meta}=    Set Variable    ${memory_job}[meta]
     Dictionary Should Contain Key    ${memory_meta}    conversation_id    msg=Memory job should have conversation_id in meta
@@ -213,7 +223,7 @@ Audio Upload Client ID Generation Test
 
     Log To Console    ✅ Client ID generation verified
     Log To Console    🆔 Client ID: ${client_id1}
-    Log To Console    ✅ conversation_id in job metadata verified
+    Log To Console    ✅ conversation_id in job metadata verified (transcription + memory jobs)
 
 
 Audio Upload Job Tracking Test

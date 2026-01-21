@@ -19,7 +19,7 @@ Get User Conversations
 Get Conversation By ID
     [Documentation]    Get a specific conversation by ID
     [Arguments]       ${conversation_id}
-    ${response}=    GET On Session    api    /api/conversations/${conversation_id} 
+    ${response}=    GET On Session    api    /api/conversations/${conversation_id}
     RETURN    ${response.json()}[conversation]
 
 Get Conversation Versions

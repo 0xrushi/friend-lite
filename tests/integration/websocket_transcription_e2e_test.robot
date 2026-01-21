@@ -123,6 +123,27 @@ Conversation Created With Valid Transcript
     Send Audio Chunks To Stream    ${stream_id}    ${TEST_AUDIO_FILE}    num_chunks=200
     Close Audio Stream    ${stream_id}
 
+    # DIAGNOSTIC: Verify speech detection job completes before checking for conversation
+    Log    Waiting for speech detection job to complete...
+    ${speech_jobs}=    Wait Until Keyword Succeeds    30s    3s
+    ...    Get Jobs By Type And Client    speech_detection    ${client_id}
+
+    Should Not Be Empty    ${speech_jobs}    No speech detection job found
+    ${speech_job}=    Set Variable    ${speech_jobs}[0]
+    ${speech_job_id}=    Set Variable    ${speech_job}[job_id]
+
+    # Wait for speech detection to finish
+    Wait For Job Status    ${speech_job_id}    finished    timeout=30s    interval=2s
+
+    # Verify speech was detected (not no_speech_detected)
+    ${speech_result}=    Get Job Result    ${speech_job_id}
+    Should Not Contain    ${speech_result}    no_speech_detected
+    ...    Speech detection failed with no_speech_detected - transcript may be empty or insufficient
+    Should Contain    ${speech_result}    conversation_job_id
+    ...    Speech detection did not create conversation_job_id
+
+    Log    ✅ Speech detection completed successfully, conversation job should exist
+
     # Wait for conversation to be created
     ${conv_jobs}=    Wait Until Keyword Succeeds    60s    3s
     ...    Job Type Exists For Client    open_conversation    ${client_id}

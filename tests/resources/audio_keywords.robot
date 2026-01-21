@@ -43,9 +43,21 @@ Upload Audio File
       ${upload_response}=    Set Variable    ${response.json()}
       Log    Parsed upload response: ${upload_response}
 
-      # Validate upload was successful
+      # Check HTTP status code first - fail immediately with clear error message
+      IF    ${response.status_code} == 400
+          ${error_msg}=    Set Variable    ${upload_response['files'][0]['error']}
+          Fail    Upload failed (HTTP 400): All files failed - ${error_msg}
+      END
+
+      IF    ${response.status_code} == 207
+          ${error_msg}=    Set Variable    Partial upload failure - check logs
+          Log    WARN: Partial upload (HTTP 207): ${upload_response['summary']['failed']} of ${upload_response['summary']['total']} files failed
+          # Continue anyway since some files succeeded
+      END
+
+      # Validate upload was successful (should be 200 or 207 at this point)
       Should Be Equal As Strings    ${upload_response['summary']['started']}    1    Upload failed: No files enqueued
-      Should Be Equal As Strings    ${upload_response['files'][0]['status']}    started    Upload failed: ${response.text}
+      Should Be Equal As Strings    ${upload_response['files'][0]['status']}    started    Upload failed: ${upload_response['files'][0].get('error', 'Unknown error')}
 
       # Extract important values
       ${job_id}=        Set Variable    ${upload_response['files'][0]['conversation_id']}

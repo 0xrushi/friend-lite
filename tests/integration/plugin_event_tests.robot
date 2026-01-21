@@ -164,8 +164,9 @@ WebSocket Disconnect Should Trigger Conversation Complete Event
     ${total_chunks}=    Close Audio Stream Without Stop Event    ${stream_id}
     Log    Closed WebSocket stream abruptly, sent ${total_chunks} total chunks
 
-    # Wait for plugin event dispatch (polls every 2s, max 10s)
-    ${new_events}=    Wait For Plugin Event    conversation.complete    ${baseline_count}    timeout=10s
+    # Wait for plugin event dispatch (polls every 2s, max 30s)
+    # Event dispatch depends on memory and title/summary jobs completing (~20-25s total)
+    ${new_events}=    Wait For Plugin Event    conversation.complete    ${baseline_count}    timeout=30s
 
     Should Be True    ${new_events} > 0
     ...    msg=At least one conversation.complete event should be logged
@@ -174,9 +175,12 @@ WebSocket Disconnect Should Trigger Conversation Complete Event
     Verify Event Metadata    conversation.complete    end_reason    websocket_disconnect    ${conversation_id}
 
     # Verify conversation has end_reason set in database
+    # Wait for end_reason to be persisted (open_conversation_job saves it at the end)
+    Wait Until Keyword Succeeds    10s    1s
+    ...    Conversation Should Have End Reason    ${conversation_id}    websocket_disconnect
+
+    # Verify completed_at timestamp is set
     ${updated_conversation}=    Get Conversation By ID    ${conversation_id}
-    Should Be Equal    ${updated_conversation}[end_reason]    websocket_disconnect
-    ...    msg=Conversation should have websocket_disconnect end_reason
     Should Not Be Equal    ${updated_conversation}[completed_at]    ${None}
     ...    msg=Conversation should have completed_at timestamp
 
