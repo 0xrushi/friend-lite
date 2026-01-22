@@ -23,7 +23,15 @@ Get queue length
 
 Get Job Details
     [Documentation]    Get job details from the queue API by searching the jobs list
+    ...                Returns None if job not found
+    ...                Handles None job_id gracefully with clear error message
     [Arguments]    ${job_id}
+
+    # Check if job_id is None before attempting to query
+    ${is_none}=    Evaluate    $job_id is None or str($job_id) == 'None'
+    IF    ${is_none}
+        Fail    Cannot get job details: job_id is None. This usually means the job was not created successfully (check API response for errors).
+    END
 
     ${response}=    GET On Session    api    /api/queue/jobs
     Should Be Equal As Integers    ${response.status_code}    200
@@ -38,17 +46,28 @@ Get Job Details
     END
 
     # If we get here, job not found - return None
+    Log    Job with ID '${job_id}' not found in queue    WARN
     RETURN    ${None}
 
 Get Job Status
     [Documentation]    Get just the status of a specific job by ID (lightweight endpoint)
+    ...                Returns None if job not found or if job_id is None
+    ...                Handles None job_id gracefully by returning None
     [Arguments]    ${job_id}
+
+    # Check if job_id is None - return None instead of failing
+    ${is_none}=    Evaluate    $job_id is None or str($job_id) == 'None'
+    IF    ${is_none}
+        Log    Job ID is None, cannot get status    WARN
+        RETURN    ${None}
+    END
 
     # Use the lightweight status endpoint - try to get the response
     ${success}=    Run Keyword And Return Status    GET On Session    api    /api/queue/jobs/${job_id}/status    expected_status=200
 
     IF    not ${success}
         # Job not found
+        Log    Job with ID '${job_id}' not found    DEBUG
         RETURN    ${None}
     END
 
@@ -60,12 +79,21 @@ Get Job Status
 Check job status
     [Documentation]    Check the status of a specific job by ID
     ...                Fails immediately if job is in 'failed' state when expecting 'finished'
+    ...                Handles None job_id gracefully with clear error message
     [Arguments]    ${job_id}    ${expected_status}
+
+    # Check if job_id is None or 'None' string before attempting to query
+    ${is_none}=    Evaluate    $job_id is None or str($job_id) == 'None'
+    IF    ${is_none}
+        Fail    Cannot check job status: job_id is None. This usually means the job was not created successfully (check API response for errors).
+    END
 
     ${job}=    Get Job status    ${job_id}
 
-    # If job is None (not found), fail explicitly
-    Should Not Be Equal    ${job}[job_id]    ${None}    Job with ID ${job_id} not found in queue
+    # If job is None (not found), fail explicitly with context
+    IF    ${job} == ${None}
+        Fail    Job with ID '${job_id}' not found in queue. The job may have expired, been flushed, or never existed.
+    END
 
     ${actual_status}=    Set Variable    ${job}[status]
     Log    Job ${job_id} status: ${actual_status} (expected: ${expected_status})
@@ -142,7 +170,14 @@ Find Job For Client
 
 Wait For Job Status
     [Documentation]    Wait for a job to reach a specific status
+    ...                Handles None job_id gracefully with clear error message
     [Arguments]    ${job_id}    ${expected_status}    ${timeout}=60s    ${interval}=5s
+
+    # Check if job_id is None before waiting (fail fast with clear message)
+    ${is_none}=    Evaluate    $job_id is None or str($job_id) == 'None'
+    IF    ${is_none}
+        Fail    Cannot wait for job status: job_id is None. This usually means the job was not created successfully (check API response for errors).
+    END
 
     Wait Until Keyword Succeeds    ${timeout}    ${interval}
     ...    Check job status    ${job_id}    ${expected_status}

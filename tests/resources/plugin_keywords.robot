@@ -150,10 +150,11 @@ Wait For Plugin Event
     ...    - baseline_count: The event count before the operation started
     ...    - timeout: Maximum time to wait (default: 30s)
     ...    - retry_interval: Time between polling attempts (default: 2s)
-    [Arguments]    ${event_type}    ${baseline_count}    ${timeout}=30s    ${retry_interval}=2s
+    ...    - conversation_id: Optional conversation_id to filter events (default: empty)
+    [Arguments]    ${event_type}    ${baseline_count}    ${timeout}=30s    ${retry_interval}=2s    ${conversation_id}=${EMPTY}
 
     Wait Until Keyword Succeeds    ${timeout}    ${retry_interval}
-    ...    Plugin Event Count Should Be Greater Than    ${event_type}    ${baseline_count}
+    ...    Plugin Event Count Should Be Greater Than    ${event_type}    ${baseline_count}    ${conversation_id}
 
     # After successful wait, get the final count
     ${current_count}=    Get Plugin Event Count    ${event_type}
@@ -165,12 +166,37 @@ Plugin Event Count Should Be Greater Than
     ...
     ...    This keyword is used by Wait For Plugin Event for polling.
     ...    It will fail (causing a retry) until the condition is met.
-    [Arguments]    ${event_type}    ${baseline_count}
+    ...    Optionally filters by conversation_id if provided.
+    [Arguments]    ${event_type}    ${baseline_count}    ${conversation_id}=${EMPTY}
 
-    ${current_count}=    Get Plugin Event Count    ${event_type}
+    # Get all events of this type
+    ${events}=    Get Plugin Events By Type    ${event_type}
+
+    # If conversation_id filter specified, filter events
+    IF    '${conversation_id}' != ''
+        ${filtered_events}=    Create List
+        FOR    ${event}    IN    @{events}
+            ${event_data}=    Set Variable    ${event}[data]
+            ${event_conv_id}=    Evaluate    $event_data.get('conversation_id', '')
+            IF    '${event_conv_id}' == '${conversation_id}'
+                Append To List    ${filtered_events}    ${event}
+            END
+        END
+        ${current_count}=    Get Length    ${filtered_events}
+    ELSE
+        ${current_count}=    Get Length    ${events}
+    END
+
     ${new_events}=    Evaluate    ${current_count} - ${baseline_count}
-    Should Be True    ${new_events} > 0
-    ...    msg=Expected new ${event_type} events, but count is still ${current_count} (baseline: ${baseline_count})
+
+    # Build error message with conversation_id context if filtering
+    IF    '${conversation_id}' != ''
+        ${error_msg}=    Set Variable    Expected new ${event_type} events for conversation ${conversation_id}, but count is still ${current_count} (baseline: ${baseline_count})
+    ELSE
+        ${error_msg}=    Set Variable    Expected new ${event_type} events, but count is still ${current_count} (baseline: ${baseline_count})
+    END
+
+    Should Be True    ${new_events} > 0    msg=${error_msg}
 
     RETURN    ${new_events}
 
@@ -205,14 +231,23 @@ Verify Event Metadata
     Should Not Be Empty    ${events}
     ...    msg=No events found for event type '${event_type}'
 
+    # Collect conversation IDs for better error messages
+    ${found_conv_ids}=    Create List
+    ${found_metadata_values}=    Create List
+
     # Find matching event (optionally filtered by conversation_id)
     ${found}=    Set Variable    ${False}
     FOR    ${event}    IN    @{events}
+        # Track conversation_id for debugging
+        ${event_data}=    Set Variable    ${event}[data]
+        ${event_conv_id}=    Evaluate    $event_data.get('conversation_id', '')
+        IF    '${event_conv_id}' != ''
+            Append To List    ${found_conv_ids}    ${event_conv_id}
+        END
+
         # If conversation_id filter specified, check if this is the right conversation
         ${is_match}=    Set Variable    ${True}
         IF    '${conversation_id}' != ''
-            ${event_data}=    Set Variable    ${event}[data]
-            ${event_conv_id}=    Evaluate    $event_data.get('conversation_id', '')
             IF    '${event_conv_id}' != '${conversation_id}'
                 ${is_match}=    Set Variable    ${False}
             END
@@ -224,6 +259,7 @@ Verify Event Metadata
             Dictionary Should Contain Key    ${event_metadata}    ${metadata_key}
             ...    msg=Event metadata missing key '${metadata_key}'
             ${actual_value}=    Get From Dictionary    ${event_metadata}    ${metadata_key}
+            Append To List    ${found_metadata_values}    ${actual_value}
             IF    '${actual_value}' == '${expected_value}'
                 ${found}=    Set Variable    ${True}
                 BREAK
@@ -231,5 +267,13 @@ Verify Event Metadata
         END
     END
 
-    Should Be True    ${found}
-    ...    msg=No events found with metadata '${metadata_key}=${expected_value}' for event type '${event_type}'
+    # Build detailed error message if not found
+    IF    not ${found}
+        ${unique_conv_ids}=    Evaluate    list(set($found_conv_ids))
+        IF    '${conversation_id}' != ''
+            ${error_msg}=    Set Variable    No events found with metadata '${metadata_key}=${expected_value}' for conversation '${conversation_id}'. Found conversation IDs: ${unique_conv_ids}. Found metadata values: ${found_metadata_values}
+        ELSE
+            ${error_msg}=    Set Variable    No events found with metadata '${metadata_key}=${expected_value}' for event type '${event_type}'. Found conversation IDs: ${unique_conv_ids}. Found metadata values: ${found_metadata_values}
+        END
+        Fail    ${error_msg}
+    END
