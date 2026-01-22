@@ -393,8 +393,22 @@ def get_transcription_provider(provider_name: Optional[str] = None, mode: Option
     return RegistryBatchTranscriptionProvider()
 
 
+def is_transcription_available(mode: str = "batch") -> bool:
+    """Check if transcription provider is available for given mode.
+
+    Args:
+        mode: Either "batch" or "streaming"
+
+    Returns:
+        True if a transcription provider is configured and available, False otherwise
+    """
+    provider = get_transcription_provider(mode=mode)
+    return provider is not None
+
+
 __all__ = [
     "get_transcription_provider",
+    "is_transcription_available",
     "RegistryBatchTranscriptionProvider",
     "RegistryStreamingTranscriptionProvider",
     "BaseTranscriptionProvider",
