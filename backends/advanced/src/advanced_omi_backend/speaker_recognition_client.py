@@ -36,6 +36,29 @@ class SpeakerRecognitionClient:
             service_url: URL of the speaker recognition service (e.g., http://speaker-service:8085)
                         If not provided, uses config.yml service_url or SPEAKER_SERVICE_URL env var
         """
+        # Check if we should use mock client (for testing)
+        if os.getenv("USE_MOCK_SPEAKER_CLIENT") == "true":
+            try:
+                # Import mock client from tests directory
+                import sys
+                from pathlib import Path
+
+                # Add tests directory to Python path
+                tests_dir = Path(__file__).resolve().parents[5] / "tests"
+                if str(tests_dir) not in sys.path:
+                    sys.path.insert(0, str(tests_dir))
+
+                from mocks.mock_speaker_client import MockSpeakerRecognitionClient
+
+                self._mock_client = MockSpeakerRecognitionClient()
+                self.enabled = True
+                self.service_url = "mock://speaker-service"
+                logger.info("🎤 Using MOCK speaker recognition client for tests")
+                return
+            except ImportError as e:
+                logger.error(f"Failed to import mock speaker client: {e}")
+                # Fall through to normal initialization
+
         # Load speaker recognition config from config.yml
         registry = get_models_registry()
         if not registry or not registry.speaker_recognition:
@@ -88,6 +111,12 @@ class SpeakerRecognitionClient:
         Returns:
             Dictionary containing segments with matched text and speaker identification
         """
+        # Use mock client if configured
+        if hasattr(self, '_mock_client'):
+            return await self._mock_client.diarize_identify_match(
+                conversation_id, backend_token, transcript_data, user_id
+            )
+
         if not self.enabled:
             logger.info(f"🎤 Speaker recognition disabled, returning empty result")
             return {"segments": []}

@@ -321,10 +321,14 @@ async def diarize_identify_match(
         transcript = json.loads(transcript_data)
         words = transcript.get("words", [])
     except json.JSONDecodeError as e:
-        raise HTTPException(400, f"Invalid transcript_data JSON: {str(e)}") from e
+        error_msg = f"Invalid transcript_data JSON: {str(e)}"
+        log.error(f"❌ {error_msg}")
+        raise HTTPException(400, error_msg) from e
 
     if not words:
-        raise HTTPException(400, "No words found in transcript_data")
+        error_msg = f"No words found in transcript_data (transcript keys: {list(transcript.keys())}, words type: {type(words)})"
+        log.error(f"❌ {error_msg}")
+        raise HTTPException(400, error_msg)
 
     # Get settings for chunking configuration
     from simple_speaker_recognition.api.service import auth as settings

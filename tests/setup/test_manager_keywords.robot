@@ -82,7 +82,7 @@ Clear Test Databases
 
     # Clear Redis queues and job registries (preserve worker registrations, failed and finished jobs)
     # Delete all rq:* keys except worker registrations (rq:worker:*), failed jobs (rq:failed:*), and finished jobs (rq:finished:*)
-    ${redis_clear_script}=    Set Variable    redis-cli --scan --pattern "rq:*" | grep -Ev "^rq:(worker|failed|finished)" | xargs -r redis-cli DEL; redis-cli --scan --pattern "audio:*" | xargs -r redis-cli DEL; redis-cli --scan --pattern "consumer:*" | xargs -r redis-cli DEL
+    ${redis_clear_script}=    Set Variable    redis-cli --scan --pattern "rq:*" | grep -Ev "^rq:(worker|failed|finished)" | xargs -r redis-cli DEL; redis-cli --scan --pattern "audio:*" | xargs -r redis-cli DEL; redis-cli --scan --pattern "consumer:*" | xargs -r redis-cli DEL; redis-cli --scan --pattern "transcription:*" | xargs -r redis-cli DEL
     Run Process    docker    exec    ${REDIS_CONTAINER}    sh    -c    ${redis_clear_script}    shell=True
     Log To Console    Redis queues and job registries cleared (worker registrations preserved)
 

@@ -207,18 +207,11 @@ async def recognise_speakers_job(
     actual_transcript_text = transcript_text or transcript_version.transcript or ""
     actual_words = words if words else []
 
-    # If words not provided, extract from segments (single source of truth)
-    if not actual_words and transcript_version.segments:
-        actual_words = []
-        for seg in transcript_version.segments:
-            for word in seg.words:
-                actual_words.append({
-                    "word": word.word,
-                    "start": word.start,
-                    "end": word.end,
-                    "confidence": word.confidence
-                })
-        logger.info(f"🔤 Extracted {len(actual_words)} words from {len(transcript_version.segments)} segments")
+    # If words not provided, read from transcript version metadata
+    # (Transcription job stores words in metadata since segments are created by speaker service)
+    if not actual_words and transcript_version.metadata:
+        actual_words = transcript_version.metadata.get("words", [])
+        logger.info(f"🔤 Loaded {len(actual_words)} words from transcript version metadata")
 
     if not actual_transcript_text:
         logger.warning(f"🎤 No transcript text found in version {version_id}")

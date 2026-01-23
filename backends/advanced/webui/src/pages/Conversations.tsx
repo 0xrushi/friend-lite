@@ -63,7 +63,6 @@ export default function Conversations() {
   const [playingSegment, setPlayingSegment] = useState<string | null>(null) // Format: "audioUuid-segmentIndex"
   const [audioCurrentTime, setAudioCurrentTime] = useState<{ [conversationId: string]: number }>({})
   const audioRefs = useRef<{ [key: string]: HTMLAudioElement }>({})
-  const segmentTimerRef = useRef<number | null>(null)
 
   // Reprocessing state
   const [openDropdown, setOpenDropdown] = useState<string | null>(null)
@@ -434,17 +433,12 @@ export default function Conversations() {
 
   const handleSegmentPlayPause = (conversationId: string, segmentIndex: number, segment: any) => {
     const segmentId = `${conversationId}-${segmentIndex}`;
-    const audioKey = conversationId; // Use conversation ID as cache key
 
     // If this segment is already playing, pause it
     if (playingSegment === segmentId) {
-      const audio = audioRefs.current[audioKey];
+      const audio = audioRefs.current[segmentId];
       if (audio) {
         audio.pause();
-      }
-      if (segmentTimerRef.current) {
-        window.clearTimeout(segmentTimerRef.current);
-        segmentTimerRef.current = null;
       }
       setPlayingSegment(null);
       return;
@@ -452,31 +446,28 @@ export default function Conversations() {
 
     // Stop any currently playing segment
     if (playingSegment) {
-      // Stop all audio elements
-      Object.values(audioRefs.current).forEach(audio => {
-        audio.pause();
-      });
-      if (segmentTimerRef.current) {
-        window.clearTimeout(segmentTimerRef.current);
-        segmentTimerRef.current = null;
+      const currentAudio = audioRefs.current[playingSegment];
+      if (currentAudio) {
+        currentAudio.pause();
       }
     }
 
-    // Get or create audio element for this conversation
-    let audio = audioRefs.current[audioKey];
+    // Get or create audio element for this specific segment
+    let audio = audioRefs.current[segmentId];
 
-    // Check if we need to create a new audio element (none exists or previous had error)
+    // Create new audio element with segment-specific URL
     if (!audio || audio.error) {
       const token = localStorage.getItem(getStorageKey('token')) || '';
-      const audioUrl = `${BACKEND_URL}/api/audio/get_audio/${conversationId}?token=${token}`;
-      console.log('Creating audio element with URL:', audioUrl);
-      console.log('Token present:', !!token, 'Token length:', token.length);
+      // Use chunks endpoint with time range for instant loading (only fetches needed chunks)
+      const audioUrl = `${BACKEND_URL}/api/audio/chunks/${conversationId}?start_time=${segment.start}&end_time=${segment.end}&token=${token}`;
+      console.log('Creating segment audio element with URL:', audioUrl);
+      console.log('Segment range:', segment.start, 'to', segment.end, '(duration:', segment.end - segment.start, 'seconds)');
       audio = new Audio(audioUrl);
-      audioRefs.current[audioKey] = audio;
+      audioRefs.current[segmentId] = audio;
 
       // Add error listener for debugging
       audio.addEventListener('error', () => {
-        console.error('Audio element error:', audio.error?.code, audio.error?.message);
+        console.error('Audio segment error:', audio.error?.code, audio.error?.message);
         console.error('Audio src:', audio.src);
       });
 
@@ -486,19 +477,10 @@ export default function Conversations() {
       });
     }
 
-    // Set the start time and play
+    // Play the segment (no need to seek since audio is already trimmed to exact range)
     console.log('Playing segment:', segment.start, 'to', segment.end);
-    audio.currentTime = segment.start;
     audio.play().then(() => {
       setPlayingSegment(segmentId);
-
-      // Set a timer to stop at the segment end time
-      const duration = (segment.end - segment.start) * 1000; // Convert to milliseconds
-      segmentTimerRef.current = window.setTimeout(() => {
-        audio.pause();
-        setPlayingSegment(null);
-        segmentTimerRef.current = null;
-      }, duration);
     }).catch(err => {
       console.error('Error playing audio segment:', err);
       setPlayingSegment(null);
@@ -508,13 +490,10 @@ export default function Conversations() {
   // Cleanup audio on unmount
   useEffect(() => {
     return () => {
-      // Stop all audio and clear timers
+      // Stop all audio elements
       Object.values(audioRefs.current).forEach(audio => {
         audio.pause();
       });
-      if (segmentTimerRef.current) {
-        window.clearTimeout(segmentTimerRef.current);
-      }
     };
   }, [])
 

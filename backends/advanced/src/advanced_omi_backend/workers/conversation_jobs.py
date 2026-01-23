@@ -16,6 +16,7 @@ from advanced_omi_backend.models.job import async_job
 from advanced_omi_backend.controllers.queue_controller import redis_conn
 from advanced_omi_backend.controllers.session_controller import mark_session_complete
 from advanced_omi_backend.services.plugin_service import get_plugin_router, init_plugin_router
+from datetime import datetime
 
 from advanced_omi_backend.utils.conversation_utils import (
     analyze_speech,
@@ -872,6 +873,21 @@ async def dispatch_conversation_complete_event_job(
     if not conversation:
         logger.error(f"Conversation {conversation_id} not found")
         return {"success": False, "error": "Conversation not found"}
+
+    # Save end_reason and completed_at to database if not already set
+    # This ensures end_reason is persisted before plugins receive conversation.complete event
+    if end_reason and conversation.end_reason is None:
+        try:
+            conversation.end_reason = Conversation.EndReason(end_reason)
+        except ValueError:
+            logger.warning(f"⚠️ Invalid end_reason '{end_reason}', using UNKNOWN")
+            conversation.end_reason = Conversation.EndReason.UNKNOWN
+
+        if conversation.completed_at is None:
+            conversation.completed_at = datetime.utcnow()
+
+        await conversation.save()
+        logger.info(f"💾 Saved end_reason={conversation.end_reason} to conversation {conversation_id[:12]} in event dispatch job")
 
     # Get user email for event data
     from advanced_omi_backend.models.user import User

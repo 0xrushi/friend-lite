@@ -357,71 +357,22 @@ async def transcribe_full_audio_job(
     # Calculate processing time (transcription only)
     processing_time = time.time() - start_time
 
-    # Convert segments to SpeakerSegment objects
+    # Transcription only provides text + words with timestamps
+    # Speaker service will create segments via diarization
     speaker_segments = []
-
-    if segments:
-        # Use provided segments
-        for seg in segments:
-            # Use identified_as if available (from speaker recognition), otherwise use speaker label
-            speaker_id = seg.get("identified_as") or seg.get("speaker", "Unknown")
-            # Convert speaker ID to string if it's an integer (some providers return int speaker IDs)
-            speaker_name = f"Speaker {speaker_id}" if isinstance(speaker_id, int) else speaker_id
-
-            speaker_segments.append(
-                Conversation.SpeakerSegment(
-                    start=seg.get("start", 0),
-                    end=seg.get("end", 0),
-                    text=seg.get("text", ""),
-                    speaker=speaker_name,
-                    confidence=seg.get("confidence"),
-                )
-            )
-    elif transcript_text:
-        # Fallback: If no segments but we have text, create a single segment from the full transcript
-        # This handles providers that don't support segmentation
-        # Calculate duration from words if available, otherwise estimate from audio
-        start_time_seg = 0.0
-        end_time_seg = 0.0
-
-        if words:
-            # Use word timestamps if available
-            start_times = [w.get("start", 0) for w in words if "start" in w]
-            end_times = [w.get("end", 0) for w in words if "end" in w]
-            if start_times:
-                start_time_seg = min(start_times)
-            if end_times:
-                end_time_seg = max(end_times)
-        else:
-            # Estimate duration: assume ~150 words per minute, or use audio file duration
-            # For now, use a default duration if we can't calculate it
-            end_time_seg = len(transcript_text.split()) * 0.4  # Rough estimate: 0.4s per word
-
-        speaker_segments.append(
-            Conversation.SpeakerSegment(
-                start=start_time_seg,
-                end=end_time_seg if end_time_seg > start_time_seg else start_time_seg + 1.0,
-                text=transcript_text,
-                speaker="Unknown",
-                confidence=None,
-            )
-        )
-        logger.info(
-            f"📊 Created single segment from transcript text (no segments returned by provider)"
-        )
-
-    logger.info(f"📊 Created {len(speaker_segments)} speaker segments")
+    logger.info(f"📊 Transcription complete: {len(words)} words (segments will be created by speaker service)")
 
     # Add new transcript version
     provider_normalized = provider_name.lower() if provider_name else "unknown"
 
-    # Prepare metadata (transcription only - speaker recognition will add its own metadata)
+    # Prepare metadata (transcription only - speaker service will add segments and metadata)
+    # Store words in metadata so speaker job can access them
     metadata = {
         "trigger": trigger,
         "audio_file_size": len(wav_data),
-        "segment_count": len(segments),
         "word_count": len(words),
-        "speaker_recognition": {"enabled": False, "reason": "handled_by_separate_job"},
+        "segments_created_by": "speaker_service",  # Speaker service creates segments via diarization
+        "words": words,  # Store word-level timing data for speaker job
     }
 
     conversation.add_transcript_version(

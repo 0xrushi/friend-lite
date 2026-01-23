@@ -58,6 +58,8 @@ services:
       - SPEECH_DETECTION_MIN_WORDS=5  # 5 words instead of 10
       # Wait for audio queue to drain before timing out (test mode)
       - WAIT_FOR_AUDIO_QUEUE_DRAIN=true
+      # Mock speaker recognition for tests (avoids resource-intensive ML service)
+      - USE_MOCK_SPEAKER_CLIENT=true
     depends_on:
       qdrant-test:
         condition: service_started
@@ -209,6 +211,8 @@ services:
       - SPEECH_DETECTION_MIN_WORDS=5  # 5 words instead of 10
       # Wait for audio queue to drain before timing out (test mode)
       - WAIT_FOR_AUDIO_QUEUE_DRAIN=true
+      # Mock speaker recognition for tests (avoids resource-intensive ML service)
+      - USE_MOCK_SPEAKER_CLIENT=true
     depends_on:
       chronicle-backend-test:
         condition: service_healthy
