@@ -588,74 +588,39 @@ async def open_conversation_job(
     # Create transcript version from streaming results
     version_id = f"streaming_{session_id[:12]}"
     transcript_text = final_transcript.get("text", "")
-    segments_data = final_transcript.get("segments", [])
+    words_data = final_transcript.get("words", [])  # All words from aggregator
 
-    # If streaming provider didn't provide segments (e.g., Deepgram streaming),
-    # create segments from individual final results with word-level data
-    if not segments_data:
-        logger.info(f"📝 No segments in streaming results, creating from word-level data")
-        results = await aggregator.get_session_results(session_id)
-
-        for result in results:
-            words = result.get("words", [])
-            text = result.get("text", "").strip()
-
-            # Skip empty results or results without timing data
-            # WARNING: We don't support results without word-level timing data.
-            # Ideally should error, but skipping for now to handle edge cases gracefully.
-            if not words or not text:
-                continue
-
-            # Create segment dict from this result chunk
-            # Each "final" result becomes one segment with generic speaker label
-            segment_dict = {
-                "start": words[0]["start"],
-                "end": words[-1]["end"],
-                "text": text,
-                "speaker": "SPEAKER_00",  # Generic label, updated by speaker recognition
-                "confidence": result.get("confidence"),
-                "words": words  # Already in correct format from aggregator
-            }
-            segments_data.append(segment_dict)
-
-        logger.info(f"✅ Created {len(segments_data)} segments from streaming results")
-
-    # Convert segments to SpeakerSegment format with word-level timestamps
-    segments = [
-        Conversation.SpeakerSegment(
-            start=seg.get("start", 0.0),
-            end=seg.get("end", 0.0),
-            text=seg.get("text", ""),
-            speaker=seg.get("speaker", "SPEAKER_00"),
-            confidence=seg.get("confidence"),
-            words=[
-                Conversation.Word(
-                    word=w.get("word", ""),
-                    start=w.get("start", 0.0),
-                    end=w.get("end", 0.0),
-                    confidence=w.get("confidence")
-                )
-                for w in seg.get("words", [])
-            ]
+    # Convert words to Word objects
+    words = [
+        Conversation.Word(
+            word=w.get("word", ""),
+            start=w.get("start", 0.0),
+            end=w.get("end", 0.0),
+            confidence=w.get("confidence")
         )
-        for seg in segments_data
+        for w in words_data
     ]
+
+    # Segments remain EMPTY until speaker recognition service processes them
+    # Per Chronicle architecture: segments ONLY come from speaker service
+    segments = []
 
     # Determine provider from streaming results
     provider = final_transcript.get("provider", "deepgram")
 
-    # Add streaming transcript as the initial version
+    # Add streaming transcript with words at version level
     conversation.add_transcript_version(
         version_id=version_id,
         transcript=transcript_text,
-        segments=segments,
+        words=words,  # Store at version level
+        segments=segments,  # Empty - only speaker service creates segments
         provider=provider,
         model=provider,  # Provider name as model
         processing_time_seconds=None,  # Not applicable for streaming
         metadata={
             "source": "streaming",
             "chunk_count": final_transcript.get("chunk_count", 0),
-            "word_count": len(final_transcript.get("words", []))
+            "word_count": len(words),
         },
         set_as_active=True
     )
@@ -664,7 +629,7 @@ async def open_conversation_job(
     await conversation.save()
     logger.info(
         f"✅ Saved streaming transcript: {len(transcript_text)} chars, "
-        f"{len(segments)} segments, {len(final_transcript.get('words', []))} words "
+        f"{len(segments)} segments (empty until speaker recognition), {len(words)} words "
         f"for conversation {conversation_id[:12]}"
     )
 

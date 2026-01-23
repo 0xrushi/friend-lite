@@ -365,20 +365,30 @@ async def transcribe_full_audio_job(
     # Add new transcript version
     provider_normalized = provider_name.lower() if provider_name else "unknown"
 
+    # Convert words to Word objects
+    word_objects = [
+        Conversation.Word(
+            word=w.get("word", ""),
+            start=w.get("start", 0.0),
+            end=w.get("end", 0.0),
+            confidence=w.get("confidence")
+        )
+        for w in words
+    ]
+
     # Prepare metadata (transcription only - speaker service will add segments and metadata)
-    # Store words in metadata so speaker job can access them
     metadata = {
         "trigger": trigger,
         "audio_file_size": len(wav_data),
         "word_count": len(words),
         "segments_created_by": "speaker_service",  # Speaker service creates segments via diarization
-        "words": words,  # Store word-level timing data for speaker job
     }
 
     conversation.add_transcript_version(
         version_id=version_id,
         transcript=transcript_text,
-        segments=speaker_segments,
+        words=word_objects,  # Store at version level (not in metadata!)
+        segments=speaker_segments,  # Empty - will be filled by speaker recognition
         provider=provider_normalized,  # Now just a string, no enum constructor needed
         model=provider.name,
         processing_time_seconds=processing_time,

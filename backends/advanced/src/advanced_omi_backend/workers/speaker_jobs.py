@@ -207,11 +207,36 @@ async def recognise_speakers_job(
     actual_transcript_text = transcript_text or transcript_version.transcript or ""
     actual_words = words if words else []
 
-    # If words not provided, read from transcript version metadata
-    # (Transcription job stores words in metadata since segments are created by speaker service)
-    if not actual_words and transcript_version.metadata:
+    # If words not provided as parameter, read from version.words field (standardized location)
+    if not actual_words and transcript_version.words:
+        # Convert Word objects to dicts for speaker service API
+        actual_words = [
+            {
+                "word": w.word,
+                "start": w.start,
+                "end": w.end,
+                "confidence": w.confidence
+            }
+            for w in transcript_version.words
+        ]
+        logger.info(f"🔤 Loaded {len(actual_words)} words from transcript version.words field")
+    # Backward compatibility: Fall back to metadata if words field is empty (old data)
+    elif not actual_words and transcript_version.metadata.get("words"):
         actual_words = transcript_version.metadata.get("words", [])
-        logger.info(f"🔤 Loaded {len(actual_words)} words from transcript version metadata")
+        logger.info(f"🔤 Loaded {len(actual_words)} words from transcript version metadata (legacy)")
+    # Backward compatibility: Extract from segments if that's all we have (old streaming data)
+    elif not actual_words and transcript_version.segments:
+        for segment in transcript_version.segments:
+            if segment.words:
+                for w in segment.words:
+                    actual_words.append({
+                        "word": w.word,
+                        "start": w.start,
+                        "end": w.end,
+                        "confidence": w.confidence
+                    })
+        if actual_words:
+            logger.info(f"🔤 Extracted {len(actual_words)} words from segments (legacy)")
 
     if not actual_transcript_text:
         logger.warning(f"🎤 No transcript text found in version {version_id}")
@@ -220,6 +245,16 @@ async def recognise_speakers_job(
             "conversation_id": conversation_id,
             "version_id": version_id,
             "error": "No transcript text available",
+            "processing_time_seconds": 0
+        }
+
+    if not actual_words:
+        logger.warning(f"🎤 No words found in version {version_id}")
+        return {
+            "success": False,
+            "conversation_id": conversation_id,
+            "version_id": version_id,
+            "error": "No word-level timing data available",
             "processing_time_seconds": 0
         }
 

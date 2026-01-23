@@ -63,7 +63,14 @@ class Conversation(Document):
         """Version of a transcript with processing metadata."""
         version_id: str = Field(description="Unique version identifier")
         transcript: Optional[str] = Field(None, description="Full transcript text")
-        segments: List["Conversation.SpeakerSegment"] = Field(default_factory=list, description="Speaker segments")
+        words: List["Conversation.Word"] = Field(
+            default_factory=list,
+            description="Word-level timestamps for entire transcript"
+        )
+        segments: List["Conversation.SpeakerSegment"] = Field(
+            default_factory=list,
+            description="Speaker segments (filled by speaker recognition)"
+        )
         provider: Optional[str] = Field(None, description="Transcription provider used (deepgram, parakeet, etc.)")
         model: Optional[str] = Field(None, description="Model used (e.g., nova-3, parakeet)")
         created_at: datetime = Field(description="When this version was created")
@@ -253,8 +260,9 @@ class Conversation(Document):
         self,
         version_id: str,
         transcript: str,
-        segments: List["Conversation.SpeakerSegment"],
-        provider: str,  # Provider name from config.yml (deepgram, parakeet, etc.)
+        words: Optional[List["Conversation.Word"]] = None,
+        segments: Optional[List["Conversation.SpeakerSegment"]] = None,
+        provider: str = None,  # Provider name from config.yml (deepgram, parakeet, etc.)
         model: Optional[str] = None,
         processing_time_seconds: Optional[float] = None,
         metadata: Optional[Dict[str, Any]] = None,
@@ -264,7 +272,8 @@ class Conversation(Document):
         new_version = Conversation.TranscriptVersion(
             version_id=version_id,
             transcript=transcript,
-            segments=segments,
+            words=words or [],
+            segments=segments or [],
             provider=provider,
             model=model,
             created_at=datetime.now(),
