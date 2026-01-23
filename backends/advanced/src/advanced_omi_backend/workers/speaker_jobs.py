@@ -315,33 +315,61 @@ async def recognise_speakers_job(
             error_message = speaker_result.get("message", "Unknown error")
             logger.error(f"🎤 Speaker recognition service error: {error_type} - {error_message}")
 
-            # For connection failures, skip speaker recognition but allow downstream jobs to proceed
-            # Speaker recognition is optional - memory extraction and other jobs should still run
+            # Connection/timeout errors → skip gracefully (existing behavior)
             if error_type in ("connection_failed", "timeout", "client_error"):
                 logger.warning(
                     f"⚠️ Speaker service unavailable ({error_type}), skipping speaker recognition. "
                     f"Downstream jobs (memory, title/summary, events) will proceed normally."
                 )
                 return {
-                    "success": True,
+                    "success": True,  # Allow pipeline to continue
                     "conversation_id": conversation_id,
                     "version_id": version_id,
                     "speaker_recognition_enabled": True,
                     "speaker_service_unavailable": True,
                     "identified_speakers": [],
                     "skip_reason": f"Speaker service unavailable: {error_type}",
+                    "error_type": error_type,
                     "processing_time_seconds": time.time() - start_time
                 }
 
-            # For other errors (e.g., processing errors), return error dict without failing
-            return {
-                "success": False,
-                "conversation_id": conversation_id,
-                "version_id": version_id,
-                "error": f"Speaker recognition failed: {error_type}",
-                "error_details": error_message,
-                "processing_time_seconds": time.time() - start_time
-            }
+            # Validation errors → fail job, don't retry
+            elif error_type == "validation_error":
+                logger.error(f"❌ Speaker service validation error: {error_message}")
+                return {
+                    "success": False,
+                    "conversation_id": conversation_id,
+                    "version_id": version_id,
+                    "error": f"Validation error: {error_message}",
+                    "error_type": error_type,
+                    "retryable": False,  # Don't retry validation errors
+                    "processing_time_seconds": time.time() - start_time
+                }
+
+            # Resource errors → fail job, can retry later
+            elif error_type == "resource_error":
+                logger.error(f"❌ Speaker service resource error: {error_message}")
+                return {
+                    "success": False,
+                    "conversation_id": conversation_id,
+                    "version_id": version_id,
+                    "error": f"Resource error: {error_message}",
+                    "error_type": error_type,
+                    "retryable": True,  # Can retry later when resources available
+                    "processing_time_seconds": time.time() - start_time
+                }
+
+            # Unknown errors → fail job
+            else:
+                return {
+                    "success": False,
+                    "conversation_id": conversation_id,
+                    "version_id": version_id,
+                    "error": f"Speaker recognition failed: {error_type}",
+                    "error_details": error_message,
+                    "error_type": error_type,
+                    "processing_time_seconds": time.time() - start_time
+                }
 
         # Service worked but found no segments (legitimate empty result)
         if not speaker_result or "segments" not in speaker_result or not speaker_result["segments"]:
@@ -441,6 +469,30 @@ async def recognise_speakers_job(
             "identified_speakers": list(identified_speakers),
             "segment_count": len(updated_segments),
             "processing_time_seconds": processing_time
+        }
+
+    except asyncio.TimeoutError as e:
+        logger.error(f"❌ Speaker recognition timeout: {e}")
+
+        # Add timeout metadata to job
+        from rq import get_current_job
+        current_job = get_current_job()
+        if current_job:
+            current_job.meta.update({
+                "error_type": "timeout",
+                "audio_duration": conversation.audio_total_duration if conversation else None,
+                "timeout_occurred_at": time.time()
+            })
+            current_job.save_meta()
+
+        return {
+            "success": False,
+            "conversation_id": conversation_id,
+            "version_id": version_id,
+            "error": "Speaker recognition timeout",
+            "error_type": "timeout",
+            "audio_duration": conversation.audio_total_duration if conversation else None,
+            "processing_time_seconds": time.time() - start_time
         }
 
     except Exception as speaker_error:

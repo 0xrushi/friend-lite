@@ -81,6 +81,35 @@ class SpeakerRecognitionClient:
         else:
             logger.info("Speaker recognition client disabled (no service URL configured)")
 
+    def calculate_timeout(self, audio_duration: Optional[float]) -> float:
+        """
+        Calculate proportional timeout based on audio duration.
+
+        Uses the formula: timeout = min(MAX_TIMEOUT, audio_duration * MULTIPLIER + BASE_TIMEOUT)
+
+        Args:
+            audio_duration: Duration of audio in seconds
+
+        Returns:
+            Calculated timeout in seconds
+        """
+        BASE_TIMEOUT = 30.0  # Minimum timeout for short files
+        TIMEOUT_MULTIPLIER = 8.0  # Processing speed ratio (e.g., 1 min audio = 8 min timeout)
+        MAX_TIMEOUT = 600.0  # 10 minute cap for very long files
+
+        if audio_duration is None or audio_duration <= 0:
+            logger.warning("Audio duration unknown or invalid, using base timeout")
+            return BASE_TIMEOUT
+
+        calculated_timeout = audio_duration * TIMEOUT_MULTIPLIER + BASE_TIMEOUT
+        timeout = min(MAX_TIMEOUT, calculated_timeout)
+
+        logger.info(
+            f"🕐 Calculated timeout: audio_duration={audio_duration:.1f}s → "
+            f"timeout={timeout:.1f}s (base={BASE_TIMEOUT}, multiplier={TIMEOUT_MULTIPLIER}, max={MAX_TIMEOUT})"
+        )
+        return timeout
+
     async def diarize_identify_match(
         self,
         conversation_id: str,
@@ -112,6 +141,14 @@ class SpeakerRecognitionClient:
         if not self.enabled:
             logger.info(f"🎤 Speaker recognition disabled, returning empty result")
             return {"segments": []}
+
+        # Fetch conversation to get audio duration for timeout calculation
+        from advanced_omi_backend.models.conversation import Conversation
+        conversation = await Conversation.find_one(Conversation.conversation_id == conversation_id)
+        audio_duration = conversation.audio_total_duration if conversation else None
+
+        # Calculate proportional timeout based on audio duration
+        timeout = self.calculate_timeout(audio_duration)
 
         try:
             logger.info(f"🎤 Calling speaker service with conversation_id: {conversation_id[:12]}...")
@@ -172,7 +209,7 @@ class SpeakerRecognitionClient:
                 async with session.post(
                     request_url,
                     data=form_data,
-                    timeout=aiohttp.ClientTimeout(total=120),
+                    timeout=aiohttp.ClientTimeout(total=timeout),
                 ) as response:
                     logger.info(f"🎤 Speaker service response status: {response.status}")
 
@@ -231,6 +268,11 @@ class SpeakerRecognitionClient:
                 f"({len(audio_data) / 1024 / 1024:.2f} MB)"
             )
 
+            # Estimate audio duration from data size (assuming 16kHz, 16-bit PCM)
+            # WAV header is typically 44 bytes
+            estimated_duration = (len(audio_data) - 44) / 32000  # 16000 Hz * 2 bytes per sample
+            timeout = self.calculate_timeout(estimated_duration)
+
             # Call the speaker recognition service
             async with aiohttp.ClientSession() as session:
                 # Prepare the audio data for upload (no disk I/O!)
@@ -277,7 +319,7 @@ class SpeakerRecognitionClient:
                 async with session.post(
                     endpoint_url,
                     data=form_data,
-                    timeout=aiohttp.ClientTimeout(total=120),
+                    timeout=aiohttp.ClientTimeout(total=timeout),
                 ) as response:
                     logger.info(f"🎤 [DIARIZE] Response status: {response.status}")
 
@@ -346,6 +388,20 @@ class SpeakerRecognitionClient:
 
             logger.info(f"Identifying {len(unique_speakers)} speakers in {audio_path}")
 
+            # Get audio duration for timeout calculation
+            import wave
+            try:
+                with wave.open(audio_path, "rb") as wav_file:
+                    frame_count = wav_file.getnframes()
+                    sample_rate = wav_file.getframerate()
+                    audio_duration = frame_count / sample_rate if sample_rate > 0 else None
+            except Exception as e:
+                logger.warning(f"Failed to get audio duration from {audio_path}: {e}")
+                audio_duration = None
+
+            # Calculate proportional timeout based on audio duration
+            timeout = self.calculate_timeout(audio_duration)
+
             # Call the speaker recognition service
             async with aiohttp.ClientSession() as session:
                 # Prepare the audio file for upload
@@ -374,7 +430,7 @@ class SpeakerRecognitionClient:
                     async with session.post(
                         f"{self.service_url}/diarize-and-identify",
                         data=form_data,
-                        timeout=aiohttp.ClientTimeout(total=120),
+                        timeout=aiohttp.ClientTimeout(total=timeout),
                     ) as response:
                         if response.status != 200:
                             logger.warning(

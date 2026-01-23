@@ -68,6 +68,7 @@ export default function Conversations() {
   const [openDropdown, setOpenDropdown] = useState<string | null>(null)
   const [reprocessingTranscript, setReprocessingTranscript] = useState<Set<string>>(new Set())
   const [reprocessingMemory, setReprocessingMemory] = useState<Set<string>>(new Set())
+  const [reprocessingSpeakers, setReprocessingSpeakers] = useState<Set<string>>(new Set())
   const [deletingConversation, setDeletingConversation] = useState<Set<string>>(new Set())
 
   // Transcript segment editing state
@@ -238,6 +239,40 @@ export default function Conversations() {
     } finally {
       if (conversation.conversation_id) {
         setReprocessingMemory(prev => {
+          const newSet = new Set(prev)
+          newSet.delete(conversation.conversation_id!)
+          return newSet
+        })
+      }
+    }
+  }
+
+  const handleReprocessSpeakers = async (conversation: Conversation) => {
+    try {
+      if (!conversation.conversation_id) {
+        setError('Cannot reprocess speakers: Conversation ID is missing. This conversation may be from an older format.')
+        return
+      }
+
+      setReprocessingSpeakers(prev => new Set(prev).add(conversation.conversation_id!))
+      setOpenDropdown(null)
+
+      const response = await conversationsApi.reprocessSpeakers(
+        conversation.conversation_id,
+        'active'  // Use active transcript version as source
+      )
+
+      if (response.status === 200) {
+        // Refresh conversations to show new version with updated speakers
+        await loadConversations()
+      } else {
+        setError(`Failed to start speaker reprocessing: ${response.data?.error || 'Unknown error'}`)
+      }
+    } catch (err: any) {
+      setError(`Error starting speaker reprocessing: ${err.message || 'Unknown error'}`)
+    } finally {
+      if (conversation.conversation_id) {
+        setReprocessingSpeakers(prev => {
           const newSet = new Set(prev)
           newSet.delete(conversation.conversation_id!)
           return newSet
@@ -691,6 +726,22 @@ export default function Conversations() {
                           <Zap className="h-4 w-4" />
                         )}
                         <span>Reprocess Memory</span>
+                        {!conversation.conversation_id && (
+                          <span className="text-xs text-red-500 ml-1">(ID missing)</span>
+                        )}
+                      </button>
+                      <button
+                        onClick={() => handleReprocessSpeakers(conversation)}
+                        disabled={!conversation.conversation_id || reprocessingSpeakers.has(conversation.conversation_id)}
+                        className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="Create new transcript version with re-identified speakers (automatically updates memories)"
+                      >
+                        {conversation.conversation_id && reprocessingSpeakers.has(conversation.conversation_id) ? (
+                          <RefreshCw className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <User className="h-4 w-4" />
+                        )}
+                        <span>Reprocess Who Spoke</span>
                         {!conversation.conversation_id && (
                           <span className="text-xs text-red-500 ml-1">(ID missing)</span>
                         )}

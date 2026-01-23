@@ -122,6 +122,15 @@ export const conversationsApi = {
   reprocessMemory: (conversationId: string, transcriptVersionId: string = 'active') => api.post(`/api/conversations/${conversationId}/reprocess-memory`, null, {
     params: { transcript_version_id: transcriptVersionId }
   }),
+  reprocessSpeakers: (
+    conversationId: string,
+    transcriptVersionId: string = 'active'
+  ) =>
+    api.post(`/api/conversations/${conversationId}/reprocess-speakers`, null, {
+      params: {
+        transcript_version_id: transcriptVersionId
+      }
+    }),
 
   // Version management
   activateTranscriptVersion: (conversationId: string, versionId: string) => api.post(`/api/conversations/${conversationId}/activate-transcript/${versionId}`),
@@ -132,7 +141,6 @@ export const conversationsApi = {
 export const memoriesApi = {
   getAll: (userId?: string) => api.get('/api/memories', { params: userId ? { user_id: userId } : {} }),
   getById: (id: string, userId?: string) => api.get(`/api/memories/${id}`, { params: userId ? { user_id: userId } : {} }),
-  getUnfiltered: (userId?: string) => api.get('/api/memories/unfiltered', { params: userId ? { user_id: userId } : {} }),
   search: (query: string, userId?: string, limit: number = 20, scoreThreshold?: number) =>
     api.get('/api/memories/search', {
       params: {

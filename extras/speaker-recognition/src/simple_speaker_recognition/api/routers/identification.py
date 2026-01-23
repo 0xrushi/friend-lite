@@ -97,9 +97,46 @@ async def diarize_and_identify(
     log.info("Processing diarize-and-identify request")
     log.info(f"Parameters - min_duration: {min_duration}, similarity_threshold: {similarity_threshold}, identify_only_enrolled: {identify_only_enrolled}, user_id: {user_id}, min_speakers: {min_speakers}, max_speakers: {max_speakers}, collar: {collar}, min_duration_off: {min_duration_off}")
     log.info(f"File - name: {file.filename}, content_type: {file.content_type}, size: {file.size if hasattr(file, 'size') else 'unknown'}")
-    
+
+    # Early validation: Validate file presence
+    if not file or not file.filename:
+        log.error("❌ VALIDATION ERROR: No audio file provided")
+        raise HTTPException(
+            400,
+            detail={
+                "error": "validation_error",
+                "message": "No audio file provided",
+                "field": "file"
+            }
+        )
+
     # Read audio data once
     audio_data = await file.read()
+
+    # Early validation: Validate non-empty
+    if len(audio_data) == 0:
+        log.error("❌ VALIDATION ERROR: Audio file is empty")
+        raise HTTPException(
+            400,
+            detail={
+                "error": "validation_error",
+                "message": "Audio file is empty",
+                "field": "file"
+            }
+        )
+
+    # Resource check - verify backend is initialized
+    audio_backend = get_audio_backend()
+    if not audio_backend:
+        log.error("❌ RESOURCE ERROR: Audio backend not initialized")
+        raise HTTPException(
+            503,
+            detail={
+                "error": "resource_error",
+                "message": "Audio backend not initialized",
+                "resource": "audio_backend"
+            }
+        )
     
     # Save to temp file for processing
     with secure_temp_file() as tmp:
@@ -121,9 +158,9 @@ async def diarize_and_identify(
         log.info(f"Step 1: Performing speaker diarization on {tmp_path}")
         if min_speakers or max_speakers:
             log.info(f"Using speaker constraints: min={min_speakers}, max={max_speakers}")
-        
-        audio_backend = get_audio_backend()
-        segments = await audio_backend.async_diarize(tmp_path, min_speakers=min_speakers, max_speakers=max_speakers, 
+
+        # Use audio_backend from early validation (already checked above)
+        segments = await audio_backend.async_diarize(tmp_path, min_speakers=min_speakers, max_speakers=max_speakers,
                                                      collar=collar, min_duration_off=min_duration_off)
         
         # Log what PyAnnote produced
@@ -316,19 +353,46 @@ async def diarize_identify_match(
     if conversation_id and not backend_token:
         raise HTTPException(400, "backend_token required when using conversation_id")
 
-    # Parse transcript data
+    # Early validation: Parse transcript_data FIRST (fail fast if invalid)
     try:
         transcript = json.loads(transcript_data)
         words = transcript.get("words", [])
     except json.JSONDecodeError as e:
         error_msg = f"Invalid transcript_data JSON: {str(e)}"
-        log.error(f"❌ {error_msg}")
-        raise HTTPException(400, error_msg) from e
+        log.error(f"❌ VALIDATION ERROR: {error_msg}")
+        raise HTTPException(
+            400,
+            detail={
+                "error": "validation_error",
+                "message": error_msg,
+                "field": "transcript_data"
+            }
+        ) from e
 
     if not words:
         error_msg = f"No words found in transcript_data (transcript keys: {list(transcript.keys())}, words type: {type(words)})"
-        log.error(f"❌ {error_msg}")
-        raise HTTPException(400, error_msg)
+        log.error(f"❌ VALIDATION ERROR: {error_msg}")
+        raise HTTPException(
+            400,
+            detail={
+                "error": "validation_error",
+                "message": error_msg,
+                "field": "transcript_data.words"
+            }
+        )
+
+    # Resource check - verify model is loaded before processing
+    audio_backend = get_audio_backend()
+    if not audio_backend or not hasattr(audio_backend, 'async_diarize'):
+        log.error("❌ RESOURCE ERROR: Diarization model not loaded")
+        raise HTTPException(
+            503,
+            detail={
+                "error": "resource_error",
+                "message": "Diarization model not loaded",
+                "resource": "diarization_model"
+            }
+        )
 
     # Get settings for chunking configuration
     from simple_speaker_recognition.api.service import auth as settings
@@ -395,7 +459,7 @@ async def diarize_identify_match(
         if min_speakers or max_speakers:
             log.info(f"Using speaker constraints: min={min_speakers}, max={max_speakers}")
 
-        audio_backend = get_audio_backend()
+        # Use audio_backend from early validation (already checked above)
         diarization_segments = await audio_backend.async_diarize(
             tmp_path,
             min_speakers=min_speakers,

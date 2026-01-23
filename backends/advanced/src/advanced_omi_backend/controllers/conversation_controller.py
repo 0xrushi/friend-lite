@@ -561,6 +561,172 @@ async def reprocess_memory(conversation_id: str, transcript_version_id: str, use
         return JSONResponse(status_code=500, content={"error": "Error starting memory reprocessing"})
 
 
+async def reprocess_speakers(
+    conversation_id: str,
+    transcript_version_id: str,
+    user: User
+):
+    """
+    Reprocess speaker identification for a specific transcript version.
+    Users can only reprocess their own conversations.
+
+    Creates NEW transcript version with same text/words but re-identified speakers.
+    Automatically chains memory reprocessing since speaker attribution affects meaning.
+    """
+    try:
+        # 1. Find conversation and validate ownership
+        conversation_model = await Conversation.find_one(
+            Conversation.conversation_id == conversation_id
+        )
+        if not conversation_model:
+            return JSONResponse(
+                status_code=404,
+                content={"error": "Conversation not found"}
+            )
+
+        # Check ownership for non-admin users
+        if not user.is_superuser and conversation_model.user_id != str(user.user_id):
+            return JSONResponse(
+                status_code=403,
+                content={"error": "Access forbidden. You can only reprocess your own conversations."}
+            )
+
+        # 2. Resolve source transcript version ID (handle "active" special case)
+        source_version_id = transcript_version_id
+        if source_version_id == "active":
+            active_version_id = conversation_model.active_transcript_version
+            if not active_version_id:
+                return JSONResponse(
+                    status_code=404,
+                    content={"error": "No active transcript version found"}
+                )
+            source_version_id = active_version_id
+
+        # 3. Find and validate the source transcript version
+        source_version = None
+        for version in conversation_model.transcript_versions:
+            if version.version_id == source_version_id:
+                source_version = version
+                break
+
+        if not source_version:
+            return JSONResponse(
+                status_code=404,
+                content={"error": f"Transcript version '{source_version_id}' not found"}
+            )
+
+        # 4. Validate transcript has content and words
+        if not source_version.transcript:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "Cannot re-diarize empty transcript. Transcript version has no text."}
+            )
+
+        if not source_version.words:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "Cannot re-diarize transcript without word timings. Words are required for diarization."}
+            )
+
+        # 5. Check if speaker recognition is enabled
+        speaker_config = get_service_config('speaker_recognition')
+        if not speaker_config.get('enabled', True):
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": "Speaker recognition is disabled",
+                    "details": "Enable speaker service in config to use this feature"
+                }
+            )
+
+        # 6. Create NEW transcript version (copy text/words, empty segments)
+        new_version_id = str(uuid.uuid4())
+
+        # Add new version with copied text/words but empty segments
+        # Speaker job will populate segments with re-identified speakers
+        conversation_model.add_transcript_version(
+            version_id=new_version_id,
+            transcript=source_version.transcript,  # COPY transcript text
+            words=source_version.words,  # COPY word timings
+            segments=[],  # Empty - will be populated by speaker job
+            provider=source_version.provider,
+            model=source_version.model,
+            processing_time_seconds=None,  # Will be updated by job
+            metadata={
+                "reprocessing_type": "speaker_diarization",
+                "source_version_id": source_version_id,
+                "trigger": "manual_reprocess"
+            },
+            set_as_active=True  # Set new version as active
+        )
+
+        # Save conversation with new version
+        await conversation_model.save()
+
+        logger.info(
+            f"Created new transcript version {new_version_id} from source {source_version_id} "
+            f"for conversation {conversation_id}"
+        )
+
+        # 7. Enqueue speaker recognition job with NEW version_id
+        speaker_job = transcription_queue.enqueue(
+            recognise_speakers_job,
+            conversation_id,
+            new_version_id,  # NEW version (not source)
+            job_timeout=1200,  # 20 minutes
+            result_ttl=JOB_RESULT_TTL,
+            job_id=f"reprocess_speaker_{conversation_id[:12]}",
+            description=f"Re-diarize speakers for {conversation_id[:8]}",
+            meta={
+                'conversation_id': conversation_id,
+                'version_id': new_version_id,
+                'source_version_id': source_version_id,
+                'trigger': 'reprocess'
+            }
+        )
+
+        logger.info(
+            f"Enqueued speaker reprocessing job {speaker_job.id} "
+            f"for new version {new_version_id}"
+        )
+
+        # 8. Chain memory reprocessing (speaker changes affect memory context)
+        memory_job = memory_queue.enqueue(
+            process_memory_job,
+            conversation_id,
+            depends_on=speaker_job,
+            job_timeout=1800,  # 30 minutes
+            result_ttl=JOB_RESULT_TTL,
+            job_id=f"memory_{conversation_id[:12]}",
+            description=f"Extract memories for {conversation_id[:8]}",
+            meta={
+                'conversation_id': conversation_id,
+                'trigger': 'reprocess_after_speaker'
+            }
+        )
+
+        logger.info(
+            f"Chained memory reprocessing job {memory_job.id} "
+            f"after speaker job {speaker_job.id}"
+        )
+
+        # 9. Return job information
+        return JSONResponse(content={
+            "message": "Speaker reprocessing started",
+            "job_id": speaker_job.id,
+            "version_id": new_version_id,  # NEW version ID
+            "source_version_id": source_version_id,  # Original version used as source
+            "status": "queued"
+        })
+
+    except Exception as e:
+        logger.error(f"Error starting speaker reprocessing: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": "Error starting speaker reprocessing"}
+        )
+
+
 async def activate_transcript_version(conversation_id: str, version_id: str, user: User):
     """Activate a specific transcript version. Users can only modify their own conversations."""
     try:

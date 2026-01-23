@@ -66,6 +66,32 @@ async def reprocess_memory(
     return await conversation_controller.reprocess_memory(conversation_id, transcript_version_id, current_user)
 
 
+@router.post("/{conversation_id}/reprocess-speakers")
+async def reprocess_speakers(
+    conversation_id: str,
+    current_user: User = Depends(current_active_user),
+    transcript_version_id: str = Query(default="active")
+):
+    """
+    Re-run speaker identification/diarization on existing transcript.
+
+    Creates a NEW transcript version with same text/words but re-identified speakers.
+    Automatically chains memory reprocessing since speaker changes affect memory context.
+
+    Args:
+        conversation_id: Conversation to reprocess
+        transcript_version_id: Which transcript version to use as source (default: "active")
+
+    Returns:
+        Job status with job_id and new version_id
+    """
+    return await conversation_controller.reprocess_speakers(
+        conversation_id,
+        transcript_version_id,
+        current_user
+    )
+
+
 @router.post("/{conversation_id}/activate-transcript/{version_id}")
 async def activate_transcript_version(
     conversation_id: str,
