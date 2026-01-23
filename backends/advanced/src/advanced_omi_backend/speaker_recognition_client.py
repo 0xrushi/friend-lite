@@ -39,16 +39,8 @@ class SpeakerRecognitionClient:
         # Check if we should use mock client (for testing)
         if os.getenv("USE_MOCK_SPEAKER_CLIENT") == "true":
             try:
-                # Import mock client from tests directory
-                import sys
-                from pathlib import Path
-
-                # Add tests directory to Python path
-                tests_dir = Path(__file__).resolve().parents[5] / "tests"
-                if str(tests_dir) not in sys.path:
-                    sys.path.insert(0, str(tests_dir))
-
-                from mocks.mock_speaker_client import MockSpeakerRecognitionClient
+                # Import mock client from testing module
+                from advanced_omi_backend.testing.mock_speaker_client import MockSpeakerRecognitionClient
 
                 self._mock_client = MockSpeakerRecognitionClient()
                 self.enabled = True
