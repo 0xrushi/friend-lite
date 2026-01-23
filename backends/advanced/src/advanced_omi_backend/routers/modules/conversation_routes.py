@@ -7,12 +7,13 @@ Handles conversation CRUD operations, audio processing, and transcript managemen
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from advanced_omi_backend.auth import current_active_user
-from advanced_omi_backend.controllers import conversation_controller, audio_controller
-from advanced_omi_backend.users import User
+from advanced_omi_backend.controllers import conversation_controller
 from advanced_omi_backend.models.conversation import Conversation
+from advanced_omi_backend.users import User
+from advanced_omi_backend.utils.audio_chunk_utils import reconstruct_audio_segment
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +117,7 @@ async def get_conversation_waveform(
         - duration_seconds: float - Total audio duration
     """
     from fastapi import HTTPException
+
     from advanced_omi_backend.models.conversation import Conversation
     from advanced_omi_backend.models.waveform import WaveformData
     from advanced_omi_backend.workers.waveform_jobs import generate_waveform_data
@@ -227,7 +229,6 @@ async def get_audio_segment(
     Returns:
         WAV audio bytes (16kHz, mono) for the requested time range
     """
-    from advanced_omi_backend.utils.audio_chunk_utils import reconstruct_audio_segment
 
     # Verify conversation exists and user has access
     conversation = await Conversation.find_one(
