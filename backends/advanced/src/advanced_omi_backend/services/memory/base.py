@@ -25,17 +25,18 @@ __all__ = [
 @dataclass
 class MemoryEntry:
     """Represents a memory entry with content, metadata, and embeddings.
-    
+
     This is the core data structure used throughout the memory service
     for storing and retrieving user memories.
-    
+
     Attributes:
         id: Unique identifier for the memory
         content: The actual memory text/content
         metadata: Additional metadata (user_id, source, timestamps, etc.)
         embedding: Vector embedding for semantic search (optional)
-        score: Similarity score from search operations (optional) 
+        score: Similarity score from search operations (optional)
         created_at: Timestamp when memory was created
+        updated_at: Timestamp when memory was last updated
     """
     id: str
     content: str
@@ -43,11 +44,15 @@ class MemoryEntry:
     embedding: Optional[List[float]] = None
     score: Optional[float] = None
     created_at: Optional[str] = None
-    
+    updated_at: Optional[str] = None
+
     def __post_init__(self):
-        """Set created_at timestamp if not provided."""
+        """Set created_at and updated_at timestamps if not provided."""
+        current_time = str(int(time.time()))
         if self.created_at is None:
-            self.created_at = str(int(time.time()))
+            self.created_at = current_time
+        if self.updated_at is None:
+            self.updated_at = self.created_at  # Default to created_at, not current_time
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert MemoryEntry to dictionary for JSON serialization."""
@@ -59,6 +64,7 @@ class MemoryEntry:
             "embedding": self.embedding,
             "score": self.score,
             "created_at": self.created_at,
+            "updated_at": self.updated_at,
             "user_id": self.metadata.get("user_id")  # Extract user_id from metadata
         }
 

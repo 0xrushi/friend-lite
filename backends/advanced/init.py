@@ -5,7 +5,6 @@ Interactive configuration for all services and API keys
 """
 
 import argparse
-import getpass
 import os
 import platform
 import secrets
@@ -22,9 +21,15 @@ from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
 from rich.text import Text
 
-# Add repo root to path for config_manager import
+# Add repo root to path for imports
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from config_manager import ConfigManager
+from setup_utils import (
+    prompt_password as util_prompt_password,
+    prompt_with_existing_masked,
+    mask_value,
+    read_env_value
+)
 
 
 class ChronicleSetup:
@@ -48,6 +53,9 @@ class ChronicleSetup:
             self.console.print(f"[red][ERROR][/red] config.yml not found at {self.config_manager.config_yml_path}")
             self.console.print("[red][ERROR][/red] Run wizard.py from project root to create config.yml")
             sys.exit(1)
+
+        # Ensure plugins.yml exists (copy from template if missing)
+        self._ensure_plugins_yml_exists()
 
     def print_header(self, title: str):
         """Print a colorful header"""
@@ -76,19 +84,8 @@ class ChronicleSetup:
             return default
 
     def prompt_password(self, prompt: str) -> str:
-        """Prompt for password (hidden input)"""
-        while True:
-            try:
-                password = getpass.getpass(f"{prompt}: ")
-                if len(password) >= 8:
-                    return password
-                self.console.print("[yellow][WARNING][/yellow] Password must be at least 8 characters")
-            except (EOFError, KeyboardInterrupt):
-                # For non-interactive environments, generate a secure password
-                self.console.print("[yellow][WARNING][/yellow] Non-interactive environment detected")
-                password = f"admin-{secrets.token_hex(8)}"
-                self.console.print(f"Generated secure password: {password}")
-                return password
+        """Prompt for password (delegates to shared utility)"""
+        return util_prompt_password(prompt, min_length=8, allow_generated=True)
 
     def prompt_choice(self, prompt: str, choices: Dict[str, str], default: str = "1") -> str:
         """Prompt for a choice from options"""
@@ -107,6 +104,26 @@ class ChronicleSetup:
                 self.console.print(f"Using default choice: {default}")
                 return default
 
+    def _ensure_plugins_yml_exists(self):
+        """Ensure plugins.yml exists by copying from template if missing."""
+        plugins_yml = Path("../../config/plugins.yml")
+        plugins_template = Path("../../config/plugins.yml.template")
+
+        if not plugins_yml.exists():
+            if plugins_template.exists():
+                self.console.print("[blue][INFO][/blue] plugins.yml not found, creating from template...")
+                shutil.copy2(plugins_template, plugins_yml)
+                self.console.print(f"[green]✅[/green] Created {plugins_yml} from template")
+                self.console.print("[yellow][NOTE][/yellow] Edit config/plugins.yml to configure plugins")
+                self.console.print("[yellow][NOTE][/yellow] Set HA_TOKEN in .env for Home Assistant integration")
+            else:
+                raise RuntimeError(
+                    f"Template file not found: {plugins_template}\n"
+                    f"The repository structure is incomplete. Please ensure config/plugins.yml.template exists."
+                )
+        else:
+            self.console.print(f"[blue][INFO][/blue] Found existing {plugins_yml}")
+
     def backup_existing_env(self):
         """Backup existing .env file"""
         env_path = Path(".env")
@@ -117,24 +134,38 @@ class ChronicleSetup:
             self.console.print(f"[blue][INFO][/blue] Backed up existing .env file to {backup_path}")
 
     def read_existing_env_value(self, key: str) -> str:
-        """Read a value from existing .env file"""
-        env_path = Path(".env")
-        if not env_path.exists():
-            return None
-
-        value = get_key(str(env_path), key)
-        # get_key returns None if key doesn't exist or value is empty
-        return value if value else None
+        """Read a value from existing .env file (delegates to shared utility)"""
+        return read_env_value(".env", key)
 
     def mask_api_key(self, key: str, show_chars: int = 5) -> str:
-        """Mask API key showing only first and last few characters"""
-        if not key or len(key) <= show_chars * 2:
-            return key
+        """Mask API key (delegates to shared utility)"""
+        return mask_value(key, show_chars)
 
-        # Remove quotes if present
-        key_clean = key.strip("'\"")
+    def prompt_with_existing_masked(self, prompt_text: str, env_key: str, placeholders: list,
+                                     is_password: bool = False, default: str = "") -> str:
+        """
+        Prompt for a value, showing masked existing value from .env if present.
+        Delegates to shared utility from setup_utils.
 
-        return f"{key_clean[:show_chars]}{'*' * min(15, len(key_clean) - show_chars * 2)}{key_clean[-show_chars:]}"
+        Args:
+            prompt_text: The prompt to display
+            env_key: The .env key to check for existing value
+            placeholders: List of placeholder values to treat as "not set"
+            is_password: Whether to mask the value (for passwords/tokens)
+            default: Default value if no existing value
+
+        Returns:
+            User input value, existing value if reused, or default
+        """
+        # Use shared utility with auto-read from .env
+        return prompt_with_existing_masked(
+            prompt_text=prompt_text,
+            env_file_path=".env",
+            env_key=env_key,
+            placeholders=placeholders,
+            is_password=is_password,
+            default=default
+        )
 
 
     def setup_authentication(self):
@@ -192,15 +223,14 @@ class ChronicleSetup:
             self.console.print("[blue][INFO][/blue] Deepgram selected")
             self.console.print("Get your API key from: https://console.deepgram.com/")
 
-            # Check for existing API key
-            existing_key = self.read_existing_env_value("DEEPGRAM_API_KEY")
-            if existing_key and existing_key not in ['your_deepgram_api_key_here', 'your-deepgram-key-here']:
-                masked_key = self.mask_api_key(existing_key)
-                prompt_text = f"Deepgram API key ({masked_key}) [press Enter to reuse, or enter new]"
-                api_key_input = self.prompt_value(prompt_text, "")
-                api_key = api_key_input if api_key_input else existing_key
-            else:
-                api_key = self.prompt_value("Deepgram API key (leave empty to skip)", "")
+            # Use the new masked prompt function
+            api_key = self.prompt_with_existing_masked(
+                prompt_text="Deepgram API key (leave empty to skip)",
+                env_key="DEEPGRAM_API_KEY",
+                placeholders=['your_deepgram_api_key_here', 'your-deepgram-key-here'],
+                is_password=True,
+                default=""
+            )
 
             if api_key:
                 # Write API key to .env
@@ -250,15 +280,14 @@ class ChronicleSetup:
             self.console.print("[blue][INFO][/blue] OpenAI selected")
             self.console.print("Get your API key from: https://platform.openai.com/api-keys")
 
-            # Check for existing API key
-            existing_key = self.read_existing_env_value("OPENAI_API_KEY")
-            if existing_key and existing_key not in ['your_openai_api_key_here', 'your-openai-key-here']:
-                masked_key = self.mask_api_key(existing_key)
-                prompt_text = f"OpenAI API key ({masked_key}) [press Enter to reuse, or enter new]"
-                api_key_input = self.prompt_value(prompt_text, "")
-                api_key = api_key_input if api_key_input else existing_key
-            else:
-                api_key = self.prompt_value("OpenAI API key (leave empty to skip)", "")
+            # Use the new masked prompt function
+            api_key = self.prompt_with_existing_masked(
+                prompt_text="OpenAI API key (leave empty to skip)",
+                env_key="OPENAI_API_KEY",
+                placeholders=['your_openai_api_key_here', 'your-openai-key-here'],
+                is_password=True,
+                default=""
+            )
 
             if api_key:
                 self.config["OPENAI_API_KEY"] = api_key
@@ -370,6 +399,11 @@ class ChronicleSetup:
             self.config["PARAKEET_ASR_URL"] = self.args.parakeet_asr_url
             self.console.print(f"[green][SUCCESS][/green] Parakeet ASR configured via args: {self.args.parakeet_asr_url}")
 
+        # Check if Tailscale auth key provided via args
+        if hasattr(self.args, 'ts_authkey') and self.args.ts_authkey:
+            self.config["TS_AUTHKEY"] = self.args.ts_authkey
+            self.console.print(f"[green][SUCCESS][/green] Tailscale auth key configured (Docker integration enabled)")
+
     def setup_obsidian(self):
         """Configure Obsidian/Neo4j integration"""
         # Check if enabled via command line
@@ -413,6 +447,16 @@ class ChronicleSetup:
 
             self.console.print("[green][SUCCESS][/green] Obsidian/Neo4j configured")
             self.console.print("[blue][INFO][/blue] Neo4j will start automatically with --profile obsidian")
+        else:
+            # Explicitly disable Obsidian in config.yml when not enabled
+            self.config_manager.update_memory_config({
+                "obsidian": {
+                    "enabled": False,
+                    "neo4j_host": "neo4j-mem0",
+                    "timeout": 30
+                }
+            })
+            self.console.print("[blue][INFO][/blue] Obsidian/Neo4j integration disabled")
 
     def setup_network(self):
         """Configure network settings"""
@@ -443,14 +487,14 @@ class ChronicleSetup:
                 self.console.print("[blue][INFO][/blue] For distributed deployments, use your Tailscale IP (e.g., 100.64.1.2)")
                 self.console.print("[blue][INFO][/blue] For local-only access, use 'localhost'")
 
-                # Check for existing SERVER_IP
-                existing_ip = self.read_existing_env_value("SERVER_IP")
-                if existing_ip and existing_ip not in ['localhost', 'your-server-ip-here']:
-                    prompt_text = f"Server IP/Domain for SSL certificate ({existing_ip}) [press Enter to reuse, or enter new]"
-                    server_ip_input = self.prompt_value(prompt_text, "")
-                    server_ip = server_ip_input if server_ip_input else existing_ip
-                else:
-                    server_ip = self.prompt_value("Server IP/Domain for SSL certificate (Tailscale IP or localhost)", "localhost")
+                # Use the new masked prompt function (not masked for IP, but shows existing)
+                server_ip = self.prompt_with_existing_masked(
+                    prompt_text="Server IP/Domain for SSL certificate (Tailscale IP or localhost)",
+                    env_key="SERVER_IP",
+                    placeholders=['localhost', 'your-server-ip-here'],
+                    is_password=False,
+                    default="localhost"
+                )
         
         if enable_https:
             
@@ -707,6 +751,8 @@ def main():
                        help="Enable Obsidian/Neo4j integration (default: prompt user)")
     parser.add_argument("--neo4j-password",
                        help="Neo4j password (default: prompt user)")
+    parser.add_argument("--ts-authkey",
+                       help="Tailscale auth key for Docker integration (default: prompt user)")
 
     args = parser.parse_args()
     

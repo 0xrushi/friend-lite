@@ -9,49 +9,23 @@ import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
-import yaml
 
-from dotenv import get_key
+import yaml
 from rich import print as rprint
 from rich.console import Console
 from rich.prompt import Confirm, Prompt
 
+# Import shared setup utilities
+from setup_utils import (
+    prompt_password,
+    prompt_value,
+    prompt_with_existing_masked,
+    read_env_value,
+    mask_value,
+    is_placeholder
+)
+
 console = Console()
-
-def read_env_value(env_file_path, key):
-    """Read a value from an .env file using python-dotenv"""
-    env_path = Path(env_file_path)
-    if not env_path.exists():
-        return None
-
-    value = get_key(str(env_path), key)
-    # get_key returns None if key doesn't exist or value is empty
-    return value if value else None
-
-def is_placeholder(value, *placeholder_variants):
-    """
-    Check if a value is a placeholder by normalizing both the value and placeholders.
-    Treats 'your-key-here' and 'your_key_here' as equivalent.
-
-    Args:
-        value: The value to check
-        placeholder_variants: One or more placeholder strings to check against
-
-    Returns:
-        True if value matches any placeholder variant (after normalization)
-    """
-    if not value:
-        return True
-
-    # Normalize by replacing hyphens with underscores
-    normalized_value = value.replace('-', '_').lower()
-
-    for placeholder in placeholder_variants:
-        normalized_placeholder = placeholder.replace('-', '_').lower()
-        if normalized_value == normalized_placeholder:
-            return True
-
-    return False
 
 SERVICES = {
     'backend': {
@@ -80,6 +54,44 @@ SERVICES = {
         }
     }
 }
+
+def discover_available_plugins():
+    """
+    Discover plugins by scanning plugins directory.
+
+    Returns:
+        Dictionary mapping plugin_id to plugin metadata:
+        {
+            'plugin_id': {
+                'has_setup': bool,
+                'setup_path': Path or None,
+                'dir': Path
+            }
+        }
+    """
+    plugins_dir = Path("backends/advanced/src/advanced_omi_backend/plugins")
+
+    if not plugins_dir.exists():
+        console.print(f"[yellow]Warning: Plugins directory not found: {plugins_dir}[/yellow]")
+        return {}
+
+    discovered = {}
+    skip_dirs = {'__pycache__', '__init__.py', 'base.py', 'router.py'}
+
+    for plugin_dir in plugins_dir.iterdir():
+        if not plugin_dir.is_dir() or plugin_dir.name in skip_dirs:
+            continue
+
+        plugin_id = plugin_dir.name
+        setup_script = plugin_dir / "setup.py"
+
+        discovered[plugin_id] = {
+            'has_setup': setup_script.exists(),
+            'setup_path': setup_script if setup_script.exists() else None,
+            'dir': plugin_dir
+        }
+
+    return discovered
 
 def check_service_exists(service_name, service_config):
     """Check if service directory and script exist"""
@@ -153,7 +165,8 @@ def cleanup_unselected_services(selected_services):
                 console.print(f"🧹 [dim]Backed up {service_name} configuration to {backup_file.name} (service not selected)[/dim]")
 
 def run_service_setup(service_name, selected_services, https_enabled=False, server_ip=None,
-                     obsidian_enabled=False, neo4j_password=None, transcription_provider='deepgram'):
+                     obsidian_enabled=False, neo4j_password=None, hf_token=None,
+                     transcription_provider='deepgram'):
     """Execute individual service setup script"""
     if service_name == 'advanced':
         service = SERVICES['backend'][service_name]
@@ -184,35 +197,18 @@ def run_service_setup(service_name, selected_services, https_enabled=False, serv
         # Add HTTPS configuration for services that support it
         if service_name == 'speaker-recognition' and https_enabled and server_ip:
             cmd.extend(['--enable-https', '--server-ip', server_ip])
-        
-        # For speaker-recognition, validate HF_TOKEN is required
+
+        # For speaker-recognition, pass HF_TOKEN from centralized configuration
         if service_name == 'speaker-recognition':
-            # HF_TOKEN is required for speaker-recognition
+            # Define the speaker env path
             speaker_env_path = 'extras/speaker-recognition/.env'
-            hf_token = read_env_value(speaker_env_path, 'HF_TOKEN')
-            
-            # Check if HF_TOKEN is missing or is a placeholder
-            if not hf_token or is_placeholder(hf_token, 'your_huggingface_token_here', 'your-huggingface-token-here', 'hf_xxxxx'):
-                console.print("\n[red][ERROR][/red] HF_TOKEN is required for speaker-recognition service")
-                console.print("[yellow]Speaker recognition requires a Hugging Face token to download models[/yellow]")
-                console.print("Get your token from: https://huggingface.co/settings/tokens")
-                console.print()
-                
-                # Prompt for HF_TOKEN
-                try:
-                    hf_token_input = console.input("[cyan]Enter your HF_TOKEN[/cyan]: ").strip()
-                    if not hf_token_input or is_placeholder(hf_token_input, 'your_huggingface_token_here', 'your-huggingface-token-here', 'hf_xxxxx'):
-                        console.print("[red][ERROR][/red] Invalid HF_TOKEN provided. Speaker-recognition setup cancelled.")
-                        return False
-                    hf_token = hf_token_input
-                except EOFError:
-                    console.print("[red][ERROR][/red] HF_TOKEN is required. Speaker-recognition setup cancelled.")
-                    return False
-            
-            # Pass HF Token to init script
-            cmd.extend(['--hf-token', hf_token])
-            console.print("[green][SUCCESS][/green] HF_TOKEN configured")
-            
+
+            # HF Token should have been provided via setup_hf_token_if_needed()
+            if hf_token:
+                cmd.extend(['--hf-token', hf_token])
+            else:
+                console.print("[yellow][WARNING][/yellow] No HF_TOKEN provided - speaker recognition may fail to download models")
+
             # Pass Deepgram API key from backend if available
             backend_env_path = 'backends/advanced/.env'
             deepgram_key = read_env_value(backend_env_path, 'DEEPGRAM_API_KEY')
@@ -289,6 +285,80 @@ def show_service_status():
         status = "✅" if exists else "⏸️"
         console.print(f"  {status} {service_config['description']} - {msg}")
 
+def run_plugin_setup(plugin_id, plugin_info):
+    """Run a plugin's setup.py script"""
+    setup_path = plugin_info['setup_path']
+
+    try:
+        # Run plugin setup script interactively (don't capture output)
+        # This allows the plugin to prompt for user input
+        result = subprocess.run(
+            ['uv', 'run', '--with-requirements', 'setup-requirements.txt', 'python', str(setup_path)],
+            cwd=str(Path.cwd())
+        )
+
+        if result.returncode == 0:
+            console.print(f"\n[green]✅ {plugin_id} configured successfully[/green]")
+            return True
+        else:
+            console.print(f"\n[red]❌ {plugin_id} setup failed with exit code {result.returncode}[/red]")
+            return False
+
+    except Exception as e:
+        console.print(f"[red]❌ Error running {plugin_id} setup: {e}[/red]")
+        return False
+
+def setup_plugins():
+    """Discover and setup plugins via delegation"""
+    console.print("\n🔌 [bold cyan]Plugin Configuration[/bold cyan]")
+    console.print("Chronicle supports community plugins for extended functionality.\n")
+
+    # Discover available plugins
+    available_plugins = discover_available_plugins()
+
+    if not available_plugins:
+        console.print("[dim]No plugins found[/dim]")
+        return
+
+    # Ask about enabling community plugins
+    try:
+        enable_plugins = Confirm.ask(
+            "Enable community plugins?",
+            default=True
+        )
+    except EOFError:
+        console.print("Using default: Yes")
+        enable_plugins = True
+
+    if not enable_plugins:
+        console.print("[dim]Skipping plugin configuration[/dim]")
+        return
+
+    # For each plugin with setup script
+    configured_count = 0
+    for plugin_id, plugin_info in available_plugins.items():
+        if not plugin_info['has_setup']:
+            console.print(f"[dim]  {plugin_id}: No setup wizard available (configure manually)[/dim]")
+            continue
+
+        # Ask if user wants to configure this plugin
+        try:
+            configure = Confirm.ask(
+                f"  Configure {plugin_id} plugin?",
+                default=False
+            )
+        except EOFError:
+            configure = False
+
+        if configure:
+            # Delegate to plugin's setup script
+            console.print(f"\n[cyan]Running {plugin_id} setup wizard...[/cyan]")
+            success = run_plugin_setup(plugin_id, plugin_info)
+            if success:
+                configured_count += 1
+
+    console.print(f"\n[green]✅ Configured {configured_count} plugin(s)[/green]")
+
 def setup_git_hooks():
     """Setup pre-commit hooks for development"""
     console.print("\n🔧 [bold]Setting up development environment...[/bold]")
@@ -318,6 +388,46 @@ def setup_git_hooks():
 
     except Exception as e:
         console.print(f"⚠️  [yellow]Could not setup git hooks: {e} (optional)[/yellow]")
+
+def setup_hf_token_if_needed(selected_services):
+    """Prompt for Hugging Face token if needed by selected services.
+
+    Args:
+        selected_services: List of service names selected by user
+
+    Returns:
+        HF_TOKEN string if provided, None otherwise
+    """
+    # Check if any selected services need HF_TOKEN
+    needs_hf_token = 'speaker-recognition' in selected_services or 'advanced' in selected_services
+
+    if not needs_hf_token:
+        return None
+
+    console.print("\n🤗 [bold cyan]Hugging Face Token Configuration[/bold cyan]")
+    console.print("Required for speaker recognition (PyAnnote models)")
+    console.print("\n[blue][INFO][/blue] Get yours from: https://huggingface.co/settings/tokens\n")
+
+    # Check for existing token from speaker-recognition service
+    speaker_env_path = 'extras/speaker-recognition/.env'
+    existing_token = read_env_value(speaker_env_path, 'HF_TOKEN')
+
+    # Use the masked prompt function
+    hf_token = prompt_with_existing_masked(
+        prompt_text="Hugging Face Token",
+        existing_value=existing_token,
+        placeholders=['your_huggingface_token_here', 'your-huggingface-token-here', 'hf_xxxxx'],
+        is_password=True,
+        default=""
+    )
+
+    if hf_token:
+        masked = mask_value(hf_token)
+        console.print(f"[green]✅ HF_TOKEN configured: {masked}[/green]\n")
+        return hf_token
+    else:
+        console.print("[yellow]⚠️  No HF_TOKEN provided - speaker recognition may fail[/yellow]\n")
+        return None
 
 def setup_config_file():
     """Setup config/config.yml from template if it doesn't exist"""
@@ -393,7 +503,10 @@ def main():
     if not selected_services:
         console.print("\n[yellow]No services selected. Exiting.[/yellow]")
         return
-    
+
+    # HF Token Configuration (if services require it)
+    hf_token = setup_hf_token_if_needed(selected_services)
+
     # HTTPS Configuration (for services that need it)
     https_enabled = False
     server_ip = None
@@ -417,27 +530,18 @@ def main():
             console.print("[blue][INFO][/blue] For local-only access, use 'localhost'")
             console.print("Examples: localhost, 100.64.1.2, your-domain.com")
 
-            # Check for existing SERVER_IP
+            # Check for existing SERVER_IP from backend .env
             backend_env_path = 'backends/advanced/.env'
             existing_ip = read_env_value(backend_env_path, 'SERVER_IP')
 
-            if existing_ip and existing_ip not in ['localhost', 'your-server-ip-here']:
-                # Show existing IP with option to reuse
-                prompt_text = f"Server IP/Domain for SSL certificates ({existing_ip}) [press Enter to reuse, or enter new]"
-                default_value = existing_ip
-            else:
-                prompt_text = "Server IP/Domain for SSL certificates [localhost]"
-                default_value = "localhost"
-
-            while True:
-                try:
-                    server_ip = console.input(f"{prompt_text}: ").strip()
-                    if not server_ip:
-                        server_ip = default_value
-                    break
-                except EOFError:
-                    server_ip = default_value
-                    break
+            # Use the new masked prompt function
+            server_ip = prompt_with_existing_masked(
+                prompt_text="Server IP/Domain for SSL certificates",
+                existing_value=existing_ip,
+                placeholders=['localhost', 'your-server-ip-here'],
+                is_password=False,
+                default="localhost"
+            )
 
             console.print(f"[green]✅[/green] HTTPS configured for: {server_ip}")
 
@@ -488,10 +592,15 @@ def main():
 
     for service in selected_services:
         if run_service_setup(service, selected_services, https_enabled, server_ip,
-                            obsidian_enabled, neo4j_password, transcription_provider):
+                            obsidian_enabled, neo4j_password, hf_token, transcription_provider):
             success_count += 1
         else:
             failed_services.append(service)
+
+    # Plugin Configuration (AFTER backend .env is created)
+    # This ensures plugins can add their secrets to the existing .env file
+    # without the backend init overwriting them
+    setup_plugins()
 
     # Check for Obsidian/Neo4j configuration (read from config.yml)
     obsidian_enabled = False

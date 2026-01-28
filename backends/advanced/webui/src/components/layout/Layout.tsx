@@ -1,5 +1,5 @@
 import { Link, useLocation, Outlet } from 'react-router-dom'
-import { Music, MessageSquare, MessageCircle, Brain, Users, Upload, Settings, LogOut, Sun, Moon, Shield, Radio, Layers, Calendar } from 'lucide-react'
+import { Music, MessageSquare, MessageCircle, Brain, Users, Upload, Settings, LogOut, Sun, Moon, Shield, Radio, Layers, Calendar, Puzzle, Zap } from 'lucide-react'
 import { useAuth } from '../../contexts/AuthContext'
 import { useTheme } from '../../contexts/ThemeContext'
 
@@ -18,6 +18,8 @@ export default function Layout() {
     ...(isAdmin ? [
       { path: '/upload', label: 'Upload Audio', icon: Upload },
       { path: '/queue', label: 'Queue Management', icon: Layers },
+      { path: '/plugins', label: 'Plugins', icon: Puzzle },
+      { path: '/finetuning', label: 'Fine-tuning', icon: Zap },
       { path: '/system', label: 'System State', icon: Settings },
     ] : []),
   ]

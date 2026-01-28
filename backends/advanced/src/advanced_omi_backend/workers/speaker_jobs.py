@@ -7,10 +7,16 @@ This module contains all jobs related to speaker identification and recognition.
 import asyncio
 import logging
 import time
-from typing import Dict, Any
+from typing import Any, Dict
 
+from advanced_omi_backend.auth import generate_jwt_for_user
+from advanced_omi_backend.models.conversation import Conversation
 from advanced_omi_backend.models.job import async_job
-from advanced_omi_backend.controllers.queue_controller import transcription_queue
+from advanced_omi_backend.services.audio_stream import (
+    TranscriptionResultsAggregator,
+)
+from advanced_omi_backend.speaker_recognition_client import SpeakerRecognitionClient
+from advanced_omi_backend.users import get_user_by_id
 
 logger = logging.getLogger(__name__)
 
@@ -37,8 +43,6 @@ async def check_enrolled_speakers_job(
     Returns:
         Dict with enrolled_present, identified_speakers, and speaker_result
     """
-    from advanced_omi_backend.services.audio_stream import TranscriptionResultsAggregator
-    from advanced_omi_backend.speaker_recognition_client import SpeakerRecognitionClient
 
     logger.info(f"🎤 Starting enrolled speaker check for session {session_id[:12]}")
 
@@ -64,7 +68,24 @@ async def check_enrolled_speakers_job(
         error_message = speaker_result.get("message", "Unknown error")
         logger.error(f"🎤 [SPEAKER CHECK] Speaker service error: {error_type} - {error_message}")
 
-        # Fail the job - don't create conversation if speaker service failed
+        # For connection failures, assume no enrolled speakers but allow conversation to proceed
+        # Speaker filtering is optional - if service is down, conversation should still be created
+        if error_type in ("connection_failed", "timeout", "client_error"):
+            logger.warning(
+                f"⚠️ Speaker service unavailable ({error_type}), assuming no enrolled speakers. "
+                f"Conversation will proceed normally."
+            )
+            return {
+                "success": True,
+                "session_id": session_id,
+                "speaker_service_unavailable": True,
+                "enrolled_present": False,
+                "identified_speakers": [],
+                "skip_reason": f"Speaker service unavailable: {error_type}",
+                "processing_time_seconds": time.time() - start_time
+            }
+
+        # For other processing errors, also assume no enrolled speakers
         return {
             "success": False,
             "session_id": session_id,
@@ -98,7 +119,6 @@ async def check_enrolled_speakers_job(
             current_job.meta = {}
         current_job.meta.update({
             "session_id": session_id,
-            "audio_uuid": session_id,
             "client_id": client_id,
             "enrolled_present": enrolled_present,
             "identified_speakers": identified_speakers,
@@ -121,9 +141,8 @@ async def check_enrolled_speakers_job(
 async def recognise_speakers_job(
     conversation_id: str,
     version_id: str,
-    audio_path: str,
-    transcript_text: str,
-    words: list,
+    transcript_text: str = "",
+    words: list = None,
     *,
     redis_client=None
 ) -> Dict[str, Any]:
@@ -131,23 +150,21 @@ async def recognise_speakers_job(
     RQ job function for identifying speakers in a transcribed conversation.
 
     This job runs after transcription and:
-    1. Calls speaker recognition service to identify speakers
-    2. Updates the transcript version with identified speaker labels
-    3. Returns results for downstream jobs (memory)
+    1. Reconstructs audio from MongoDB chunks
+    2. Calls speaker recognition service to identify speakers
+    3. Updates the transcript version with identified speaker labels
+    4. Returns results for downstream jobs (memory)
 
     Args:
         conversation_id: Conversation ID
         version_id: Transcript version ID to update
-        audio_path: Path to audio file
-        transcript_text: Transcript text from transcription job
-        words: Word-level timing data from transcription job
+        transcript_text: Transcript text from transcription job (optional, reads from DB if empty)
+        words: Word-level timing data from transcription job (optional, reads from DB if empty)
         redis_client: Redis client (injected by decorator)
 
     Returns:
         Dict with processing results
     """
-    from advanced_omi_backend.models.conversation import Conversation
-    from advanced_omi_backend.speaker_recognition_client import SpeakerRecognitionClient
 
     logger.info(f"🎤 RQ: Starting speaker recognition for conversation {conversation_id}")
 
@@ -161,10 +178,6 @@ async def recognise_speakers_job(
 
     # Get user_id from conversation
     user_id = conversation.user_id
-
-    # Use the provided audio path
-    actual_audio_path = audio_path
-    logger.info(f"📁 Using audio for speaker recognition: {audio_path}")
 
     # Find the transcript version to update
     transcript_version = None
@@ -189,36 +202,109 @@ async def recognise_speakers_job(
             "processing_time_seconds": 0
         }
 
-    # Call speaker recognition service
+    # Read transcript text and words from the transcript version
+    # (Parameters may be empty if called via job dependency)
+    actual_transcript_text = transcript_text or transcript_version.transcript or ""
+    actual_words = words if words else []
+
+    # If words not provided as parameter, read from version.words field (standardized location)
+    if not actual_words and transcript_version.words:
+        # Convert Word objects to dicts for speaker service API
+        actual_words = [
+            {
+                "word": w.word,
+                "start": w.start,
+                "end": w.end,
+                "confidence": w.confidence
+            }
+            for w in transcript_version.words
+        ]
+        logger.info(f"🔤 Loaded {len(actual_words)} words from transcript version.words field")
+    # Backward compatibility: Fall back to metadata if words field is empty (old data)
+    elif not actual_words and transcript_version.metadata.get("words"):
+        actual_words = transcript_version.metadata.get("words", [])
+        logger.info(f"🔤 Loaded {len(actual_words)} words from transcript version metadata (legacy)")
+    # Backward compatibility: Extract from segments if that's all we have (old streaming data)
+    elif not actual_words and transcript_version.segments:
+        for segment in transcript_version.segments:
+            if segment.words:
+                for w in segment.words:
+                    actual_words.append({
+                        "word": w.word,
+                        "start": w.start,
+                        "end": w.end,
+                        "confidence": w.confidence
+                    })
+        if actual_words:
+            logger.info(f"🔤 Extracted {len(actual_words)} words from segments (legacy)")
+
+    if not actual_transcript_text:
+        logger.warning(f"🎤 No transcript text found in version {version_id}")
+        return {
+            "success": False,
+            "conversation_id": conversation_id,
+            "version_id": version_id,
+            "error": "No transcript text available",
+            "processing_time_seconds": 0
+        }
+
+    if not actual_words:
+        logger.warning(f"🎤 No words found in version {version_id}")
+        return {
+            "success": False,
+            "conversation_id": conversation_id,
+            "version_id": version_id,
+            "error": "No word-level timing data available",
+            "processing_time_seconds": 0
+        }
+
+    transcript_data = {
+        "text": actual_transcript_text,
+        "words": actual_words
+    }
+
+    # Generate backend token for speaker service to fetch audio
+    # Speaker service will check conversation duration and decide
+    # whether to chunk based on its own memory constraints
+
+    # Get user details for token generation
     try:
-        logger.info(f"🎤 Calling speaker recognition service...")
-
-        # Read transcript text and words from the transcript version
-        # (Parameters may be empty if called via job dependency)
-        actual_transcript_text = transcript_text or transcript_version.transcript or ""
-        actual_words = words if words else []
-
-        # If words not provided, we need to get them from metadata
-        if not actual_words and transcript_version.metadata:
-            actual_words = transcript_version.metadata.get("words", [])
-
-        if not actual_transcript_text:
-            logger.warning(f"🎤 No transcript text found in version {version_id}")
+        user = await get_user_by_id(user_id)
+        if not user:
+            logger.error(f"User {user_id} not found for token generation")
             return {
                 "success": False,
                 "conversation_id": conversation_id,
                 "version_id": version_id,
-                "error": "No transcript text available",
-                "processing_time_seconds": 0
+                "error": "User not found",
+                "processing_time_seconds": time.time() - start_time
             }
 
-        transcript_data = {
-            "text": actual_transcript_text,
-            "words": actual_words
+        backend_token = generate_jwt_for_user(user_id, user.email)
+        logger.info(f"🔐 Generated backend token for speaker service")
+
+    except Exception as token_error:
+        logger.error(f"Failed to generate backend token: {token_error}", exc_info=True)
+        return {
+            "success": False,
+            "conversation_id": conversation_id,
+            "version_id": version_id,
+            "error": f"Token generation failed: {token_error}",
+            "processing_time_seconds": time.time() - start_time
         }
 
+    # Call speaker recognition service with conversation_id
+    # Speaker service will:
+    # 1. Fetch conversation metadata to check duration
+    # 2. Decide whether to chunk based on its MAX_DIARIZE_DURATION setting
+    # 3. Request audio segments via backend API as needed
+    # 4. Return merged speaker segments
+    logger.info(f"🎤 Calling speaker recognition service with conversation_id...")
+
+    try:
         speaker_result = await speaker_client.diarize_identify_match(
-            audio_path=actual_audio_path,
+            conversation_id=conversation_id,
+            backend_token=backend_token,
             transcript_data=transcript_data,
             user_id=user_id
         )
@@ -229,20 +315,61 @@ async def recognise_speakers_job(
             error_message = speaker_result.get("message", "Unknown error")
             logger.error(f"🎤 Speaker recognition service error: {error_type} - {error_message}")
 
-            # Raise exception for connection failures so dependent jobs are canceled
-            # This ensures RQ marks the job as "failed" instead of "completed"
+            # Connection/timeout errors → skip gracefully (existing behavior)
             if error_type in ("connection_failed", "timeout", "client_error"):
-                raise RuntimeError(f"Speaker recognition service unavailable: {error_type} - {error_message}")
+                logger.warning(
+                    f"⚠️ Speaker service unavailable ({error_type}), skipping speaker recognition. "
+                    f"Downstream jobs (memory, title/summary, events) will proceed normally."
+                )
+                return {
+                    "success": True,  # Allow pipeline to continue
+                    "conversation_id": conversation_id,
+                    "version_id": version_id,
+                    "speaker_recognition_enabled": True,
+                    "speaker_service_unavailable": True,
+                    "identified_speakers": [],
+                    "skip_reason": f"Speaker service unavailable: {error_type}",
+                    "error_type": error_type,
+                    "processing_time_seconds": time.time() - start_time
+                }
 
-            # For other errors (e.g., processing errors), return error dict without failing
-            return {
-                "success": False,
-                "conversation_id": conversation_id,
-                "version_id": version_id,
-                "error": f"Speaker recognition failed: {error_type}",
-                "error_details": error_message,
-                "processing_time_seconds": time.time() - start_time
-            }
+            # Validation errors → fail job, don't retry
+            elif error_type == "validation_error":
+                logger.error(f"❌ Speaker service validation error: {error_message}")
+                return {
+                    "success": False,
+                    "conversation_id": conversation_id,
+                    "version_id": version_id,
+                    "error": f"Validation error: {error_message}",
+                    "error_type": error_type,
+                    "retryable": False,  # Don't retry validation errors
+                    "processing_time_seconds": time.time() - start_time
+                }
+
+            # Resource errors → fail job, can retry later
+            elif error_type == "resource_error":
+                logger.error(f"❌ Speaker service resource error: {error_message}")
+                return {
+                    "success": False,
+                    "conversation_id": conversation_id,
+                    "version_id": version_id,
+                    "error": f"Resource error: {error_message}",
+                    "error_type": error_type,
+                    "retryable": True,  # Can retry later when resources available
+                    "processing_time_seconds": time.time() - start_time
+                }
+
+            # Unknown errors → fail job
+            else:
+                return {
+                    "success": False,
+                    "conversation_id": conversation_id,
+                    "version_id": version_id,
+                    "error": f"Speaker recognition failed: {error_type}",
+                    "error_details": error_message,
+                    "error_type": error_type,
+                    "processing_time_seconds": time.time() - start_time
+                }
 
         # Service worked but found no segments (legitimate empty result)
         if not speaker_result or "segments" not in speaker_result or not speaker_result["segments"]:
@@ -264,21 +391,43 @@ async def recognise_speakers_job(
         updated_segments = []
         empty_segment_count = 0
         for seg in speaker_segments:
-            segment_text = seg.get("text", "").strip()
+            # FIX: More robust empty segment detection
+            text = seg.get("text", "").strip()
 
-            # Skip segments with no text
-            if not segment_text:
+            # Skip segments with no text, whitespace-only, or very short
+            if not text or len(text) < 3:
                 empty_segment_count += 1
+                logger.debug(f"Filtered empty/short segment: text='{text}'")
+                continue
+
+            # Skip segments with invalid structure
+            if not isinstance(seg.get("start"), (int, float)) or not isinstance(seg.get("end"), (int, float)):
+                empty_segment_count += 1
+                logger.debug(f"Filtered segment with invalid timing: {seg}")
                 continue
 
             speaker_name = seg.get("identified_as") or seg.get("speaker", "Unknown")
+
+            # Extract words from speaker service response (already matched to this segment)
+            words_data = seg.get("words", [])
+            segment_words = [
+                Conversation.Word(
+                    word=w.get("word", ""),
+                    start=w.get("start", 0.0),
+                    end=w.get("end", 0.0),
+                    confidence=w.get("confidence")
+                )
+                for w in words_data
+            ]
+
             updated_segments.append(
                 Conversation.SpeakerSegment(
                     start=seg.get("start", 0),
                     end=seg.get("end", 0),
-                    text=segment_text,
+                    text=text,
                     speaker=speaker_name,
-                    confidence=seg.get("confidence")
+                    confidence=seg.get("confidence"),
+                    words=segment_words  # Use words from speaker service
                 )
             )
 
@@ -320,6 +469,30 @@ async def recognise_speakers_job(
             "identified_speakers": list(identified_speakers),
             "segment_count": len(updated_segments),
             "processing_time_seconds": processing_time
+        }
+
+    except asyncio.TimeoutError as e:
+        logger.error(f"❌ Speaker recognition timeout: {e}")
+
+        # Add timeout metadata to job
+        from rq import get_current_job
+        current_job = get_current_job()
+        if current_job:
+            current_job.meta.update({
+                "error_type": "timeout",
+                "audio_duration": conversation.audio_total_duration if conversation else None,
+                "timeout_occurred_at": time.time()
+            })
+            current_job.save_meta()
+
+        return {
+            "success": False,
+            "conversation_id": conversation_id,
+            "version_id": version_id,
+            "error": "Speaker recognition timeout",
+            "error_type": "timeout",
+            "audio_duration": conversation.audio_total_duration if conversation else None,
+            "processing_time_seconds": time.time() - start_time
         }
 
     except Exception as speaker_error:

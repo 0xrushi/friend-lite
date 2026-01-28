@@ -168,13 +168,13 @@ export const useSimpleAudioRecording = (): SimpleAudioRecordingReturn => {
     if (BACKEND_URL && BACKEND_URL.startsWith('http')) {
       // BACKEND_URL is a full URL (e.g., http://localhost:8000)
       const backendHost = BACKEND_URL.replace(/^https?:\/\//, '')
-      wsUrl = `${wsProtocol}//${backendHost}/ws_pcm?token=${token}&device_name=webui-simple-recorder`
+      wsUrl = `${wsProtocol}//${backendHost}/ws?codec=pcm&token=${token}&device_name=webui-recorder`
     } else if (BACKEND_URL && BACKEND_URL !== '') {
       // BACKEND_URL is a path (e.g., /prod)
-      wsUrl = `${wsProtocol}//${window.location.host}${BACKEND_URL}/ws_pcm?token=${token}&device_name=webui-simple-recorder`
+      wsUrl = `${wsProtocol}//${window.location.host}${BACKEND_URL}/ws?codec=pcm&token=${token}&device_name=webui-recorder`
     } else {
       // BACKEND_URL is empty (same origin)
-      wsUrl = `${wsProtocol}//${window.location.host}/ws_pcm?token=${token}&device_name=webui-simple-recorder`
+      wsUrl = `${wsProtocol}//${window.location.host}/ws?codec=pcm&token=${token}&device_name=webui-recorder`
     }
     
     return new Promise<WebSocket>((resolve, reject) => {
@@ -228,6 +228,38 @@ export const useSimpleAudioRecording = (): SimpleAudioRecordingReturn => {
       ws.onmessage = (event) => {
         console.log('📨 Received message from server:', event.data)
         setDebugStats(prev => ({ ...prev, messagesReceived: prev.messagesReceived + 1 }))
+
+        // Parse server messages
+        try {
+          const message = JSON.parse(event.data)
+
+          // Handle error messages from backend
+          if (message.type === 'error') {
+            const errorMsg = message.message || 'Unknown error from server'
+            console.error('❌ Server error:', errorMsg)
+
+            setError(errorMsg)
+            setCurrentStep('error')
+            setDebugStats(prev => ({
+              ...prev,
+              lastError: errorMsg,
+              lastErrorTime: new Date()
+            }))
+
+            // Stop recording and cleanup
+            cleanup()
+            setIsRecording(false)
+          }
+
+          // Handle other message types (interim_transcript, etc.)
+          else if (message.type === 'interim_transcript') {
+            console.log('📝 Received interim transcript:', message.data)
+          }
+
+        } catch (e) {
+          // Not JSON, ignore
+          console.log('📨 Non-JSON message:', event.data)
+        }
       }
     })
   }, [])

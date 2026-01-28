@@ -29,8 +29,7 @@ class AppConfig:
     def __init__(self):
         # MongoDB Configuration
         self.mongodb_uri = os.getenv("MONGODB_URI", "mongodb://mongo:27017")
-        # default to legacy value to avoid breaking peoples .env
-        self.mongodb_database = os.getenv("MONGODB_DATABASE", "friend-lite")
+        self.mongodb_database = os.getenv("MONGODB_DATABASE", "chronicle")
         self.mongo_client = AsyncIOMotorClient(self.mongodb_uri)
         self.db = self.mongo_client.get_default_database(self.mongodb_database)
         self.users_col = self.db["users"]
@@ -46,11 +45,6 @@ class AppConfig:
         self.new_conversation_timeout_minutes = float(
             os.getenv("NEW_CONVERSATION_TIMEOUT_MINUTES", "1.5")
         )
-
-        # Audio cropping configuration
-        self.audio_cropping_enabled = os.getenv("AUDIO_CROPPING_ENABLED", "true").lower() == "true"
-        self.min_speech_segment_duration = float(os.getenv("MIN_SPEECH_SEGMENT_DURATION", "1.0"))
-        self.cropping_context_padding = float(os.getenv("CROPPING_CONTEXT_PADDING", "0.1"))
 
         # Transcription Configuration (registry-based)
         self.transcription_provider = get_transcription_provider(None)

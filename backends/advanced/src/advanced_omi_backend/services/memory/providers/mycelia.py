@@ -190,6 +190,7 @@ class MyceliaMemoryService(MemoryServiceBase):
             content=memory_content,
             metadata=metadata,
             created_at=self._extract_bson_date(obj.get("createdAt")),
+            updated_at=self._extract_bson_date(obj.get("updatedAt")),
         )
 
     async def _call_resource(self, action: str, jwt_token: str, **params) -> Dict[str, Any]:

@@ -10,6 +10,10 @@ tests/setup/.env.test
 config/config.yml
 !config/config.yml.template
 
+# Plugins config (contains secrets)
+config/plugins.yml
+!config/plugins.yml.template
+
 # Config backups
 config/*.backup.*
 config/*.backup*

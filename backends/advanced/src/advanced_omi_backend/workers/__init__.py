@@ -6,7 +6,7 @@ This package provides modular RQ job functions organized by domain:
 - speaker_jobs: Speaker recognition and identification
 - conversation_jobs: Conversation management and updates
 - memory_jobs: Memory extraction and processing
-- audio_jobs: Audio file processing and cropping
+- audio_jobs: Audio file processing
 
 Queue configuration and utilities are in controllers/queue_controller.py
 """
@@ -36,9 +36,7 @@ from .memory_jobs import (
 
 # Import from audio_jobs
 from .audio_jobs import (
-    process_cropping_job,
     audio_streaming_persistence_job,
-    enqueue_cropping,
 )
 
 # Import from queue_controller
@@ -77,10 +75,6 @@ __all__ = [
     # Memory jobs
     "process_memory_job",
     "enqueue_memory_processing",
-
-    # Audio jobs
-    "process_cropping_job",
-    "enqueue_cropping",
 
     # Queue utils
     "get_queue",

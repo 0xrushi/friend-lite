@@ -65,7 +65,7 @@ memory:
 - **Embeddings**: `text-embedding-3-small`, `text-embedding-3-large`
 
 #### Ollama Models (Local)
-- **LLM**: `llama3`, `mistral`, `qwen2.5`
+- **LLM**: `llama3`, `qwen2.5`
 - **Embeddings**: `nomic-embed-text`, `all-minilm`
 
 ## Hot Reload

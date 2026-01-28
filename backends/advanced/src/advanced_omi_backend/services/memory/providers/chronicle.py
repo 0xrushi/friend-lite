@@ -277,12 +277,12 @@ class MemoryService(MemoryServiceBase):
 
     async def count_memories(self, user_id: str) -> Optional[int]:
         """Count total number of memories for a user.
-        
+
         Uses the vector store's native count capabilities.
-        
+
         Args:
             user_id: User identifier
-            
+
         Returns:
             Total count of memories for the user, or None if not supported
         """
@@ -296,6 +296,103 @@ class MemoryService(MemoryServiceBase):
         except Exception as e:
             memory_logger.error(f"Count memories failed: {e}")
             return None
+
+    async def get_memory(self, memory_id: str, user_id: Optional[str] = None) -> Optional[MemoryEntry]:
+        """Get a specific memory by ID.
+
+        Args:
+            memory_id: Unique identifier of the memory to retrieve
+            user_id: Optional user ID for authentication/filtering
+
+        Returns:
+            MemoryEntry object if found, None otherwise
+        """
+        if not self._initialized:
+            await self.initialize()
+
+        try:
+            memory = await self.vector_store.get_memory(memory_id, user_id)
+            if memory:
+                memory_logger.info(f"📄 Retrieved memory {memory_id}")
+            else:
+                memory_logger.debug(f"Memory {memory_id} not found")
+            return memory
+        except Exception as e:
+            memory_logger.error(f"Get memory failed: {e}")
+            return None
+
+    async def update_memory(
+        self,
+        memory_id: str,
+        content: Optional[str] = None,
+        metadata: Optional[dict[str, Any]] = None,
+        user_id: Optional[str] = None,
+        user_email: Optional[str] = None
+    ) -> bool:
+        """Update a specific memory's content and/or metadata.
+
+        Regenerates embeddings when content is updated.
+
+        Args:
+            memory_id: Unique identifier of the memory to update
+            content: New content for the memory (if None, content is not updated)
+            metadata: New metadata to merge with existing (if None, metadata is not updated)
+            user_id: Optional user ID for authentication
+            user_email: Optional user email for authentication
+
+        Returns:
+            True if update succeeded, False otherwise
+        """
+        if not self._initialized:
+            await self.initialize()
+
+        try:
+            # Get existing memory
+            existing_memory = await self.vector_store.get_memory(memory_id, user_id)
+            if not existing_memory:
+                memory_logger.warning(f"Memory {memory_id} not found for update")
+                return False
+
+            # Determine new content and metadata
+            new_content = content if content is not None else existing_memory.content
+            new_metadata = {**existing_memory.metadata}
+            if metadata:
+                new_metadata.update(metadata)
+
+            # Update timestamps
+            new_metadata["updated_at"] = str(int(time.time()))
+
+            # Generate new embedding if content changed
+            if content is not None:
+                embeddings = await self.llm_provider.generate_embeddings([new_content])
+                new_embedding = embeddings[0]
+            else:
+                # If content didn't change, reuse existing embedding
+                if existing_memory.embedding:
+                    new_embedding = existing_memory.embedding
+                else:
+                    # No existing embedding, generate one
+                    embeddings = await self.llm_provider.generate_embeddings([new_content])
+                    new_embedding = embeddings[0]
+
+            # Update in vector store
+            success = await self.vector_store.update_memory(
+                memory_id=memory_id,
+                new_content=new_content,
+                new_embedding=new_embedding,
+                new_metadata=new_metadata
+            )
+
+            if success:
+                memory_logger.info(f"✅ Updated memory {memory_id}")
+            else:
+                memory_logger.error(f"Failed to update memory {memory_id}")
+
+            return success
+
+        except Exception as e:
+            memory_logger.error(f"Error updating memory {memory_id}: {e}", exc_info=True)
+            return False
 
     async def delete_memory(self, memory_id: str, user_id: Optional[str] = None, user_email: Optional[str] = None) -> bool:
         """Delete a specific memory by ID.
@@ -418,7 +515,8 @@ class MemoryService(MemoryServiceBase):
             List of MemoryEntry objects ready for storage
         """
         memory_entries = []
-        
+        current_time = str(int(time.time()))
+
         for memory_text, embedding in zip(fact_memories_text, embeddings):
             memory_id = str(uuid.uuid4())
             memory_entries.append(
@@ -435,10 +533,11 @@ class MemoryService(MemoryServiceBase):
                         "extraction_enabled": self.config.extraction_enabled,
                     },
                     embedding=embedding,
-                    created_at=str(int(time.time())),
+                    created_at=current_time,
+                    updated_at=current_time,
                 )
             )
-        
+
         return memory_entries
 
     async def _process_memory_updates(
@@ -633,15 +732,17 @@ class MemoryService(MemoryServiceBase):
                 if emb is None:
                     memory_logger.warning(f"Skipping ADD action due to missing embedding: {action_text}")
                     continue
-                    
+
                 memory_id = str(uuid.uuid4())
+                current_time = str(int(time.time()))
                 memory_entries.append(
                     MemoryEntry(
                         id=memory_id,
                         content=action_text,
                         metadata=base_metadata,
                         embedding=emb,
-                        created_at=str(int(time.time())),
+                        created_at=current_time,
+                        updated_at=current_time,
                     )
                 )
                 memory_logger.info(f"➕ Added new memory: {memory_id} - {action_text[:50]}...")

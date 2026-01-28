@@ -72,16 +72,6 @@ async def delete_memory(memory_id: str, current_user: User = Depends(current_act
     return await memory_controller.delete_memory(memory_id, current_user)
 
 
-@router.get("/unfiltered")
-async def get_memories_unfiltered(
-    current_user: User = Depends(current_active_user),
-    limit: int = Query(default=50, ge=1, le=1000),
-    user_id: Optional[str] = Query(default=None, description="User ID filter (admin only)"),
-):
-    """Get all memories including fallback transcript memories (for debugging). Users see only their own memories, admins can see all or filter by user."""
-    return await memory_controller.get_memories_unfiltered(current_user, limit, user_id)
-
-
 @router.get("/admin")
 async def get_all_memories_admin(current_user: User = Depends(current_superuser), limit: int = 200):
     """Get all memories across all users for admin review. Admin only."""
