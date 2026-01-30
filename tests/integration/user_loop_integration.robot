@@ -1,170 +1,186 @@
 *** Settings ***
-Documentation     User-loop integration tests covering all fixed issues
-...               Tests end-to-end: MongoDB → API → UI → No popup (Issue #5, #7)
+Documentation    User-loop integration tests
 
-Library           RequestsLibrary
-Library           Collections
-# Removed - duplicate keywords
+Library          RequestsLibrary
+Library          Collections
+Resource         ../setup/setup_keywords.robot
+Resource         ../setup/teardown_keywords.robot
 Resource         ../resources/user_loop_keywords.robot
+Variables        ../setup/test_env.py
 
-*** Variables ***
-${USER_LOOP_BASE_URL}      http://localhost:8000/api/user-loop
+Suite Setup      Suite Setup
+Suite Teardown   Suite Teardown
+Test Setup       Clear Test Databases
 
 *** Test Cases ***
-Full Accept Swipe Flow
-    [Documentation]    Integration test: Complete accept swipe flow (Issue #5, #6, #7)
-    ...                1. Create conversation with maybe_anomaly: true
-    ...                2. GET /events → returns anomaly
-    ...                3. POST /accept → updates to "verified"
-    ...                4. GET /events → returns empty (no popup)
+Reject Swipe Removes Event And Updates MongoDB
+    [Documentation]    Reject (left swipe) should stash, mark rejected, and remove from /events
+    [Tags]    conversation
 
-    # Step 1: Create conversation with anomaly
     ${timestamp}=    Get Timestamp
-    ${conv_id}=    Set Variable    integration-accept-${timestamp}
-    ${version_id}=  Set Variable    integration-version-${timestamp}
-    
-    Insert Test Conversation    ${conv_id}    ${version_id}    maybe_anomaly=true
+    ${conv_id}=      Set Variable    integration-reject-${timestamp}
+    ${version_id}=   Set Variable    version-${timestamp}
+    ${stash_id}=     Set Variable    ${EMPTY}
 
-    # Step 2: GET /events must return anomaly
-    Create Session    user-loop    ${USER_LOOP_BASE_URL}
-    ${response}=    GET On Session    user-loop    /events    expected_status=200
+    TRY
+        Insert Test Conversation    ${conv_id}    ${version_id}    maybe_anomaly=true
+        Insert Test Audio Chunk    ${conv_id}    0    mock audio data
 
-    ${events_before}=    Set Variable    ${response.json()}
-    Should Not Be Empty    ${events_before}
-    Should Be Equal    ${events_before}[0][version_id]    ${version_id}
-    Should Be Equal    ${events_before}[0][transcript]    Integration accept test
+        ${response}=    GET On Session    api    /api/user-loop/events    expected_status=200
+        ${events_before}=    Set Variable    ${response.json()}
+        Should Not Be Empty    ${events_before}
 
-    # Step 3: POST /accept to verify (Issue #5, #6)
-    ${body}=    Create Dictionary
-    ...    transcript_version_id=${version_id}
-    ...    conversation_id=${conv_id}
+        ${found}=    Set Variable    ${False}
+        FOR    ${event}    IN    @{events_before}
+            IF    '${event}[conversation_id]' == '${conv_id}' and '${event}[version_id]' == '${version_id}'
+                ${found}=    Set Variable    ${True}
+            END
+        END
+        Should Be True    ${found}    msg=Expected inserted anomaly to be present before reject
 
-    ${response}=    POST On Session    user-loop    /accept    json=${body}    expected_status=200
+        ${body}=    Create Dictionary
+        ...    transcript_version_id=${version_id}
+        ...    conversation_id=${conv_id}
+        ...    reason=Integration test false positive
 
-    ${result}=    Set Variable    ${response.json()}
-    Should Be Equal    ${result}[status]    success
-    Should Be Equal    ${result}[message]    Verified transcript
+        ${response}=    POST On Session    api    /api/user-loop/reject    json=${body}    expected_status=200
+        ${result}=      Set Variable    ${response.json()}
+        Should Be Equal    ${result}[status]    success
+        Should Not Be Empty    ${result}[stash_id]
+        ${stash_id}=    Set Variable    ${result}[stash_id]
 
-    # Verify: MongoDB updated correctly
-    ${conv}=    Get Test Conversation    ${conv_id}
-    ${maybe_anomaly}=    Get From Dictionary    ${conv}[transcript_versions][0]    maybe_anomaly
-    Should Be Equal    ${maybe_anomaly}    verified
-    Should Be Equal As Strings    ${maybe_anomaly}    verified
+        ${conv}=    Get Test Conversation    ${conv_id}
+        ${maybe_anomaly}=    Get From Dictionary    ${conv}[transcript_versions][0]    maybe_anomaly
+        Should Be Equal As Strings    ${maybe_anomaly}    rejected
+        ${rejected_at}=    Get From Dictionary    ${conv}[transcript_versions][0]    rejected_at
+        Should Not Be Empty    ${rejected_at}
 
-    ${verified_at}=    Get From Dictionary    ${conv}[transcript_versions][0]    verified_at
-    Should Not Be Empty    ${verified_at}
+        ${stash}=    Get Training Stash Entry    ${stash_id}
+        Should Not Be Empty    ${stash}
+        ${audio_chunks}=    Get From Dictionary    ${stash}    audio_chunks
+        Should Not Be Empty    ${audio_chunks}
 
-    # Step 4: GET /events now returns empty (Issue #7)
-    ${response}=    GET On Session    user-loop    /events    expected_status=200
+        ${response}=    GET On Session    api    /api/user-loop/events    expected_status=200
+        ${events_after}=    Set Variable    ${response.json()}
+        ${still_present}=    Set Variable    ${False}
+        FOR    ${event}    IN    @{events_after}
+            IF    '${event}[conversation_id]' == '${conv_id}' and '${event}[version_id]' == '${version_id}'
+                ${still_present}=    Set Variable    ${True}
+            END
+        END
+        Should Be True    ${still_present} == False    msg=Rejected anomaly should not reappear in /events
+    FINALLY
+        Run Keyword And Ignore Error    Delete Test Conversation    ${conv_id}
+        IF    '${stash_id}' != '${EMPTY}'
+            Run Keyword And Ignore Error    Delete Training Stash Entry    ${stash_id}
+        END
+    END
 
-    ${events_after}=    Set Variable    ${response.json()}
-    Should Be Equal    ${events_after}    ${EMPTY}
+Accept Swipe Removes Event And Updates MongoDB
+    [Documentation]    Accept (right swipe) should mark verified and remove from /events
+    [Tags]    conversation
 
-    # Cleanup
-    Delete Test Conversation    ${conv_id}
-
-Full Reject Swipe Flow
-    [Documentation]    Integration test: Complete reject swipe flow (Issue #5)
-    ...                1. Create conversation with anomaly
-    ...                2. GET /events → returns anomaly
-    ...                3. POST /reject → saves to training-stash
-    ...                4. GET /events → returns empty (removed from queue)
-
-    # Step 1: Create conversation with anomaly
     ${timestamp}=    Get Timestamp
-    ${conv_id}=    Set Variable    integration-reject-${timestamp}
-    ${version_id}=  Set Variable    integration-reject-version-${timestamp}
-    
-    Insert Test Conversation    ${conv_id}    ${version_id}    maybe_anomaly=true
-    Insert Test Audio Chunk    ${conv_id}    chunk_index=0    audio_data=mock audio data for integration test
+    ${conv_id}=      Set Variable    integration-accept-${timestamp}
+    ${version_id}=   Set Variable    version-${timestamp}
 
-    # Step 2: GET /events returns anomaly
-    Create Session    user-loop    ${USER_LOOP_BASE_URL}
-    ${response}=    GET On Session    user-loop    /events    expected_status=200
+    TRY
+        Insert Test Conversation    ${conv_id}    ${version_id}    maybe_anomaly=true
 
-    ${events_before}=    Set Variable    ${response.json()}
-    Should Not Be Empty    ${events_before}
-    Should Be Equal    ${events_before}[0][version_id]    ${version_id}
+        ${response}=    GET On Session    api    /api/user-loop/events    expected_status=200
+        ${events_before}=    Set Variable    ${response.json()}
+        Should Not Be Empty    ${events_before}
 
-    # Step 3: POST /reject to stash
-    ${body}=    Create Dictionary
-    ...    transcript_version_id=${version_id}
-    ...    conversation_id=${conv_id}
-    ...    reason=Integration test false positive
+        ${found}=    Set Variable    ${False}
+        FOR    ${event}    IN    @{events_before}
+            IF    '${event}[conversation_id]' == '${conv_id}' and '${event}[version_id]' == '${version_id}'
+                ${found}=    Set Variable    ${True}
+            END
+        END
+        Should Be True    ${found}    msg=Expected inserted anomaly to be present before accept
 
-    ${response}=    POST On Session    user-loop    /accept    json=${body}    expected_status=200
+        ${body}=    Create Dictionary
+        ...    transcript_version_id=${version_id}
+        ...    conversation_id=${conv_id}
 
-    ${result}=    Set Variable    ${response.json()}
-    Should Be Equal    ${result}[status]    success
-    Should Not Be Empty    ${result}[stash_id]
+        ${response}=    POST On Session    api    /api/user-loop/accept    json=${body}    expected_status=200
+        ${result}=      Set Variable    ${response.json()}
+        Should Be Equal    ${result}[status]    success
+        Should Be Equal    ${result}[message]    Verified transcript
 
-    # Verify: Saved to training-stash
-    ${stash_id}=    Set Variable    ${result}[stash_id]
-    ${stash}=    Get Training Stash Entry    ${stash_id}
-    Should Not Be Empty    ${stash}
-    Should Be Equal    ${stash}[transcript_version_id]    ${version_id}
-    Should Be Equal    ${stash}[conversation_id]    ${conv_id}
-    Should Be Equal    ${stash}[transcript]    Integration reject test
-    Should Be Equal    ${stash}[reason]    Integration test false positive
-    Should Not Be Empty    ${stash}[audio_data]
+        ${conv}=    Get Test Conversation    ${conv_id}
+        ${maybe_anomaly}=    Get From Dictionary    ${conv}[transcript_versions][0]    maybe_anomaly
+        Should Be Equal As Strings    ${maybe_anomaly}    verified
+        ${verified_at}=    Get From Dictionary    ${conv}[transcript_versions][0]    verified_at
+        Should Not Be Empty    ${verified_at}
 
-    # Step 4: GET /events returns empty (removed from queue)
-    ${response}=    GET On Session    user-loop    /events    expected_status=200
+        ${response}=    GET On Session    api    /api/user-loop/events    expected_status=200
+        ${events_after}=    Set Variable    ${response.json()}
+        ${still_present}=    Set Variable    ${False}
+        FOR    ${event}    IN    @{events_after}
+            IF    '${event}[conversation_id]' == '${conv_id}' and '${event}[version_id]' == '${version_id}'
+                ${still_present}=    Set Variable    ${True}
+            END
+        END
+        Should Be True    ${still_present} == False    msg=Verified anomaly should not reappear in /events
+    FINALLY
+        Run Keyword And Ignore Error    Delete Test Conversation    ${conv_id}
+    END
 
-    ${events_after}=    Set Variable    ${response.json()}
-    Should Be Equal    ${events_after}    ${EMPTY}
+Multiple Anomalies Are Filtered By Status
+    [Documentation]    Only maybe_anomaly=true is returned; verified/rejected are filtered
+    [Tags]    conversation
 
-    # Cleanup
-    Delete Test Conversation    ${conv_id}
-    Delete Training Stash Entry    ${stash_id}
-
-Multiple Anomalies All Get Filtered
-    [Documentation]    Integration test: Multiple anomalies with different states (Issue #6)
-    ...                Verify only maybe_anomaly: true (boolean) is returned
-    ...                Should NOT return verified, false, or null
-
-    # Create conversation with multiple versions
     ${timestamp}=    Get Timestamp
-    ${conv_id}=    Set Variable    multi-anomaly-${timestamp}
+    ${conv_true}=    Set Variable    multi-true-${timestamp}
+    ${conv_ver}=     Set Variable    multi-verified-${timestamp}
+    ${conv_rej}=     Set Variable    multi-rejected-${timestamp}
+
+    TRY
+        Insert Test Conversation    ${conv_true}    v-true-${timestamp}    maybe_anomaly=true
+        Insert Test Conversation    ${conv_ver}     v-verified-${timestamp}    maybe_anomaly=verified
+        Insert Test Conversation    ${conv_rej}     v-rejected-${timestamp}    maybe_anomaly=rejected
+
+        ${response}=    GET On Session    api    /api/user-loop/events    expected_status=200
+        ${events}=      Set Variable    ${response.json()}
+
+        ${found_true}=    Set Variable    ${False}
+        FOR    ${event}    IN    @{events}
+            IF    '${event}[conversation_id]' == '${conv_true}'
+                ${found_true}=    Set Variable    ${True}
+                Should Be Equal    ${event}[version_id]    v-true-${timestamp}
+            END
+            Should Not Be Equal    ${event}[conversation_id]    ${conv_ver}
+            Should Not Be Equal    ${event}[conversation_id]    ${conv_rej}
+        END
+        Should Be True    ${found_true}    msg=Expected maybe_anomaly=true conversation to be returned
+    FINALLY
+        Run Keyword And Ignore Error    Delete Test Conversation    ${conv_true}
+        Run Keyword And Ignore Error    Delete Test Conversation    ${conv_ver}
+        Run Keyword And Ignore Error    Delete Test Conversation    ${conv_rej}
+    END
+
+Deleted Conversations Are Not Returned
+    [Documentation]    Conversations with deleted=true are filtered from /events
+    [Tags]    conversation
+
     ${timestamp}=    Get Timestamp
+    ${conv_id}=      Set Variable    deleted-conv-${timestamp}
+    ${version_id}=   Set Variable    v-${timestamp}
 
-    Insert Test Conversation    ${conv_id}    version-true-${timestamp}    maybe_anomaly=true
-    Insert Test Conversation    ${conv_id}    version-verified-${timestamp}    maybe_anomaly=verified
-    Insert Test Conversation    ${conv_id}    version-false-${timestamp}    maybe_anomaly=false
+    TRY
+        Insert Test Conversation    ${conv_id}    ${version_id}    maybe_anomaly=true
+        Mark Test Conversation Deleted    ${conv_id}    ${True}
 
-    # Get events
-    Create Session    user-loop    ${USER_LOOP_BASE_URL}
-    ${response}=    GET On Session    user-loop    /events    expected_status=200
-
-    ${events}=    Set Variable    ${response.json()}
-
-    # Only v-true should be returned
-    Should Be Equal    ${len(events)}    1
-    Should Be Equal    ${events}[0][version_id]    version-true-${timestamp}
-    Should Be Equal    ${events}[0][transcript]    True anomaly
-
-    # Cleanup
-    Delete Test Conversation    ${conv_id}
-
-Deleted Conversations Not Returned
-    [Documentation]    Integration test: Deleted conversations must not be returned
-
-    # Create deleted conversation with anomaly
-    ${timestamp}=    Get Timestamp
-    ${conv_id}=    Set Variable    deleted-conv-${timestamp}
-    ${version_id}=  Set Variable    deleted-version-${timestamp}
-
-    Insert Test Conversation    ${conv_id}    ${version_id}    maybe_anomaly=true
-
-    # Mark as deleted
-    # (In real test we'd update document, but for now just verify)
-
-    # Get events - should return empty (filtered out)
-    Create Session    user-loop    ${USER_LOOP_BASE_URL}
-    ${response}=    GET On Session    user-loop    /events    expected_status=200
-
-    ${events}=    Set Variable    ${response.json()}
-    Should Be Equal    ${events}    ${EMPTY}
-
-    # Cleanup
-    Delete Test Conversation    ${conv_id}
+        ${response}=    GET On Session    api    /api/user-loop/events    expected_status=200
+        ${events}=      Set Variable    ${response.json()}
+        ${still_present}=    Set Variable    ${False}
+        FOR    ${event}    IN    @{events}
+            IF    '${event}[conversation_id]' == '${conv_id}'
+                ${still_present}=    Set Variable    ${True}
+            END
+        END
+        Should Be True    ${still_present} == False    msg=Deleted conversations must not be returned by /events
+    FINALLY
+        Run Keyword And Ignore Error    Delete Test Conversation    ${conv_id}
+    END

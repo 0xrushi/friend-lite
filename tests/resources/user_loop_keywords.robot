@@ -18,6 +18,13 @@ Delete Test Conversation
     ${result}=    UserLoopHelper.Delete Test Conversation    ${conv_id}
     RETURN    ${result}
 
+Mark Test Conversation Deleted
+    [Documentation]    Mark a test conversation as deleted
+    [Arguments]    ${conv_id}    ${deleted}=${True}
+
+    ${result}=    UserLoopHelper.Mark Test Conversation Deleted    ${conv_id}    ${deleted}
+    RETURN    ${result}
+
 Get Test Conversation
     [Documentation]    Get test conversation from MongoDB
     [Arguments]    ${conv_id}

@@ -136,6 +136,18 @@ def delete_test_conversation(conv_id):
         disconnect_from_mongodb(client)
 
 
+def mark_test_conversation_deleted(conv_id, deleted=True):
+    """Mark a test conversation as deleted/undeleted."""
+    client, db = connect_to_mongodb()
+    try:
+        return db.conversations.update_one(
+            {"conversation_id": conv_id},
+            {"$set": {"deleted": bool(deleted)}},
+        )
+    finally:
+        disconnect_from_mongodb(client)
+
+
 def get_test_conversation(conv_id):
     """
     Get test conversation from MongoDB.
