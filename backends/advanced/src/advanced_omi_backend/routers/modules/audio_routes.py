@@ -307,6 +307,10 @@ async def get_audio_chunk_range(
         401: If not authenticated
         400: If time range is invalid
     """
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"🎵 Audio chunk request: conversation={conversation_id[:8]}..., start={start_time:.2f}s, end={end_time:.2f}s")
+
     # Try token param if header auth failed
     if not current_user and token:
         current_user = await get_user_from_token_param(token)
@@ -333,52 +337,17 @@ async def get_audio_chunk_range(
     if conversation.audio_total_duration and end_time > conversation.audio_total_duration:
         end_time = conversation.audio_total_duration
 
-    # Calculate which chunks are needed (each chunk is 10 seconds)
-    CHUNK_DURATION = 10.0
-    start_chunk = int(start_time / CHUNK_DURATION)
-    end_chunk = int(end_time / CHUNK_DURATION)
-    num_chunks = end_chunk - start_chunk + 1
+    # Use the dedicated segment reconstruction function
+    from advanced_omi_backend.utils.audio_chunk_utils import reconstruct_audio_segment
 
-    # Retrieve only needed chunks
-    chunks = await retrieve_audio_chunks(
-        conversation_id=conversation_id,
-        start_index=start_chunk,
-        limit=num_chunks
-    )
-
-    if not chunks:
-        raise HTTPException(
-            status_code=404,
-            detail=f"No audio data in requested range ({start_time}s-{end_time}s)"
-        )
-
-    # Decode chunks and concatenate
-    pcm_buffer = await concatenate_chunks_to_pcm(chunks)
-
-    # Trim to exact time range within the chunks
-    SAMPLE_RATE = 16000
-    SAMPLE_WIDTH = 2  # 16-bit
-    CHANNELS = 1
-    bytes_per_second = SAMPLE_RATE * SAMPLE_WIDTH * CHANNELS
-
-    # Calculate byte offsets within concatenated buffer
-    start_offset_in_chunk = start_time - (start_chunk * CHUNK_DURATION)
-    end_offset_in_chunk = end_time - (end_chunk * CHUNK_DURATION)
-
-    start_byte = int(start_offset_in_chunk * bytes_per_second)
-    # Calculate end byte from the end of buffer
-    bytes_from_end = int((CHUNK_DURATION - end_offset_in_chunk) * bytes_per_second)
-    end_byte = len(pcm_buffer) - bytes_from_end
-
-    # Trim PCM data
-    trimmed_pcm = pcm_buffer[start_byte:end_byte]
-
-    # Build WAV file with trimmed audio
-    wav_data = await build_wav_from_pcm(
-        pcm_data=trimmed_pcm,
-        sample_rate=SAMPLE_RATE,
-        channels=CHANNELS
-    )
+    try:
+        wav_data = await reconstruct_audio_segment(conversation_id, start_time, end_time)
+        logger.info(f"✅ Returning WAV: {len(wav_data)} bytes for range {start_time:.2f}s - {end_time:.2f}s")
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to reconstruct audio segment: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to reconstruct audio: {str(e)}")
 
     return StreamingResponse(
         io.BytesIO(wav_data),

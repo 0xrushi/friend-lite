@@ -167,3 +167,14 @@ Check Conversation Has End Reason
     ${end_reason}=    Set Variable    ${conversation}[end_reason]
     Should Not Be Equal As Strings    ${end_reason}    None    msg=End reason not set yet
     RETURN    ${conversation}
+
+Conversation Should Have End Reason
+    [Documentation]    Verify conversation has specific end_reason value
+    ...
+    ...    This keyword checks if the conversation's end_reason field matches the expected value.
+    [Arguments]    ${conversation_id}    ${expected_end_reason}
+
+    ${conversation}=    Get Conversation By ID    ${conversation_id}
+    ${actual_end_reason}=    Set Variable    ${conversation}[end_reason]
+    Should Be Equal As Strings    ${actual_end_reason}    ${expected_end_reason}
+    ...    msg=Expected end_reason '${expected_end_reason}', got '${actual_end_reason}'

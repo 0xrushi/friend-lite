@@ -14,12 +14,21 @@ import uuid
 from fastapi import UploadFile
 from fastapi.responses import JSONResponse
 
+from advanced_omi_backend.controllers.queue_controller import (
+    JOB_RESULT_TTL,
+    start_post_conversation_jobs,
+    transcription_queue,
+)
 from advanced_omi_backend.models.conversation import create_conversation
 from advanced_omi_backend.models.user import User
+from advanced_omi_backend.services.transcription import is_transcription_available
 from advanced_omi_backend.utils.audio_chunk_utils import convert_audio_to_chunks
 from advanced_omi_backend.utils.audio_utils import (
     AudioValidationError,
     validate_and_prepare_audio,
+)
+from advanced_omi_backend.workers.transcription_jobs import (
+    transcribe_full_audio_job,
 )
 
 logger = logging.getLogger(__name__)
@@ -167,38 +176,36 @@ async def upload_and_process_audio_files(
                     continue
 
                 # Enqueue batch transcription job first (file uploads need transcription)
-                from advanced_omi_backend.controllers.queue_controller import (
-                    JOB_RESULT_TTL,
-                    start_post_conversation_jobs,
-                    transcription_queue,
-                )
-                from advanced_omi_backend.workers.transcription_jobs import (
-                    transcribe_full_audio_job,
-                )
-
                 version_id = str(uuid.uuid4())
                 transcribe_job_id = f"transcribe_{conversation_id[:12]}"
 
-                transcription_job = transcription_queue.enqueue(
-                    transcribe_full_audio_job,
-                    conversation_id,
-                    version_id,
-                    "batch",  # trigger
-                    job_timeout=1800,  # 30 minutes
-                    result_ttl=JOB_RESULT_TTL,
-                    job_id=transcribe_job_id,
-                    description=f"Transcribe uploaded file {conversation_id[:8]}",
-                    meta={'conversation_id': conversation_id, 'client_id': client_id}
-                )
-
-                audio_logger.info(f"📥 Enqueued transcription job {transcription_job.id} for uploaded file")
+                # Check if transcription provider is available before enqueueing
+                transcription_job = None
+                if is_transcription_available(mode="batch"):
+                    transcription_job = transcription_queue.enqueue(
+                        transcribe_full_audio_job,
+                        conversation_id,
+                        version_id,
+                        "batch",  # trigger
+                        job_timeout=1800,  # 30 minutes
+                        result_ttl=JOB_RESULT_TTL,
+                        job_id=transcribe_job_id,
+                        description=f"Transcribe uploaded file {conversation_id[:8]}",
+                        meta={'conversation_id': conversation_id, 'client_id': client_id}
+                    )
+                    audio_logger.info(f"📥 Enqueued transcription job {transcription_job.id} for uploaded file")
+                else:
+                    audio_logger.warning(
+                        f"⚠️ Skipping transcription for conversation {conversation_id}: "
+                        "No transcription provider configured"
+                    )
 
                 # Enqueue post-conversation processing job chain (depends on transcription)
                 job_ids = start_post_conversation_jobs(
                     conversation_id=conversation_id,
                     user_id=user.user_id,
                     transcript_version_id=version_id,  # Pass the version_id from transcription job
-                    depends_on_job=transcription_job,  # Wait for transcription to complete
+                    depends_on_job=transcription_job,  # Wait for transcription to complete (or None)
                     client_id=client_id  # Pass client_id for UI tracking
                 )
 
@@ -206,15 +213,24 @@ async def upload_and_process_audio_files(
                     "filename": file.filename,
                     "status": "started",  # RQ standard: job has been enqueued
                     "conversation_id": conversation_id,
-                    "transcript_job_id": transcription_job.id,
+                    "transcript_job_id": transcription_job.id if transcription_job else None,
                     "speaker_job_id": job_ids['speaker_recognition'],
                     "memory_job_id": job_ids['memory'],
                     "duration_seconds": round(duration, 2),
                 })
 
+                # Build job chain description
+                job_chain = []
+                if transcription_job:
+                    job_chain.append(transcription_job.id)
+                if job_ids['speaker_recognition']:
+                    job_chain.append(job_ids['speaker_recognition'])
+                if job_ids['memory']:
+                    job_chain.append(job_ids['memory'])
+
                 audio_logger.info(
                     f"✅ Processed {file.filename} → conversation {conversation_id}, "
-                    f"jobs: {transcription_job.id} → {job_ids['speaker_recognition']} → {job_ids['memory']}"
+                    f"jobs: {' → '.join(job_chain) if job_chain else 'none'}"
                 )
 
             except (OSError, IOError) as e:

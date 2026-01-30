@@ -142,43 +142,9 @@ class RegistryBatchTranscriptionProvider(BatchTranscriptionProvider):
             words = _dotted_get(data, extract.get("words")) or []
             segments = _dotted_get(data, extract.get("segments")) or []
 
-            # DEBUG: Log what we extracted
-            logger.debug(f"DEBUG Registry: Extracted {len(segments)} segments from response")
-            if segments and len(segments) > 0:
-                logger.debug(f"DEBUG Registry: First segment keys: {list(segments[0].keys()) if isinstance(segments[0], dict) else 'not a dict'}")
-                logger.debug(f"DEBUG Registry: First segment: {segments[0]}")
-
-            # FIX: Normalize Deepgram segment structure
-            provider = self.model.model_provider.lower() if self.model.model_provider else ""
-            if provider == "deepgram" and segments:
-                normalized_segments = []
-                for seg in segments:
-                    # Deepgram segments may have nested structure
-                    # Extract text from either 'text' or 'transcript' or 'sentences'
-                    text_content = seg.get("text") or seg.get("transcript") or ""
-
-                    # Handle nested sentences structure
-                    if not text_content and "sentences" in seg:
-                        sentences = seg.get("sentences", [])
-                        text_content = " ".join([s.get("text", "") for s in sentences if s.get("text")])
-
-                    # Skip empty segments
-                    if not text_content or not text_content.strip():
-                        logger.debug(f"Skipping empty Deepgram segment: {seg}")
-                        continue
-
-                    # Build normalized segment
-                    normalized_seg = {
-                        "text": text_content.strip(),
-                        "start": seg.get("start", 0.0),
-                        "end": seg.get("end", 0.0),
-                        "speaker": seg.get("speaker", "SPEAKER_00"),
-                        "confidence": seg.get("confidence", 1.0)
-                    }
-                    normalized_segments.append(normalized_seg)
-
-                segments = normalized_segments
-                logger.debug(f"Normalized {len(segments)} Deepgram segments")
+            # Ignore segments from all providers - speaker service creates them via diarization
+            segments = []
+            logger.debug(f"Transcription: Extracted {len(words)} words, ignoring provider segments (speaker service will create them)")
 
         return {"text": text, "words": words, "segments": segments}
 
@@ -393,8 +359,22 @@ def get_transcription_provider(provider_name: Optional[str] = None, mode: Option
     return RegistryBatchTranscriptionProvider()
 
 
+def is_transcription_available(mode: str = "batch") -> bool:
+    """Check if transcription provider is available for given mode.
+
+    Args:
+        mode: Either "batch" or "streaming"
+
+    Returns:
+        True if a transcription provider is configured and available, False otherwise
+    """
+    provider = get_transcription_provider(mode=mode)
+    return provider is not None
+
+
 __all__ = [
     "get_transcription_provider",
+    "is_transcription_available",
     "RegistryBatchTranscriptionProvider",
     "RegistryStreamingTranscriptionProvider",
     "BaseTranscriptionProvider",

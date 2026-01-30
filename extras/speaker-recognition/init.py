@@ -209,9 +209,7 @@ class SpeakerRecognitionSetup:
             choice = self.prompt_choice("Choose compute mode:", choices, "1")
             compute_mode = "gpu" if choice == "2" else "cpu"
 
-        self.config["COMPUTE_MODE"] = compute_mode
-
-        # Set PYTORCH_CUDA_VERSION for Docker build
+        # Set PYTORCH_CUDA_VERSION for Docker build (profile determined from this)
         if compute_mode == "cpu":
             self.config["PYTORCH_CUDA_VERSION"] = "cpu"
         else:
@@ -249,6 +247,11 @@ class SpeakerRecognitionSetup:
             self.config["PYTORCH_CUDA_VERSION"] = choice_to_cuda[cuda_choice]
 
         self.console.print(f"[blue][INFO][/blue] Using {compute_mode.upper()} mode with PyTorch CUDA version: {self.config['PYTORCH_CUDA_VERSION']}")
+
+        # Set service host and port defaults
+        self.config["SPEAKER_SERVICE_HOST"] = "0.0.0.0"
+        self.config["SPEAKER_SERVICE_PORT"] = "8085"
+        self.config["REACT_UI_HOST"] = "0.0.0.0"
 
     def setup_deepgram(self):
         """Configure Deepgram API key if provided"""
@@ -373,7 +376,9 @@ class SpeakerRecognitionSetup:
         self.console.print()
 
         self.console.print(f"✅ HF Token: {'Configured' if self.config.get('HF_TOKEN') else 'Not configured'}")
-        self.console.print(f"✅ Compute Mode: {self.config.get('COMPUTE_MODE', 'Not configured')}")
+        pytorch_version = self.config.get('PYTORCH_CUDA_VERSION', 'cpu')
+        compute_mode = 'GPU' if pytorch_version.startswith('cu') else 'CPU'
+        self.console.print(f"✅ Compute Mode: {compute_mode} ({pytorch_version})")
         self.console.print(f"✅ HTTPS Enabled: {self.config.get('REACT_UI_HTTPS', 'false')}")
         if self.config.get('DEEPGRAM_API_KEY'):
             self.console.print(f"✅ Deepgram API Key: Configured")

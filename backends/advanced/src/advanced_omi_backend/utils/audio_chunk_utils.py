@@ -587,20 +587,63 @@ async def reconstruct_audio_segment(
             channels=channels,
         )
 
-    # Decode and concatenate chunks
-    pcm_data = await concatenate_chunks_to_pcm(chunks)
+    # Decode each chunk and clip to exact time boundaries for precise segment extraction
+    pcm_buffer = bytearray()
+    bytes_per_second = sample_rate * channels * 2  # 16-bit = 2 bytes per sample
 
-    # Build WAV file for this segment
+    for chunk in chunks:
+        # Decode this chunk to PCM
+        pcm_data = await decode_opus_to_pcm(
+            opus_data=chunk.audio_data,
+            sample_rate=chunk.sample_rate,
+            channels=chunk.channels,
+        )
+
+        # Calculate clip boundaries for this chunk
+        clip_start_byte = 0
+        clip_end_byte = len(pcm_data)
+
+        # Trim start if chunk begins before requested start_time
+        if chunk.start_time < start_time:
+            offset_seconds = start_time - chunk.start_time
+            offset_bytes = int(offset_seconds * bytes_per_second)
+            # Align to sample boundary (2 bytes for 16-bit audio)
+            clip_start_byte = (offset_bytes // 2) * 2
+
+        # Trim end if chunk extends past requested end_time
+        if chunk.end_time > end_time:
+            # Calculate duration from chunk start to requested end
+            duration_seconds = end_time - chunk.start_time
+            duration_bytes = int(duration_seconds * bytes_per_second)
+            # Align to sample boundary
+            clip_end_byte = (duration_bytes // 2) * 2
+
+        # Append only the clipped portion to buffer
+        if clip_start_byte < clip_end_byte:
+            clipped_pcm = pcm_data[clip_start_byte:clip_end_byte]
+            pcm_buffer.extend(clipped_pcm)
+
+            logger.debug(
+                f"Chunk {chunk.chunk_index}: [{chunk.start_time:.1f}s - {chunk.end_time:.1f}s] "
+                f"→ clipped [{max(chunk.start_time, start_time):.1f}s - {min(chunk.end_time, end_time):.1f}s] "
+                f"({len(clipped_pcm)} bytes)"
+            )
+
+    # Build WAV file from precisely trimmed PCM data
     wav_bytes = await build_wav_from_pcm(
-        pcm_data=pcm_data,
+        pcm_data=bytes(pcm_buffer),
         sample_rate=sample_rate,
         channels=channels,
     )
 
+    actual_duration = len(pcm_buffer) / bytes_per_second
+    expected_duration = end_time - start_time
+
     logger.info(
         f"Reconstructed audio segment for {conversation_id[:8]}...: "
         f"{start_time:.1f}s - {end_time:.1f}s "
-        f"({len(chunks)} chunks, {len(wav_bytes)} bytes)"
+        f"({len(chunks)} chunks, {len(wav_bytes)} bytes WAV, "
+        f"actual duration: {actual_duration:.2f}s, expected: {expected_duration:.2f}s)"
     )
 
     return wav_bytes
