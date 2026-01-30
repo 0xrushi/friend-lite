@@ -2,6 +2,7 @@ import { Link, useLocation, Outlet } from 'react-router-dom'
 import { Music, MessageSquare, MessageCircle, Brain, Users, Upload, Settings, LogOut, Sun, Moon, Shield, Radio, Layers, Calendar, Puzzle } from 'lucide-react'
 import { useAuth } from '../../contexts/AuthContext'
 import { useTheme } from '../../contexts/ThemeContext'
+import UserLoopModal from '../UserLoopModal'
 
 export default function Layout() {
   const location = useLocation()
@@ -107,6 +108,9 @@ export default function Layout() {
           </div>
         </div>
       </footer>
+
+      {/* User Loop Modal - Swipe interface for anomaly review */}
+      <UserLoopModal />
     </div>
   )
 }

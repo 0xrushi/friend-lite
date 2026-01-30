@@ -14,6 +14,7 @@ This package contains organized router modules for different functional areas:
 - health_routes: Health check endpoints
 - websocket_routes: WebSocket connection handling
 - admin_routes: Admin-only system management endpoints
+- user_loop_routes: Anomaly review and transcript verification
 """
 
 from .admin_routes import router as admin_router
@@ -28,6 +29,7 @@ from .obsidian_routes import router as obsidian_router
 from .queue_routes import router as queue_router
 from .system_routes import router as system_router
 from .user_routes import router as user_router
+from .user_loop_routes import router as user_loop_router
 from .websocket_routes import router as websocket_router
 
 __all__ = [
@@ -43,5 +45,6 @@ __all__ = [
    "queue_router",
    "system_router",
    "user_router",
+   "user_loop_router",
    "websocket_router",
 ]

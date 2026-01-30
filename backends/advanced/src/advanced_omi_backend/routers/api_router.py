@@ -11,6 +11,7 @@ import os
 from fastapi import APIRouter
 
 from .modules import (
+    user_loop_router,  
     admin_router,
     annotation_router,
     audio_router,
@@ -39,6 +40,7 @@ router.include_router(user_router)
 router.include_router(chat_router)
 router.include_router(client_router)
 router.include_router(conversation_router)
+router.include_router(user_loop_router)
 router.include_router(memory_router)
 router.include_router(obsidian_router)
 router.include_router(system_router)

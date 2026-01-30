@@ -69,6 +69,10 @@ class Conversation(Document):
         created_at: datetime = Field(description="When this version was created")
         processing_time_seconds: Optional[float] = Field(None, description="Time taken to process")
         metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional provider-specific metadata")
+        maybe_anomaly: Optional[Union[bool, str]] = Field(
+            None,
+            description="Anomaly detection status: True (anomaly detected), False (no anomaly), 'verified' (user verified no anomaly)"
+        )
 
     class MemoryVersion(BaseModel):
         """Version of memory extraction with processing metadata."""
