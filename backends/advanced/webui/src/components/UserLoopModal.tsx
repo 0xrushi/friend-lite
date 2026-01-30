@@ -22,12 +22,11 @@ export default function UserLoopModal() {
   const [isLoading, setIsLoading] = useState(false)
   const [particles, setParticles] = useState<{ id: number; x: number; y: number; type: 'heart' | 'heart-break' }[]>([])
 
-  // Algorithm to determine if popup should show (always true for now)
+  // Poll backend for anomalies; open modal when there are events
   useEffect(() => {
-    const checkAnomaly = () => {
-      // TODO: Replace with actual algorithm
-      const shouldShow = true
-      setIsOpen(shouldShow)
+    const checkAnomaly = async () => {
+      const data = await fetchEvents()
+      setIsOpen(Array.isArray(data) && data.length > 0)
     }
 
     // Check on component mount
@@ -38,13 +37,6 @@ export default function UserLoopModal() {
     return () => clearInterval(interval)
   }, [])
 
-  // Load events when modal opens
-  useEffect(() => {
-    if (isOpen && !isLoading) {
-      fetchEvents()
-    }
-  }, [isOpen, isLoading])
-
   // Clean up particles
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -53,11 +45,14 @@ export default function UserLoopModal() {
     return () => clearTimeout(timer)
   }, [particles])
 
-  const fetchEvents = async () => {
+  const fetchEvents = async (): Promise<AnomalyEvent[]> => {
     try {
       setIsLoading(true)
       console.log('Fetching events...')
       const response = await fetch(`${BACKEND_URL}/api/user-loop/events`)
+      if (!response.ok) {
+        throw new Error(`Failed to fetch events: ${response.status}`)
+      }
       const data = await response.json()
       console.log('Events fetched:', data)
       console.log('Events array:', Array.isArray(data))
@@ -69,8 +64,10 @@ export default function UserLoopModal() {
       }
       setEvents(data)
       setCurrentIndex(0)
+      return data
     } catch (error) {
       console.error('Failed to fetch events:', error)
+      return []
     } finally {
       setIsLoading(false)
     }

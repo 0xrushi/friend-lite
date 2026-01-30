@@ -289,6 +289,25 @@ async def reject_transcript(action: SwipeAction, db=Depends(get_database)):
         # Insert into training-stash
         result = await db.training_stash.insert_one(stash_entry)
         stash_id = str(result.inserted_id)
+
+        # Mark transcript version as handled so it doesn't reappear in /events.
+        # /events only returns maybe_anomaly == True.
+        update_result = await db.conversations.update_one(
+            {
+                "conversation_id": action.conversation_id,
+                "transcript_versions.version_id": action.transcript_version_id,
+            },
+            {
+                "$set": {
+                    "transcript_versions.$.maybe_anomaly": "rejected",
+                    "transcript_versions.$.rejected_at": datetime.now().isoformat(),
+                    "transcript_versions.$.rejected_reason": action.reason,
+                }
+            },
+        )
+
+        if update_result.matched_count == 0:
+            raise HTTPException(status_code=404, detail="Conversation or version not found")
         
         logger.info(f"Stashed transcript {action.transcript_version_id} with reason: {action.reason}")
         

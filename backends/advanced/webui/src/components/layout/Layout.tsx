@@ -9,6 +9,8 @@ export default function Layout() {
   const { user, logout, isAdmin } = useAuth()
   const { isDark, toggleTheme } = useTheme()
 
+  const userLoopModalEnabled = import.meta.env.VITE_USER_LOOP_MODAL_ENABLED === 'true'
+
   const navigationItems = [
     { path: '/live-record', label: 'Live Record', icon: Radio },
     { path: '/chat', label: 'Chat', icon: MessageCircle },
@@ -110,7 +112,7 @@ export default function Layout() {
       </footer>
 
       {/* User Loop Modal - Swipe interface for anomaly review */}
-      <UserLoopModal />
+      {userLoopModalEnabled && <UserLoopModal />}
     </div>
   )
 }

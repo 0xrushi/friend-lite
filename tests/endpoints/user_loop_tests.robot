@@ -172,6 +172,11 @@ Reject Saves To TrainingStash
         Should Be Equal    ${stash}[transcript_version_id]    ${version_id}
         Should Be Equal    ${stash}[transcript]    Test transcript
         Should Be Equal    ${stash}[reason]    False positive
+
+        # Verify: conversation is removed from /events queue
+        ${conv}=    Get Test Conversation    ${conv_id}
+        ${maybe_anomaly}=    Get From Dictionary    ${conv}[transcript_versions][0]    maybe_anomaly
+        Should Be Equal As Strings    ${maybe_anomaly}    rejected
     FINALLY
         Run Keyword And Ignore Error    Delete Test Conversation    ${conv_id}
         Run Keyword And Ignore Error    Delete Test Audio Chunks    ${conv_id}

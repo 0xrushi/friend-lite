@@ -48,6 +48,23 @@ def _to_boolean(value):
     return bool(value)
 
 
+def _normalize_maybe_anomaly(value):
+    """Normalize maybe_anomaly test input.
+
+    Accepts:
+    - true/false (bool)
+    - "true"/"false" (string)
+    - "verified"/"rejected" (string)
+    """
+    if isinstance(value, str):
+        lowered = value.lower()
+        if lowered in {"verified", "rejected"}:
+            return lowered
+        if lowered in {"true", "false"}:
+            return lowered == "true"
+    return _to_boolean(value)
+
+
 def insert_test_conversation(conv_id, version_id, maybe_anomaly):
     """
     Insert test conversation into MongoDB with all required fields.
@@ -63,8 +80,7 @@ def insert_test_conversation(conv_id, version_id, maybe_anomaly):
     client, db = connect_to_mongodb()
     try:
         timestamp = int(time.time())
-        # Convert string to boolean
-        maybe_anomaly_bool = _to_boolean(maybe_anomaly)
+        maybe_anomaly_value = _normalize_maybe_anomaly(maybe_anomaly)
         
         # Create complete conversation document with all required fields
         data = {
@@ -76,7 +92,7 @@ def insert_test_conversation(conv_id, version_id, maybe_anomaly):
             "transcript_versions": [{
                 "version_id": version_id,
                 "transcript": "Test transcript",
-                "maybe_anomaly": maybe_anomaly_bool,
+                "maybe_anomaly": maybe_anomaly_value,
                 "created_at": timestamp,  # Required field
                 "segments": [],
                 "metadata": {"word_count": 5}
