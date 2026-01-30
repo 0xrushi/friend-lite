@@ -1,8 +1,8 @@
 # Event Detection - Whisper LoRA Adapter
 
-**🟢 STATUS: PRODUCTION WORKFLOW (User-Loop → Training → Detection)**
+**🟢 STATUS: TRAINING/EXPORT WORKFLOW (User-Loop → Export → Training)**
 
-This folder contains an **event detection system** using Whisper + LoRA adapters. It integrates with the **Chronicle user-loop** for continuous data collection and training.
+This folder contains **training/export utilities** for Whisper + LoRA event detection. It integrates with the **Chronicle user-loop** for continuous data collection and training.
 
 ---
 
@@ -10,31 +10,29 @@ This folder contains an **event detection system** using Whisper + LoRA adapters
 
 This system uses a **LoRA (Low-Rank Adaptation)** adapter on top of Whisper's Large V3 model to detect specific custom events (sounds, keywords, phrases) in audio.
 
-### Production Workflow:
+### Workflow:
 
 ```
+Backend Anomaly Scan Job (sets maybe_anomaly: true)
+        │
+        ▼
 User-Loop Popup (Review Anomalies)
         │
         ├──► Swipe Right → Accept/Verify
         │       │
         │       ▼
-        │  MongoDB: training_stash collection
+        │  MongoDB: maybe_anomaly = "verified"
         │
-        └──► Swipe Left → Reject/Stash 
+        └──► Swipe Left → Reject/Stash
                 │
                 ▼
-        MongoDB: maybe_anomaly = "verified"
+         MongoDB: training_stash collection
                 │
                 ▼
         Export: user_loop_feedback.jsonl
                 │
                 ▼
         Train: LoRA adapter
-                │
-                ▼
-        Detect: Check audio for events
-                │
-                └──► New Anomalies Detected
 ```
 
 ---
@@ -43,10 +41,11 @@ User-Loop Popup (Review Anomalies)
 
 | File | Purpose | Status |
 |-------|----------|--------|
-| `detect.py` | Run inference to detect events in audio files | ✅ Active |
 | `export_from_mongo.py` | Export MongoDB `training_stash` to JSONL for training | ✅ Active (Bridge) |
 | `train.py` | Fine-tune Whisper with LoRA adapter | ✅ Active |
 | `requirements.txt` | Python dependencies | ✅ Active |
+
+Anomaly flagging (setting `maybe_anomaly: true` in MongoDB) is handled by the backend script `backends/advanced/src/advanced_omi_backend/scripts/run_anomaly_detection.py`.
 
 ---
 
@@ -94,7 +93,7 @@ User-Loop Popup (Review Anomalies)
 **Export MongoDB `training_stash` collection to JSONL format:**
 
 ```bash
-python export_from_mongo.py \
+uv run python export_from_mongo.py \
   --output user_loop_feedback.jsonl \
   --min_samples 10
 ```
@@ -129,22 +128,20 @@ python export_from_mongo.py \
 **Fine-tune Whisper with exported user-loop data:**
 
 ```bash
-python train.py \
-  --data_file user_loop_feedback.jsonl \
+uv run python train.py \
+  --train_manifest user_loop_feedback.jsonl \
   --output_dir ./sneeze_adapter \
   --base_model unsloth/whisper-large-v3 \
-  --epochs 10 \
-  --batch_size 4 \
-  --learning_rate 1e-4
+  --source_tag "<event>" \
+  --target_token "EVENT_DETECTED"
 ```
 
 **Training Parameters:**
-- `--data_file`: JSONL file from export (required)
-- `--output_dir`: Directory to save adapter (required)
+- `--train_manifest`: JSONL file from export (default: `train.jsonl`)
+- `--output_dir`: Directory to save adapter (default: `event_lora_adapter_unsloth`)
 - `--base_model`: Whisper model ID (default: `unsloth/whisper-large-v3`)
-- `--epochs`: Number of training epochs (default: 10)
-- `--batch_size`: Batch size (default: 4)
-- `--learning_rate`: Learning rate (default: `1e-4`)
+- `--source_tag`: Tag in text to replace (default: `<event>`)
+- `--target_token`: Token to emit for event (default: `EVENT_DETECTED`)
 
 **Output:**
 ```bash
@@ -156,30 +153,19 @@ python train.py \
 
 ---
 
-### Step 4: Detect Events (Inference)
+### Step 4: Flag New Anomalies (Backend Job)
 
-**Run inference to check if audio contains event:**
+The backend provides a MongoDB scan job that sets `transcript_versions.$.maybe_anomaly = True` for transcripts that haven't been reviewed yet.
+
+From `backends/advanced/`:
 
 ```bash
-python detect.py \
-  --audio_path ./test_audio.wav \
-  --base_model unsloth/whisper-large-v3 \
-  --adapter_path ./sneeze_adapter \
-  --trigger_token "<sneeze>"
+uv run python src/advanced_omi_backend/scripts/run_anomaly_detection.py
 ```
 
-**Arguments:**
-- `--audio`: Path to audio file (required)
-- `--base_model`: Whisper model ID (default: `unsloth/whisper-large-v3`)
-- `--adapter_path`: Path to trained adapter directory (required)
-- `--trigger_token`: Token to detect in transcription (required)
-
-**Output:**
-```
-Loading audio: test_audio.wav
-Transcription: He let out a loud <sneeze>
-✅ DETECTED: <sneeze>
-```
+Notes:
+- Configure MongoDB via `MONGODB_URI` (defaults to `mongodb://localhost:27017`).
+- This script is currently a placeholder implementation (it marks unflagged transcripts as anomalies).
 
 ---
 
@@ -232,24 +218,19 @@ Transcription: He let out a loud <sneeze>
          └────────┬─────────┘
                   │
                   ▼
-         ┌────────────────────┐
-         │ DETECTION PHASE   │
-         │   detect.py       │
-         └────────┬─────────┘
-                  │
-                  ▼
-         ┌────────────────────┐
-         │   New Anomalies    │
-         │   Detected         │
-         └────────┬─────────┘
-                  │
-                  ▼
-         ┌────────────────────┐
-         │   User Popup      │
-         │   (Round 2)       │
-         └────────────────────┘
-                  │
-                  └──► Back to start!
+          ┌──────────────────────────────┐
+          │ BACKEND ANOMALY SCAN (JOB)   │
+          │ run_anomaly_detection.py     │
+          │ sets maybe_anomaly: true     │
+          └─────────────┬────────────────┘
+                        │
+                        ▼
+          ┌────────────────────┐
+          │   User Popup      │
+          │   (Round 2)       │
+          └────────────────────┘
+                   │
+                   └──► Back to start!
 ```
 
 ---
@@ -307,10 +288,10 @@ The training JSONL file (`user_loop_feedback.jsonl`) uses this schema:
 # crontab -e
 
 # Export training data daily at 2 AM
-0 2 * * * cd /path/to/event-detection && python export_from_mongo.py --min_samples 50
+0 2 * * * cd /path/to/backends/advanced/event-detection && uv run python export_from_mongo.py --min_samples 50
 
 # Retrain adapter weekly on Sunday at 3 AM
-0 3 * * 0 cd /path/to/event-detection && python train.py --data_file user_loop_feedback.jsonl
+0 3 * * 0 cd /path/to/backends/advanced/event-detection && uv run python train.py --train_manifest user_loop_feedback.jsonl
 ```
 
 ### Adapter Versioning
@@ -353,17 +334,17 @@ Track metrics to improve detection:
 
 ---
 
-### Issue: "Adapter not found"
+### Issue: "Adapter output directory missing"
 
 **Symptoms:**
 ```
-FileNotFoundError: Adapter ./sneeze_adapter not found!
+Expected adapter directory not found: ./sneeze_adapter
 ```
 
 **Solutions:**
-1. Verify `--adapter_path` matches trained output directory
+1. Verify `--output_dir` matches where you expect the adapter to be saved
 2. Check if train.py completed successfully
-3. Ensure output directory exists
+3. Ensure the output directory exists and is writable
 
 ---
 
@@ -452,56 +433,16 @@ const checkAnomaly = async () => {
 - ✅ GET /api/user-loop/events (returns anomalies)
 - ✅ POST /api/user-loop/accept (verifies)
 - ✅ POST /api/user-loop/reject (stashes to training)
-- ❌ No automatic anomaly detection (hardcoded)
+- ✅ Anomaly scan job: src/advanced_omi_backend/scripts/run_anomaly_detection.py (sets maybe_anomaly: true)
 ```
 
 ### Future Integration
 
-To add **automatic anomaly detection**:
+To replace the placeholder scan with **model-based anomaly detection**:
 
-1. **Load Adapter in Backend**
-   ```python
-   # Load LoRA adapter on startup
-   adapter_path = "./adapters/sneeze_latest"
-   model = load_whisper_with_adapter(adapter_path)
-   ```
-
-2. **Add Detection Service**
-   ```python
-   # services/event_detection_service.py
-   async def detect_anomaly(audio_chunks, transcript):
-       # Combine audio chunks
-       audio = combine_chunks(audio_chunks)
-       
-       # Run inference
-       detected, confidence = detect_event(audio, adapter)
-       
-       # Set maybe_anomaly based on detection
-       return detected
-   ```
-
-3. **Update Conversation Processing**
-   ```python
-   # When new conversation is transcribed
-   is_anomaly = event_service.detect_anomaly(
-       audio_chunks=conversation.audio_chunks,
-       transcript=conversation.transcript
-   )
-   
-   # Save to database
-   conversation.transcript_versions[0].maybe_anomaly = is_anomaly
-   ```
-
-4. **Remove Hardcoded Frontend**
-   ```typescript
-   const checkAnomaly = async () => {
-     // Check backend for anomalies
-     const response = await fetch('/api/user-loop/events')
-     const anomalies = await response.json()
-     const shouldShow = anomalies.length > 0  // Real detection!
-     setIsOpen(shouldShow)
-   }
-   ```
+1. Train an adapter in this folder (`train.py`) and version it.
+2. Load the adapter in the backend scan job and use inference to decide whether to set `maybe_anomaly: true`.
+3. Ensure the UI only opens the user-loop popup when `/api/user-loop/events` returns events.
 
 ---
 
@@ -511,10 +452,10 @@ To add **automatic anomaly detection**:
 |--------|-----------|----------|
 | **1. Collection** | User-Loop Popup | User swipes left to reject (stash) / right to accept |
 | **2. Storage** | MongoDB | Saves to `training_stash` collection |
-| **3. Export** | export_from_mongo.py | `python export_from_mongo.py --min_samples 10` |
-| **4. Training** | train.py | `python train.py --data_file user_loop_feedback.jsonl` |
-| **5. Detection** | detect.py | `python detect.py --audio test.wav --adapter ./adapter` |
-| **6. Deployment** | Backend | Load adapter and run detection automatically |
+| **3. Export** | export_from_mongo.py | `uv run python export_from_mongo.py --min_samples 10` |
+| **4. Training** | train.py | `uv run python train.py --train_manifest user_loop_feedback.jsonl --output_dir ./sneeze_adapter` |
+| **5. Flagging** | Backend job | `cd .. && uv run python src/advanced_omi_backend/scripts/run_anomaly_detection.py` |
+| **6. Deployment** | Backend | (Future) Use trained adapter inside the scan job |
 
 ---
 
@@ -531,5 +472,5 @@ To improve event detection:
 ---
 
 **Last Updated**: January 30, 2026  
-**Status**: 🟢 Production Workflow (User-Loop → Training → Detection) ✅
-**Backend Integration**: 🟡 Partial (Manual export, auto detection pending)
+**Status**: 🟢 Training/Export Workflow (User-Loop → Export → Training) ✅
+**Backend Integration**: 🟡 Partial (flagging job exists; model-based detection pending)

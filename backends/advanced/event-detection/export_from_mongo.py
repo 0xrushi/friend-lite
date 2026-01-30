@@ -11,7 +11,7 @@ Workflow:
     1. Users swipe on user-loop popup
     2. Items saved to MongoDB training_stash collection
     3. Export with this script to JSONL format
-    4. Train LoRA adapter: python train.py --data_file user_loop_feedback.jsonl
+    4. Train LoRA adapter: python train.py --train_manifest user_loop_feedback.jsonl
 """
 
 import argparse
@@ -111,13 +111,13 @@ def main():
         print("\n🎯 Next Steps:")
         print("   1. Review exported file:", args.output)
         print("   2. Train LoRA adapter:")
-        print(f"      python train.py --data_file {args.output}")
-        print("   3. Test detection:")
-        print("      python detect.py --audio_path test.wav --adapter_path ./adapter")
+        print(f"      python train.py --train_manifest {args.output}")
+        print("   3. Run anomaly scan (MongoDB flagging):")
+        print("      cd .. && uv run python src/advanced_omi_backend/scripts/run_anomaly_detection.py")
     else:
         print("❌ Export failed")
         print("\n💡 Suggestions:")
-        print("   - Swipe right on user-loop popup to add samples")
+        print("   - Swipe left on user-loop popup to add samples")
         print("   - Check MongoDB connection")
         print("   - Lower --min_samples threshold")
 
