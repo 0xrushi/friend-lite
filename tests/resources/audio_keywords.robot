@@ -65,15 +65,31 @@ Upload Audio File
       Log    Conversation ID: ${job_id}
       Log    Transcript Job ID: ${transcript_job_id}
 
-      # Wait for conversation to be created and transcribed
-      Log    Waiting for transcription to complete...
+      # Check if transcript_job_id is None (job not created)
+      ${is_none}=    Evaluate    $transcript_job_id is None or str($transcript_job_id) == 'None'
+
+      IF    ${is_none}
+          # Transcript job not created - skip job waiting and poll for conversation directly
+          Log    Transcript job ID is None - transcription job not created. Polling for conversation directly...
+
+          # Poll for conversation to appear (max 60s)
+          Wait Until Keyword Succeeds    60s    5s
+          ...    Get Conversation By ID    ${job_id}
+
+          ${conversation}=    Get Conversation By ID    ${job_id}
+          Log    Found conversation (without job tracking): ${conversation}
+          RETURN    ${conversation}
+      END
+
+      # Normal path: Wait for transcription job to complete
+      Log    Waiting for transcription job ${transcript_job_id} to complete...
 
       Wait Until Keyword Succeeds    60s    5s       Check job status   ${transcript_job_id}    finished
       ${job}=    Get Job Details    ${transcript_job_id}
 
      # Get the finished conversation
       ${conversation}=     Get Conversation By ID    ${job}[result][conversation_id]
-      Should Not Be Equal    ${conversation}    ${None}    Conversation not found after upload and started
+      Should Not Be Equal    ${conversation}    ${None}    Conversation not found after upload and processing
 
       Log    Found conversation: ${conversation}
       RETURN    ${conversation}

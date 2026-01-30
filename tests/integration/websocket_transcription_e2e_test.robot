@@ -80,7 +80,7 @@ Speech Detection Receives Transcription From Stream
 
     # Stream audio and close
     ${stream_id}=    Open Audio Stream    device_name=${device_name}
-    Send Audio Chunks To Stream    ${stream_id}    ${TEST_AUDIO_FILE}    num_chunks=200
+    Send Audio Chunks To Stream    ${stream_id}    ${TEST_AUDIO_FILE}    num_chunks=200    realtime_pacing=True
     Close Audio Stream    ${stream_id}
 
     # Wait for speech detection job to complete
@@ -120,7 +120,7 @@ Conversation Created With Valid Transcript
 
     # Stream audio (enough to trigger speech detection)
     ${stream_id}=    Open Audio Stream    device_name=${device_name}
-    Send Audio Chunks To Stream    ${stream_id}    ${TEST_AUDIO_FILE}    num_chunks=200
+    Send Audio Chunks To Stream    ${stream_id}    ${TEST_AUDIO_FILE}    num_chunks=200    realtime_pacing=True
     Close Audio Stream    ${stream_id}
 
     # DIAGNOSTIC: Verify speech detection job completes before checking for conversation

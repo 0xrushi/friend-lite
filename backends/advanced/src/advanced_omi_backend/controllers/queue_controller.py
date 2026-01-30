@@ -483,27 +483,35 @@ def start_post_conversation_jobs(
     else:
         logger.info(f"⏭️  Speaker recognition disabled, skipping speaker job for conversation {conversation_id[:8]}")
 
-    # Step 2: Memory extraction job
-    # Depends on speaker job if it was created, otherwise depends on upstream (transcription or nothing)
-    memory_job_id = f"memory_{conversation_id[:12]}"
-    logger.info(f"🔍 DEBUG: Creating memory job with job_id={memory_job_id}, conversation_id={conversation_id[:12]}")
+    # Step 2: Memory extraction job (conditional - only if enabled)
+    # Check if memory extraction is enabled
+    memory_config = get_service_config('memory.extraction')
+    memory_enabled = memory_config.get('enabled', True)  # Default to True for backward compatibility
 
-    memory_job = memory_queue.enqueue(
-        process_memory_job,
-        conversation_id,
-        job_timeout=900,  # 15 minutes
-        result_ttl=JOB_RESULT_TTL,
-        depends_on=speaker_dependency,  # Either speaker_job or upstream dependency
-        job_id=memory_job_id,
-        description=f"Memory extraction for conversation {conversation_id[:8]}",
-        meta=job_meta
-    )
-    if speaker_job:
-        logger.info(f"📥 RQ: Enqueued memory extraction job {memory_job.id}, meta={memory_job.meta} (depends on speaker job {speaker_job.id})")
-    elif depends_on_job:
-        logger.info(f"📥 RQ: Enqueued memory extraction job {memory_job.id}, meta={memory_job.meta} (depends on {depends_on_job.id})")
+    memory_job = None
+    if memory_enabled:
+        # Depends on speaker job if it was created, otherwise depends on upstream (transcription or nothing)
+        memory_job_id = f"memory_{conversation_id[:12]}"
+        logger.info(f"🔍 DEBUG: Creating memory job with job_id={memory_job_id}, conversation_id={conversation_id[:12]}")
+
+        memory_job = memory_queue.enqueue(
+            process_memory_job,
+            conversation_id,
+            job_timeout=900,  # 15 minutes
+            result_ttl=JOB_RESULT_TTL,
+            depends_on=speaker_dependency,  # Either speaker_job or upstream dependency
+            job_id=memory_job_id,
+            description=f"Memory extraction for conversation {conversation_id[:8]}",
+            meta=job_meta
+        )
+        if speaker_job:
+            logger.info(f"📥 RQ: Enqueued memory extraction job {memory_job.id}, meta={memory_job.meta} (depends on speaker job {speaker_job.id})")
+        elif depends_on_job:
+            logger.info(f"📥 RQ: Enqueued memory extraction job {memory_job.id}, meta={memory_job.meta} (depends on {depends_on_job.id})")
+        else:
+            logger.info(f"📥 RQ: Enqueued memory extraction job {memory_job.id}, meta={memory_job.meta} (no dependencies, starts immediately)")
     else:
-        logger.info(f"📥 RQ: Enqueued memory extraction job {memory_job.id}, meta={memory_job.meta} (no dependencies, starts immediately)")
+        logger.info(f"⏭️  Memory extraction disabled, skipping memory job for conversation {conversation_id[:8]}")
 
     # Step 3: Title/summary generation job
     # Depends on speaker job if enabled, otherwise on upstream dependency
@@ -532,8 +540,15 @@ def start_post_conversation_jobs(
     event_job_id = f"event_complete_{conversation_id[:12]}"
     logger.info(f"🔍 DEBUG: Creating conversation complete event job with job_id={event_job_id}, conversation_id={conversation_id[:12]}")
 
-    # Event job depends on both memory and title/summary jobs completing
-    # Use RQ's depends_on list to wait for both
+    # Event job depends on memory and title/summary jobs that were actually enqueued
+    # Build dependency list excluding None values
+    event_dependencies = []
+    if memory_job:
+        event_dependencies.append(memory_job)
+    if title_summary_job:
+        event_dependencies.append(title_summary_job)
+
+    # Enqueue event dispatch job (may have no dependencies if all jobs were skipped)
     event_dispatch_job = default_queue.enqueue(
         dispatch_conversation_complete_event_job,
         conversation_id,
@@ -542,16 +557,22 @@ def start_post_conversation_jobs(
         end_reason,  # Use the end_reason parameter (defaults to 'file_upload' for backward compatibility)
         job_timeout=120,  # 2 minutes
         result_ttl=JOB_RESULT_TTL,
-        depends_on=[memory_job, title_summary_job],  # Wait for both parallel jobs
+        depends_on=event_dependencies if event_dependencies else None,  # Wait for jobs that were enqueued
         job_id=event_job_id,
         description=f"Dispatch conversation complete event ({end_reason}) for {conversation_id[:8]}",
         meta=job_meta
     )
-    logger.info(f"📥 RQ: Enqueued conversation complete event job {event_dispatch_job.id}, meta={event_dispatch_job.meta} (depends on {memory_job.id} and {title_summary_job.id})")
+
+    # Log event dispatch dependencies
+    if event_dependencies:
+        dep_ids = [job.id for job in event_dependencies]
+        logger.info(f"📥 RQ: Enqueued conversation complete event job {event_dispatch_job.id}, meta={event_dispatch_job.meta} (depends on {', '.join(dep_ids)})")
+    else:
+        logger.info(f"📥 RQ: Enqueued conversation complete event job {event_dispatch_job.id}, meta={event_dispatch_job.meta} (no dependencies, starts immediately)")
 
     return {
         'speaker_recognition': speaker_job.id if speaker_job else None,
-        'memory': memory_job.id,
+        'memory': memory_job.id if memory_job else None,
         'title_summary': title_summary_job.id,
         'event_dispatch': event_dispatch_job.id
     }

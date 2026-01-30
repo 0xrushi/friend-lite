@@ -24,7 +24,6 @@ export default function Memories() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
-  const [showUnfiltered, setShowUnfiltered] = useState(false)
   const [totalCount, setTotalCount] = useState<number | null>(null)
 
   // Semantic search state
@@ -61,9 +60,7 @@ export default function Memories() {
 
     try {
       setLoading(true)
-      const response = showUnfiltered
-        ? await memoriesApi.getUnfiltered(user.id)
-        : await memoriesApi.getAll(user.id)
+      const response = await memoriesApi.getAll(user.id)
 
       console.log('🧠 Memories API response:', response.data)
 
@@ -97,7 +94,7 @@ export default function Memories() {
 
   useEffect(() => {
     loadMemories()
-  }, [user?.id, showUnfiltered])
+  }, [user?.id])
 
   // Semantic search handlers
   const handleSemanticSearch = async () => {
@@ -272,18 +269,7 @@ export default function Memories() {
 
       {/* Controls */}
       <div className="space-y-4 mb-6">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-4">
-            <label className="flex items-center space-x-2 text-sm">
-              <input
-                type="checkbox"
-                checked={showUnfiltered}
-                onChange={(e) => setShowUnfiltered(e.target.checked)}
-                className="rounded border-gray-300"
-              />
-              <span className="text-gray-700 dark:text-gray-300">Show unfiltered</span>
-            </label>
-          </div>
+        <div className="flex items-center justify-end">
           <button
             onClick={loadMemories}
             disabled={loading || !user}
@@ -415,9 +401,9 @@ export default function Memories() {
                 )
               ) : (
                 totalCount !== null ? (
-                  `Showing ${memories.length} of ${totalCount} ${showUnfiltered ? 'unfiltered' : 'filtered'} memories`
+                  `Showing ${memories.length} of ${totalCount} memories`
                 ) : (
-                  `Showing ${showUnfiltered ? 'unfiltered' : 'filtered'} memories (${memories.length} found)`
+                  `Showing ${memories.length} memories`
                 )
               )}
             </p>

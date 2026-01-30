@@ -5,7 +5,8 @@
         containers-start containers-stop containers-restart containers-rebuild \
         containers-start-rebuild containers-clean containers-status containers-logs \
         start stop restart rebuild start-rebuild status logs \
-        test test-quick test-slow test-sdk test-all-with-slow-and-sdk clean-all
+        test test-quick test-slow test-sdk test-all-with-slow-and-sdk clean-all \
+        results results-path results-detailed
 
 # Default output directory
 OUTPUTDIR ?= results
@@ -45,6 +46,11 @@ help:
 	@echo "  make containers-clean         - Save logs + remove everything"
 	@echo "  make containers-status        - Show container health"
 	@echo "  make containers-logs          - View service logs (use SERVICE=name)"
+	@echo ""
+	@echo "View Results:"
+	@echo "  make results          - Quick terminal summary (SSH-friendly)"
+	@echo "  make results-path     - Print path to HTML report for viewing"
+	@echo "  make results-detailed - Detailed terminal output with full errors"
 	@echo ""
 	@echo "Utilities:"
 	@echo "  make clean       - Remove test output files"
@@ -192,6 +198,26 @@ test-all-with-slow-and-sdk:
 		--console verbose \
 		--loglevel INFO:INFO \
 		$(TEST_DIR)
+
+# ============================================================================
+# View Test Results
+# ============================================================================
+
+# View test results in terminal (SSH-friendly)
+results:
+	@uv run --with-requirements test-requirements.txt python show_results.py
+
+# Print path to HTML report for manual viewing
+results-path:
+	@uv run --with-requirements test-requirements.txt python show_results.py --path
+
+# Detailed terminal output with full error messages
+results-detailed:
+	@uv run --with-requirements test-requirements.txt python show_results.py --detailed
+
+# ============================================================================
+# Cleanup
+# ============================================================================
 
 # Complete cleanup: test results + containers (saves logs)
 clean-all: clean containers-clean
