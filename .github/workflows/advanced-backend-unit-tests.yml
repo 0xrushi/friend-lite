@@ -5,7 +5,7 @@ on:
     paths:
       - 'backends/advanced/**'
       - '.github/workflows/advanced-backend-unit-tests.yml'
-      - 'Makefile'
+      - 'backends/advanced/Makefile.unittests'
   push:
     branches:
       - dev
@@ -13,7 +13,7 @@ on:
     paths:
       - 'backends/advanced/**'
       - '.github/workflows/advanced-backend-unit-tests.yml'
-      - 'Makefile'
+      - 'backends/advanced/Makefile.unittests'
   workflow_dispatch:
 
 permissions:
@@ -38,4 +38,5 @@ jobs:
         uses: astral-sh/setup-uv@v4
 
       - name: Run advanced backend unit tests
-        run: make test-unit
+        working-directory: backends/advanced
+        run: make -f Makefile.unittests test-unit

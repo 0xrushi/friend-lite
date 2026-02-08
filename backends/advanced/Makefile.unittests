@@ -1,0 +1,10 @@
+.PHONY: help test-unit test-unit-fast
+
+help:
+	@echo "Advanced backend unit test targets"
+	@echo "  make -f Makefile.unittests test-unit      Run Python unit tests"
+
+test-unit:
+	@echo "Running advanced backend Python unit tests..."
+	@uv run --group test pytest tests/unit tests/test_init_llm_setup.py
+	@echo "Advanced backend Python unit tests completed"
