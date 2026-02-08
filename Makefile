@@ -19,7 +19,7 @@ export $(shell sed 's/=.*//' config.env | grep -v '^\s*$$' | grep -v '^\s*\#')
 SCRIPTS_DIR := scripts
 K8S_SCRIPTS_DIR := $(SCRIPTS_DIR)/k8s
 
-.PHONY: help menu setup-k8s setup-infrastructure setup-rbac setup-storage-pvc config config-docker config-k8s config-all clean deploy deploy-docker deploy-k8s deploy-k8s-full deploy-infrastructure deploy-apps check-infrastructure check-apps build-backend up-backend down-backend k8s-status k8s-cleanup k8s-purge audio-manage mycelia-sync-status mycelia-sync-all mycelia-sync-user mycelia-check-orphans mycelia-reassign-orphans test-robot test-robot-integration test-robot-unit test-robot-endpoints test-robot-specific test-robot-clean test-unit
+.PHONY: help menu setup-k8s setup-infrastructure setup-rbac setup-storage-pvc config config-docker config-k8s config-all clean deploy deploy-docker deploy-k8s deploy-k8s-full deploy-infrastructure deploy-apps check-infrastructure check-apps build-backend up-backend down-backend k8s-status k8s-cleanup k8s-purge audio-manage mycelia-sync-status mycelia-sync-all mycelia-sync-user mycelia-check-orphans mycelia-reassign-orphans test-robot test-robot-integration test-robot-unit test-robot-endpoints test-robot-specific test-robot-clean
 
 # Default target
 .DEFAULT_GOAL := menu
@@ -428,9 +428,3 @@ test-robot-clean: ## Clean up Robot Framework test results
 	@echo "🧹 Cleaning up Robot Framework test results..."
 	@rm -rf results/
 	@echo "✅ Test results cleaned"
-
-
-test-unit: ## Run Python unit tests for advanced backend, make sure to have more folders as unit tests geta added
-	@echo "🧪 Running Python unit tests for advanced backend..."
-	@cd backends/advanced && uv run --group test pytest tests/unit tests/test_init_llm_setup.py
-	@echo "✅ Advanced backend Python unit tests completed"
