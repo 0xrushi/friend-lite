@@ -37,6 +37,24 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v4
 
+      - name: Mock config files for unit tests
+        run: |
+          cat > config.env << 'EOF'
+          DEPLOYMENT_MODE=docker-compose
+          DOMAIN=localhost
+          CONTAINER_REGISTRY=local
+          SPEAKER_NODE=localhost
+          INFRASTRUCTURE_NAMESPACE=infrastructure
+          APPLICATION_NAMESPACE=application
+          EOF
+
+          mkdir -p backends/advanced
+          cat > backends/advanced/.env << 'EOF'
+          AUTH_SECRET_KEY=test-auth-secret
+          ADMIN_PASSWORD=test-admin-password
+          ADMIN_EMAIL=test-admin@example.com
+          EOF
+
       - name: Run advanced backend unit tests
         working-directory: backends/advanced
         run: make -f Makefile.unittests test-unit
