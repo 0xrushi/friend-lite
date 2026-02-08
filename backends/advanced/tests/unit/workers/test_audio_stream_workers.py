@@ -171,20 +171,25 @@ class TestDeepgramStreamWorker:
             assert callable(consumer.start_consuming)
             assert callable(consumer.stop)
 
-    @pytest.mark.asyncio
-    async def test_start_method_runs_worker(self):
-        """Test that start() class method creates instance and runs it."""
+    def test_start_method_runs_worker(self):
+        """Test that start() class method creates instance and schedules run() via asyncio.run."""
+        captured_coro = None
+
         with patch.object(DeepgramStreamWorker, "run", new_callable=AsyncMock) as mock_run:
             with patch("asyncio.run") as mock_asyncio_run:
-                # Simulate script execution
-                mock_asyncio_run.side_effect = lambda coro: asyncio.new_event_loop().run_until_complete(
-                    coro
-                )
+                def capture_and_close(coro):
+                    nonlocal captured_coro
+                    captured_coro = coro
+                    coro.close()
 
-                worker_instance = DeepgramStreamWorker()
-                await worker_instance.run()
+                mock_asyncio_run.side_effect = capture_and_close
 
-                mock_run.assert_called_once()
+                DeepgramStreamWorker.start()
+
+                mock_run.assert_called_once_with()
+                mock_asyncio_run.assert_called_once_with(captured_coro)
+                assert captured_coro is not None
+                assert asyncio.iscoroutine(captured_coro)
 
 
 @pytest.mark.unit
