@@ -164,6 +164,92 @@ class ChronicleSetup:
             default=default
         )
 
+    def _get_model_def(self, config: Dict[str, Any], model_name: str) -> Dict[str, Any]:
+        """Get a model definition by name from config.yml."""
+        models = config.get("models", [])
+        if not isinstance(models, list):
+            return {}
+        return next((m for m in models if m.get("name") == model_name), {})
+
+    def _infer_embedding_dimensions(self, model_name: str, fallback: int = 1536) -> int:
+        """Infer embedding dimensions for common models."""
+        known_dimensions = {
+            "text-embedding-3-small": 1536,
+            "text-embedding-3-large": 3072,
+            "text-embedding-ada-002": 1536,
+            "nomic-embed-text-v1.5": 768,
+            "nomic-embed-text:latest": 768,
+        }
+        return known_dimensions.get(model_name, fallback)
+
+    def _upsert_openai_models(
+        self,
+        api_key: str,
+        base_url: str,
+        llm_model_name: str,
+        embedding_model_name: str,
+    ) -> None:
+        """Update or create openai-llm/openai-embed in config.yml and set defaults."""
+        config = self.config_manager.get_full_config()
+        models = config.get("models", [])
+        if not isinstance(models, list):
+            models = []
+
+        openai_llm = self._get_model_def(config, "openai-llm")
+        openai_embed = self._get_model_def(config, "openai-embed")
+
+        llm_params = openai_llm.get("model_params", {})
+        if not isinstance(llm_params, dict):
+            llm_params = {}
+        llm_params.setdefault("temperature", 0.2)
+        llm_params.setdefault("max_tokens", 2000)
+
+        embedding_dimensions = openai_embed.get("embedding_dimensions")
+        if not isinstance(embedding_dimensions, int) or embedding_dimensions <= 0:
+            embedding_dimensions = self._infer_embedding_dimensions(embedding_model_name)
+
+        llm_payload = {
+            "name": "openai-llm",
+            "description": "OpenAI/OpenAI-compatible LLM",
+            "model_type": "llm",
+            "model_provider": "openai",
+            "api_family": "openai",
+            "model_name": llm_model_name,
+            "model_url": base_url,
+            "api_key": api_key,
+            "model_params": llm_params,
+            "model_output": "json",
+        }
+        embed_payload = {
+            "name": "openai-embed",
+            "description": "OpenAI/OpenAI-compatible embeddings",
+            "model_type": "embedding",
+            "model_provider": "openai",
+            "api_family": "openai",
+            "model_name": embedding_model_name,
+            "model_url": base_url,
+            "api_key": api_key,
+            "embedding_dimensions": embedding_dimensions,
+            "model_output": "vector",
+        }
+
+        def upsert_model(payload: Dict[str, Any]):
+            for idx, model in enumerate(models):
+                if model.get("name") == payload["name"]:
+                    models[idx] = {**model, **payload}
+                    return
+            models.append(payload)
+
+        upsert_model(llm_payload)
+        upsert_model(embed_payload)
+
+        config["models"] = models
+        if "defaults" not in config or not isinstance(config["defaults"], dict):
+            config["defaults"] = {}
+        config["defaults"]["llm"] = "openai-llm"
+        config["defaults"]["embedding"] = "openai-embed"
+
+        self.config_manager.save_full_config(config)
 
     def setup_authentication(self):
         """Configure authentication settings"""
@@ -307,7 +393,7 @@ class ChronicleSetup:
         self.console.print()
 
         choices = {
-            "1": "OpenAI (GPT-4, GPT-3.5 - requires API key)",
+            "1": "OpenAI / OpenAI-compatible (custom base URL, API key, model names)",
             "2": "Ollama (local models - runs locally)",
             "3": "Skip (no memory extraction)"
         }
@@ -315,8 +401,20 @@ class ChronicleSetup:
         choice = self.prompt_choice("Which LLM provider will you use?", choices, "1")
 
         if choice == "1":
-            self.console.print("[blue][INFO][/blue] OpenAI selected")
+            self.console.print("[blue][INFO][/blue] OpenAI/OpenAI-compatible selected")
             self.console.print("Get your API key from: https://platform.openai.com/api-keys")
+
+            existing_cfg = self.config_manager.get_full_config()
+            openai_llm = self._get_model_def(existing_cfg, "openai-llm")
+            openai_embed = self._get_model_def(existing_cfg, "openai-embed")
+
+            default_base_url = openai_llm.get("model_url") or openai_embed.get("model_url") or "https://api.openai.com/v1"
+            default_llm_model = openai_llm.get("model_name") or "gpt-4o-mini"
+            default_embedding_model = openai_embed.get("model_name") or "text-embedding-3-small"
+
+            base_url = self.prompt_value("OpenAI-compatible base URL", default_base_url)
+            llm_model_name = self.prompt_value("LLM model name", default_llm_model)
+            embedding_model_name = self.prompt_value("Embedding model name", default_embedding_model)
 
             # Use the new masked prompt function
             api_key = self.prompt_with_existing_masked(
@@ -329,11 +427,19 @@ class ChronicleSetup:
 
             if api_key:
                 self.config["OPENAI_API_KEY"] = api_key
-                # Update config.yml to use OpenAI models
-                self.config_manager.update_config_defaults({"llm": "openai-llm", "embedding": "openai-embed"})
+                # Update config.yml openai model definitions and defaults
+                self._upsert_openai_models(
+                    api_key=api_key,
+                    base_url=base_url,
+                    llm_model_name=llm_model_name,
+                    embedding_model_name=embedding_model_name,
+                )
                 self.console.print("[green][SUCCESS][/green] OpenAI configured in config.yml")
                 self.console.print("[blue][INFO][/blue] Set defaults.llm: openai-llm")
                 self.console.print("[blue][INFO][/blue] Set defaults.embedding: openai-embed")
+                self.console.print(f"[blue][INFO][/blue] Set openai-llm.model_url: {base_url}")
+                self.console.print(f"[blue][INFO][/blue] Set openai-llm.model_name: {llm_model_name}")
+                self.console.print(f"[blue][INFO][/blue] Set openai-embed.model_name: {embedding_model_name}")
             else:
                 self.console.print("[yellow][WARNING][/yellow] No API key provided - memory extraction will not work")
 
