@@ -7,7 +7,9 @@ Starts a consumer that reads from audio:stream:deepgram and transcribes audio.
 
 import os
 
-from advanced_omi_backend.services.transcription.deepgram import DeepgramStreamConsumer
+from advanced_omi_backend.services.transcription.streaming_consumer import (
+    StreamingTranscriptionConsumer,
+)
 from advanced_omi_backend.workers.base_audio_worker import BaseStreamWorker
 
 
@@ -27,15 +29,8 @@ class DeepgramStreamWorker(BaseStreamWorker):
             self.logger.warning("Audio transcription will use alternative providers if configured in config.yml")
 
     def get_consumer(self, redis_client):
-        """Create Deepgram consumer with balanced buffer size."""
-        # Create consumer with balanced buffer size
-        # 20 chunks = ~5 seconds of audio
-        # Balance between transcription accuracy and latency
-        # Consumer uses registry-driven provider from config.yml
-        return DeepgramStreamConsumer(
-            redis_client=redis_client,
-            buffer_chunks=20  # 5 seconds - good context without excessive delay
-        )
+        """Create streaming transcription consumer."""
+        return StreamingTranscriptionConsumer(redis_client=redis_client)
 
 
 if __name__ == "__main__":

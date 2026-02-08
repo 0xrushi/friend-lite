@@ -8,9 +8,8 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 import pytest
 import redis.asyncio as redis
 
-from advanced_omi_backend.services.transcription.deepgram import DeepgramStreamConsumer
-from advanced_omi_backend.services.transcription.parakeet_stream_consumer import (
-    ParakeetStreamConsumer,
+from advanced_omi_backend.services.transcription.streaming_consumer import (
+    StreamingTranscriptionConsumer,
 )
 from advanced_omi_backend.workers.audio_stream_deepgram_worker import DeepgramStreamWorker
 from advanced_omi_backend.workers.audio_stream_parakeet_worker import ParakeetStreamWorker
@@ -151,21 +150,21 @@ class TestDeepgramStreamWorker:
                 # Should log 3 warnings about missing API key
                 assert mock_warning.call_count == 3
 
-    def test_get_consumer_creates_deepgram_consumer(self):
-        """Test that get_consumer returns a DeepgramStreamConsumer instance."""
+    def test_get_consumer_creates_streaming_consumer(self):
+        """Test that get_consumer returns a StreamingTranscriptionConsumer instance."""
         worker = DeepgramStreamWorker()
         mock_redis = Mock()
 
-        # Mock the config/registry system that DeepgramStreamConsumer uses
+        # Mock the config/registry system that StreamingTranscriptionConsumer uses
         with patch(
-            "advanced_omi_backend.services.transcription.deepgram.get_transcription_provider"
+            "advanced_omi_backend.services.transcription.streaming_consumer.get_transcription_provider"
         ) as mock_get_provider:
             mock_provider = Mock()
             mock_get_provider.return_value = mock_provider
 
             consumer = worker.get_consumer(mock_redis)
 
-            assert isinstance(consumer, DeepgramStreamConsumer)
+            assert isinstance(consumer, StreamingTranscriptionConsumer)
             # Verify consumer has required async methods
             assert hasattr(consumer, "start_consuming")
             assert hasattr(consumer, "stop")
@@ -216,21 +215,21 @@ class TestParakeetStreamWorker:
                 # Should log 3 warnings about missing service URL
                 assert mock_warning.call_count == 3
 
-    def test_get_consumer_creates_parakeet_consumer(self):
-        """Test that get_consumer returns a ParakeetStreamConsumer instance."""
+    def test_get_consumer_creates_streaming_consumer(self):
+        """Test that get_consumer returns a StreamingTranscriptionConsumer instance."""
         worker = ParakeetStreamWorker()
         mock_redis = Mock()
 
-        # Mock the config/registry system that ParakeetStreamConsumer uses
+        # Mock the config/registry system that StreamingTranscriptionConsumer uses
         with patch(
-            "advanced_omi_backend.services.transcription.parakeet_stream_consumer.get_transcription_provider"
+            "advanced_omi_backend.services.transcription.streaming_consumer.get_transcription_provider"
         ) as mock_get_provider:
             mock_provider = Mock()
             mock_get_provider.return_value = mock_provider
 
             consumer = worker.get_consumer(mock_redis)
 
-            assert isinstance(consumer, ParakeetStreamConsumer)
+            assert isinstance(consumer, StreamingTranscriptionConsumer)
             # Verify consumer has required async methods
             assert hasattr(consumer, "start_consuming")
             assert hasattr(consumer, "stop")
