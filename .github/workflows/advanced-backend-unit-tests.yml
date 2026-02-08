@@ -5,7 +5,7 @@ on:
     paths:
       - 'backends/advanced/**'
       - '.github/workflows/advanced-backend-unit-tests.yml'
-      - 'backends/advanced/Makefile.unittests'
+      - 'Makefile.unittests'
   push:
     branches:
       - dev
@@ -13,7 +13,7 @@ on:
     paths:
       - 'backends/advanced/**'
       - '.github/workflows/advanced-backend-unit-tests.yml'
-      - 'backends/advanced/Makefile.unittests'
+      - 'Makefile.unittests'
   workflow_dispatch:
 
 permissions:
@@ -56,5 +56,4 @@ jobs:
           EOF
 
       - name: Run advanced backend unit tests
-        working-directory: backends/advanced
         run: make -f Makefile.unittests test-unit

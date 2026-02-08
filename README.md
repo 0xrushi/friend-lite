@@ -145,6 +145,22 @@ cd app
 npm start
 ```
 
+### Unit + Robot Tests
+```bash
+# Run advanced backend Python unit tests
+make -f Makefile.unittests test-unit
+
+# Run Robot test workflow (includes start-rebuild automatically)
+make -f Makefile.unittests robot-test
+
+# Run both unit + Robot tests
+make -f Makefile.unittests test-unit && make -f Makefile.unittests robot-test
+
+# Optional Robot config override
+make -f Makefile.unittests robot-test CONFIG=deepgram-openai.yml
+```
+
+
 ### Health Checks
 ```bash
 # Backend health

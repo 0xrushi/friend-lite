@@ -1,0 +1,27 @@
+.PHONY: help test-unit robot-test robot-all
+
+# Minimal auth env required during import-time test collection.
+UNIT_TEST_ENV := AUTH_SECRET_KEY=test-auth-secret ADMIN_PASSWORD=test-admin-password ADMIN_EMAIL=test-admin@example.com
+
+help:
+	@echo "Repository-level unit/robot test targets"
+	@echo "  make -f Makefile.unittests test-unit      Run advanced backend Python unit tests"
+	@echo ""
+	@echo "Robot test passthrough targets (runs via tests/)"
+	@echo "  make -f Makefile.unittests robot-test     [CONFIG=deepgram-openai.yml]"
+	@echo "  make -f Makefile.unittests robot-all      [CONFIG=deepgram-openai.yml]"
+
+test-unit:
+	@echo "Running advanced backend Python unit tests..."
+	@cd backends/advanced && $(UNIT_TEST_ENV) uv run --group test pytest tests/unit tests/test_init_llm_setup.py
+	@echo "Advanced backend Python unit tests completed"
+
+robot-test:
+	@echo "Starting/rebuilding Robot test containers from tests/..."
+	@$(MAKE) -C tests start-rebuild $(if $(CONFIG),CONFIG=$(CONFIG),)
+	@echo "Running Robot test workflow from tests/..."
+	@$(MAKE) -C tests test $(if $(CONFIG),CONFIG=$(CONFIG),)
+
+robot-all:
+	@echo "Running all Robot suites from tests/..."
+	@$(MAKE) -C tests all $(if $(CONFIG),CONFIG=$(CONFIG),)
