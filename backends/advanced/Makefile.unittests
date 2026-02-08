@@ -1,4 +1,4 @@
-.PHONY: help test-unit test-unit-fast
+.PHONY: help test-unit
 
 help:
 	@echo "Advanced backend unit test targets"
