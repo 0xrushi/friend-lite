@@ -6,5 +6,5 @@ help:
 
 test-unit:
 	@echo "Running advanced backend Python unit tests..."
-	@uv run --group test pytest tests/unit tests/test_init_llm_setup.py
+	@AUTH_SECRET_KEY=test-auth-secret uv run --group test pytest tests/unit tests/test_init_llm_setup.py
 	@echo "Advanced backend Python unit tests completed"
