@@ -24,7 +24,6 @@ from .modules import (
     queue_router,
     system_router,
     user_router,
-    annotation_router,
 )
 from .modules.health_routes import router as health_router
 
@@ -48,7 +47,6 @@ router.include_router(memory_router)
 router.include_router(obsidian_router)
 router.include_router(system_router)
 router.include_router(queue_router)
-router.include_router(annotation_router, prefix="/annotations", tags=["annotations"])
 router.include_router(health_router)  # Also include under /api for frontend compatibility
 
 # Conditionally include test routes (only in test environments)
