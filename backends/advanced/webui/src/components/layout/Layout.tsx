@@ -3,11 +3,13 @@ import { Music, MessageSquare, MessageCircle, Brain, Users, Upload, Settings, Lo
 import { useAuth } from '../../contexts/AuthContext'
 import { useTheme } from '../../contexts/ThemeContext'
 import GlobalRecordingIndicator from './GlobalRecordingIndicator'
+import UserLoopModal from '../UserLoopModal'
 
 export default function Layout() {
   const location = useLocation()
   const { user, logout, isAdmin } = useAuth()
   const { isDark, toggleTheme } = useTheme()
+  const userLoopModalEnabled = import.meta.env.VITE_USER_LOOP_MODAL_ENABLED === 'true'
 
   const navigationItems = [
     { path: '/live-record', label: 'Live Record', icon: Radio },
@@ -112,6 +114,8 @@ export default function Layout() {
           </div>
         </div>
       </footer>
+      {/* User Loop Modal - Swipe interface for anomaly review */}
+      {userLoopModalEnabled && <UserLoopModal />}
     </div>
   )
 }

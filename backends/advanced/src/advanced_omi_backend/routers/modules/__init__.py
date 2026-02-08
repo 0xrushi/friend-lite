@@ -16,6 +16,7 @@ This package contains organized router modules for different functional areas:
 - websocket_routes: WebSocket connection handling
 - admin_routes: Admin-only system management endpoints
 - knowledge_graph_routes: Knowledge graph entities, relationships, and promises
+- user_loop_routes: Anomaly review and transcript verification
 """
 
 from .admin_routes import router as admin_router
@@ -31,6 +32,7 @@ from .memory_routes import router as memory_router
 from .obsidian_routes import router as obsidian_router
 from .queue_routes import router as queue_router
 from .system_routes import router as system_router
+from .user_loop_routes import router as user_loop_router
 from .user_routes import router as user_router
 from .websocket_routes import router as websocket_router
 
@@ -48,6 +50,7 @@ __all__ = [
    "obsidian_router",
    "queue_router",
    "system_router",
+   "user_loop_router",
    "user_router",
    "websocket_router",
 ]

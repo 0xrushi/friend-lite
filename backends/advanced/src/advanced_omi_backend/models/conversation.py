@@ -81,6 +81,13 @@ class Conversation(Document):
             description="Source of speaker diarization: 'provider' (transcription service), 'pyannote' (speaker recognition), or None"
         )
         metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional provider-specific metadata")
+        maybe_anomaly: Optional[Union[bool, str]] = Field(
+            None,
+            description=(
+                "Anomaly detection status: True (anomaly detected), False (no anomaly), "
+                "'verified' (user verified no anomaly), 'rejected' (user rejected/stashed for training)"
+            )
+        )
 
     class MemoryVersion(BaseModel):
         """Version of memory extraction with processing metadata."""

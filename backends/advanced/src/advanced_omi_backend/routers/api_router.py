@@ -23,6 +23,7 @@ from .modules import (
     obsidian_router,
     queue_router,
     system_router,
+    user_loop_router,
     user_router,
 )
 from .modules.health_routes import router as health_router
@@ -41,6 +42,7 @@ router.include_router(user_router)
 router.include_router(chat_router)
 router.include_router(client_router)
 router.include_router(conversation_router)
+router.include_router(user_loop_router)
 router.include_router(finetuning_router)
 router.include_router(knowledge_graph_router)
 router.include_router(memory_router)
