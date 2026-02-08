@@ -73,9 +73,6 @@ async def create_annotation(
             
             # Trigger memory reprocessing
             enqueue_memory_processing(
-                client_id=conversation.client_id,
-                user_id=str(current_user.id),
-                user_email=current_user.email,
                 conversation_id=conversation.conversation_id,
                 priority=JobPriority.NORMAL
             )
