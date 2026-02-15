@@ -360,9 +360,9 @@ export default function Conversations() {
     loadEnrolledSpeakers()
   }, [])
 
-  // Load conversations on mount and when debug mode toggles (to include/exclude orphans)
+  // Refetch conversations when debug mode toggles (to include/exclude orphans)
   useEffect(() => {
-    loadConversations()
+    refetch()
   }, [debugMode])
 
   // Close dropdown when clicking outside
