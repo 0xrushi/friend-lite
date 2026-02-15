@@ -7,7 +7,6 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from advanced_omi_backend.database import get_database
 from advanced_omi_backend.models.conversation import Conversation
 from advanced_omi_backend.utils.logging_utils import mask_dict
 
@@ -50,8 +49,6 @@ class EmailSummarizerPlugin(BasePlugin):
         # Email service will be initialized in initialize()
         self.email_service: Optional[SMTPEmailService] = None
 
-        # MongoDB database handle
-        self.db = None
 
     def register_prompts(self, registry) -> None:
         """Register email summarizer prompts with the prompt registry."""
@@ -111,8 +108,6 @@ class EmailSummarizerPlugin(BasePlugin):
             logger.error(f"Failed to initialize email service: {e}")
             raise
 
-        # Get MongoDB database handle
-        self.db = get_database()
         logger.info("✅ Email Summarizer plugin initialized successfully")
 
     async def cleanup(self):
@@ -163,14 +158,12 @@ class EmailSummarizerPlugin(BasePlugin):
 
             title = conversation.title or self.subject_prefix
 
-            # Get user email — prefer event data, fall back to DB lookup
-            user_email = context.data.get('conversation', {}).get('user_email')
-            if not user_email:
-                user_email = await self._get_user_email(context.user_id)
+            # Send to the configured SMTP username (the user's own email)
+            user_email = self.config.get('smtp_username')
             if not user_email:
                 return PluginResult(
                     success=False,
-                    message=f"No email configured for user {context.user_id}",
+                    message="No smtp_username configured for email delivery",
                 )
 
             # Format and send
@@ -219,39 +212,6 @@ class EmailSummarizerPlugin(BasePlugin):
         except Exception as e:
             logger.error(f"Error in email summarizer (memory.processed): {e}", exc_info=True)
             return PluginResult(success=False, message=f"Error: {str(e)}")
-
-    async def _get_user_email(self, user_id: str) -> Optional[str]:
-        """
-        Get notification email from user.
-
-        Args:
-            user_id: User identifier (MongoDB ObjectId)
-
-        Returns:
-            User's notification_email, or None if not set
-        """
-        try:
-            from bson import ObjectId
-
-            # Query users collection
-            user = await self.db['users'].find_one({'_id': ObjectId(user_id)})
-
-            if not user:
-                logger.warning(f"User {user_id} not found")
-                return None
-
-            notification_email = user.get('notification_email')
-
-            if not notification_email:
-                logger.warning(f"User {user_id} has no notification_email set")
-                return None
-
-            logger.debug(f"Sending notification to {notification_email} for user {user_id}")
-            return notification_email
-
-        except Exception as e:
-            logger.error(f"Error fetching user email: {e}", exc_info=True)
-            return None
 
     def _format_subject(self, created_at: Optional[datetime] = None) -> str:
         """
