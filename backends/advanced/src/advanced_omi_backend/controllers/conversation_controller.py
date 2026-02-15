@@ -326,7 +326,7 @@ async def search_conversations(
 ):
     """Full-text search across conversation titles, summaries, and transcripts."""
     try:
-        collection = Conversation.get_motor_collection()
+        collection = Conversation.get_pymongo_collection()
 
         match_filter: dict = {"$text": {"$search": query}, "deleted": False}
         if not user.is_superuser:
