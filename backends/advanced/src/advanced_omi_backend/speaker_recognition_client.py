@@ -577,6 +577,7 @@ class SpeakerRecognitionClient:
         # Build result segments
         result_segments = []
         identified_count = 0
+        error_count = 0
         for i, seg in enumerate(segments):
             label = seg.get("speaker", "Unknown")
 
@@ -614,7 +615,21 @@ class SpeakerRecognitionClient:
             except Exception:
                 result = None
 
-            if result and result.get("found"):
+            # None result means _identify_one raised an exception (audio reconstruction or service call)
+            if result is None:
+                error_count += 1
+                result_segments.append({
+                    "start": seg["start"],
+                    "end": seg["end"],
+                    "text": seg.get("text", ""),
+                    "speaker": label,
+                    "identified_as": None,
+                    "confidence": 0.0,
+                    "status": "error",
+                })
+                continue
+
+            if result.get("found"):
                 name = result.get("speaker_name", label)
                 confidence = result.get("confidence", 0.0)
                 result_segments.append({
@@ -627,6 +642,18 @@ class SpeakerRecognitionClient:
                     "status": "identified",
                 })
                 identified_count += 1
+            elif result and result.get("status") == "error":
+                # Speaker service returned an error (500, timeout, etc.)
+                error_count += 1
+                result_segments.append({
+                    "start": seg["start"],
+                    "end": seg["end"],
+                    "text": seg.get("text", ""),
+                    "speaker": label,
+                    "identified_as": None,
+                    "confidence": 0.0,
+                    "status": "error",
+                })
             else:
                 result_segments.append({
                     "start": seg["start"],
@@ -641,10 +668,23 @@ class SpeakerRecognitionClient:
         logger.info(
             f"🎤 Per-segment identification complete: "
             f"{identified_count}/{len(speech_segments)} segments identified, "
+            f"{error_count} errors, "
             f"{len(result_segments)} total segments"
         )
 
-        return {"segments": result_segments}
+        result = {"segments": result_segments}
+
+        # If all speech segments errored, surface this as a service error
+        if error_count > 0 and error_count == len(all_tasks):
+            result["error"] = "speaker_service_error"
+            result["message"] = (
+                f"All {error_count} identification requests failed. "
+                f"Speaker service may be misconfigured or unhealthy."
+            )
+        elif error_count > 0:
+            result["partial_errors"] = error_count
+
+        return result
 
     async def diarize_and_identify(
         self, audio_data: bytes, words: None, user_id: Optional[str] = None  # NOT IMPLEMENTED

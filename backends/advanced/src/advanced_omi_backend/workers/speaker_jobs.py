@@ -549,15 +549,15 @@ async def recognise_speakers_job(
         # Extract unique identified speakers for metadata
         identified_speakers = set()
         for seg in speaker_segments:
-            identified_as = seg.get("identified_as", "Unknown")
-            if identified_as != "Unknown":
+            identified_as = seg.get("identified_as")
+            if identified_as and identified_as != "Unknown":
                 identified_speakers.add(identified_as)
 
         # Update metadata
         if not transcript_version.metadata:
             transcript_version.metadata = {}
 
-        transcript_version.metadata["speaker_recognition"] = {
+        sr_metadata = {
             "enabled": True,
             "identification_mode": "per_segment" if use_per_segment else "majority_vote",
             "identified_speakers": list(identified_speakers),
@@ -565,6 +565,9 @@ async def recognise_speakers_job(
             "total_segments": len(speaker_segments),
             "processing_time_seconds": time.time() - start_time
         }
+        if speaker_result.get("partial_errors"):
+            sr_metadata["partial_errors"] = speaker_result["partial_errors"]
+        transcript_version.metadata["speaker_recognition"] = sr_metadata
 
         # Set diarization source if pyannote ran (provider didn't do diarization)
         if not provider_has_diarization and transcript_version.diarization_source != "provider":

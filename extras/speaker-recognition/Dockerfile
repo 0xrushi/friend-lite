@@ -27,7 +27,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # ============================================
 # Runtime
 # ============================================
-FROM python:3.12-slim-bookworm AS runtime
+FROM python:3.12-slim-trixie AS runtime
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg libsndfile1 curl \
