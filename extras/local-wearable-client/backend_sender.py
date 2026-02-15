@@ -6,6 +6,7 @@ import logging
 import os
 import ssl
 from typing import AsyncGenerator, Optional
+from urllib.parse import quote
 
 import httpx
 import websockets
@@ -130,7 +131,7 @@ async def stream_to_backend(
         logger.error("Failed to get JWT token, cannot stream audio")
         return
 
-    uri_with_token = f"{websocket_uri}&token={token}&device_name={device_name}"
+    uri_with_token = f"{websocket_uri}&token={token}&device_name={quote(device_name)}"
 
     ssl_context = None
     if USE_HTTPS:

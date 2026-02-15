@@ -85,37 +85,71 @@ def create_connection(mac: str, device_type: str) -> WearableConnection:
     return OmiConnection(mac)
 
 
-async def scan_for_device(config: dict):
-    """Scan BLE and return the first matching known or auto-discovered device.
+async def scan_all_devices(config: dict) -> list[dict]:
+    """Scan BLE and return all matching known or auto-discovered devices.
 
-    Returns a dict with keys: mac, name, type  — or None.
+    Returns a list of dicts with keys: mac, name, type, rssi.
     """
     known = {d["mac"]: d for d in config.get("devices", [])}
     auto_discover = config.get("auto_discover", True)
 
     logger.info("Scanning for wearable devices...")
-    discovered = await BleakScanner.discover(timeout=5.0)
+    discovered = await BleakScanner.discover(timeout=5.0, return_adv=True)
 
-    # Check known devices first
-    for d in discovered:
+    devices = []
+    for d, adv in discovered.values():
         if d.address in known:
             entry = known[d.address]
-            logger.info("Found known device: %s [%s]", entry.get("name", d.name), d.address)
-            return {
+            devices.append({
                 "mac": d.address,
-                "name": entry.get("name", d.name),
+                "name": entry.get("name", d.name or "Unknown"),
                 "type": entry.get("type", detect_device_type(d.name or "")),
-            }
+                "rssi": adv.rssi,
+            })
+        elif auto_discover and d.name:
+            lower = d.name.casefold()
+            if "omi" in lower or "neo" in lower or "friend" in lower:
+                devices.append({
+                    "mac": d.address,
+                    "name": d.name,
+                    "type": detect_device_type(d.name),
+                    "rssi": adv.rssi,
+                })
 
-    # Auto-discover any recognised OMI/Neo device
-    if auto_discover:
-        for d in discovered:
-            if d.name and ("omi" in d.name.casefold() or "neo" in d.name.casefold() or "friend" in d.name.casefold()):
-                dtype = detect_device_type(d.name)
-                logger.info("Auto-discovered %s device: %s [%s]", dtype, d.name, d.address)
-                return {"mac": d.address, "name": d.name, "type": dtype}
+    devices.sort(key=lambda x: x.get("rssi", -999), reverse=True)
+    return devices
 
-    return None
+
+async def scan_for_device(config: dict):
+    """Scan BLE and return the first matching device, or None."""
+    devices = await scan_all_devices(config)
+    return devices[0] if devices else None
+
+
+def prompt_device_selection(devices: list[dict]) -> dict | None:
+    """Show an interactive numbered list and let the user pick a device."""
+    print(f"\nFound {len(devices)} device(s):\n")
+    print(f"  {'#':<4} {'Name':<20} {'MAC':<20} {'Type':<8} {'RSSI'}")
+    print("  " + "-" * 60)
+    for i, d in enumerate(devices, 1):
+        print(f"  {i:<4} {d['name']:<20} {d['mac']:<20} {d['type']:<8} {d.get('rssi', '?')}")
+
+    print()
+    while True:
+        try:
+            choice = input("Select device [1]: ").strip()
+            if not choice:
+                idx = 0
+            else:
+                idx = int(choice) - 1
+            if 0 <= idx < len(devices):
+                return devices[idx]
+            print(f"  Please enter a number between 1 and {len(devices)}")
+        except ValueError:
+            print(f"  Please enter a number between 1 and {len(devices)}")
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return None
 
 
 async def connect_and_stream(device: dict, backend_enabled: bool = True) -> None:
@@ -241,7 +275,7 @@ async def connect_and_stream(device: dict, backend_enabled: bool = True) -> None
             await backend_queue.put(None)
 
 
-async def run() -> None:
+async def run(target_mac: str | None = None) -> None:
     config = load_config()
     scan_interval = config.get("scan_interval", 10)
     backend_enabled = check_config()
@@ -249,14 +283,30 @@ async def run() -> None:
     logger.info("Local wearable client started — scanning for devices...")
 
     while True:
-        device = await scan_for_device(config)
+        devices = await scan_all_devices(config)
+
+        device = None
+        if target_mac:
+            # --device flag: connect to specific MAC
+            device = next((d for d in devices if d["mac"].casefold() == target_mac.casefold()), None)
+            if not device:
+                logger.debug("Target device %s not found, retrying in %ds...", target_mac, scan_interval)
+        elif len(devices) == 1:
+            device = devices[0]
+        elif len(devices) > 1:
+            device = prompt_device_selection(devices)
+            if device is None:
+                logger.info("No device selected, exiting.")
+                return
+
         if device:
             logger.info("Connecting to %s [%s] (type=%s)", device["name"], device["mac"], device["type"])
             await connect_and_stream(device, backend_enabled=backend_enabled)
             logger.info("Device disconnected, resuming scan...")
         else:
             logger.debug("No devices found, retrying in %ds...", scan_interval)
-            await asyncio.sleep(scan_interval)
+
+        await asyncio.sleep(scan_interval)
 
 
 async def scan_and_print() -> None:
@@ -311,7 +361,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command")
 
     sub.add_parser("menu", help="Launch menu bar app (default)")
-    sub.add_parser("run", help="Headless mode — scan, connect, and stream (for launchd)")
+    run_parser = sub.add_parser("run", help="Headless mode — scan, connect, and stream (for launchd)")
+    run_parser.add_argument("--device", metavar="MAC", help="Connect to a specific device by MAC address")
     sub.add_parser("scan", help="One-shot scan — print nearby devices and exit")
     sub.add_parser("install", help="Install macOS launchd agent (auto-start on login)")
     sub.add_parser("uninstall", help="Remove macOS launchd agent")
@@ -327,7 +378,7 @@ def main() -> None:
     command = args.command or "menu"  # Default to menu mode
 
     if command == "run":
-        asyncio.run(run())
+        asyncio.run(run(target_mac=getattr(args, "device", None)))
 
     elif command == "menu":
         from menu_app import run_menu_app
