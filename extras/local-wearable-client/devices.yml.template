@@ -9,3 +9,6 @@ auto_discover: true
 
 # Seconds between scans when no device is connected
 scan_interval: 10
+
+# Last connected device MAC (auto-populated on successful connection)
+# last_connected: "AA:BB:CC:DD:EE:FF"

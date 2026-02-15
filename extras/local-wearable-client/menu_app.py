@@ -17,7 +17,7 @@ from bleak import BleakScanner
 from dotenv import load_dotenv
 
 from backend_sender import stream_to_backend
-from main import check_config, connect_and_stream, create_connection, detect_device_type, load_config
+from main import CONFIG_PATH, check_config, connect_and_stream, create_connection, detect_device_type, load_config
 
 logger = logging.getLogger(__name__)
 
@@ -90,9 +90,29 @@ class BLEManager:
         self.config = load_config()
         self.backend_enabled = check_config()
         self._scan_interval = self.config.get("scan_interval", 10)
-        self._target_mac: Optional[str] = None  # MAC to auto-connect to
         self._disconnect_event: Optional[asyncio.Event] = None
         self._running_task: Optional[asyncio.Task] = None
+
+        # Restore last connected device for auto-connect
+        last = self.config.get("last_connected")
+        self._target_mac: Optional[str] = last if last else None
+        if self._target_mac:
+            logger.info("Will auto-connect to last device: %s", self._target_mac)
+
+    def _save_last_connected(self, mac: Optional[str]) -> None:
+        """Persist (or clear) the last connected device MAC in devices.yml."""
+        try:
+            with open(CONFIG_PATH) as f:
+                data = yaml.safe_load(f) or {}
+            if mac:
+                data["last_connected"] = str(mac)
+            else:
+                data.pop("last_connected", None)
+            with open(CONFIG_PATH, "w") as f:
+                yaml.dump(data, f, default_flow_style=False)
+            logger.info("Saved last_connected: %s", mac)
+        except Exception as e:
+            logger.error("Failed to save last_connected: %s", e)
 
     def start_scanning(self) -> None:
         """Begin the scan-connect loop."""
@@ -172,6 +192,7 @@ class BLEManager:
         self._disconnect_event = asyncio.Event()
         try:
             self.state.update(status="connected", connected_device=device)
+            self._save_last_connected(device["mac"])
             await connect_and_stream(device, backend_enabled=self.backend_enabled)
         except Exception as e:
             logger.error("Connection error: %s", e, exc_info=True)
@@ -200,6 +221,7 @@ class BLEManager:
     def request_disconnect(self) -> None:
         """Request disconnection (called from UI thread)."""
         self._target_mac = None
+        self._save_last_connected(None)
         # The connection will end when the BLE device is no longer reachable,
         # or we could cancel the running task. For now, clearing target_mac
         # prevents auto-reconnect.
@@ -335,6 +357,11 @@ class WearableMenuApp(rumps.App):
 
 def run_menu_app() -> None:
     """Launch the menu bar app with background BLE thread."""
+    # Register as accessory app so macOS allows menu bar icons
+    # (non-bundled Python processes default to no-UI policy on Sequoia)
+    from AppKit import NSApplication
+    NSApplication.sharedApplication().setActivationPolicy_(1)  # Accessory
+
     logging.basicConfig(
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
         level=logging.INFO,

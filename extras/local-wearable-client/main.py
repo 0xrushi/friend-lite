@@ -16,6 +16,7 @@ import argparse
 import asyncio
 import logging
 import os
+import shutil
 from typing import Any
 
 import yaml
@@ -37,6 +38,7 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "devices.yml")
+CONFIG_TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), "devices.yml.template")
 ENV_PATH = os.path.join(os.path.dirname(__file__), ".env")
 
 
@@ -64,6 +66,9 @@ def check_config() -> bool:
 
 
 def load_config() -> dict:
+    if not os.path.exists(CONFIG_PATH) and os.path.exists(CONFIG_TEMPLATE_PATH):
+        shutil.copy2(CONFIG_TEMPLATE_PATH, CONFIG_PATH)
+        logger.info("Created devices.yml from template")
     if os.path.exists(CONFIG_PATH):
         with open(CONFIG_PATH) as f:
             return yaml.safe_load(f) or {}
@@ -316,17 +321,17 @@ async def scan_and_print() -> None:
     auto_discover = config.get("auto_discover", True)
 
     print("Scanning for BLE wearable devices (5s)...\n")
-    discovered = await BleakScanner.discover(timeout=5.0)
+    discovered = await BleakScanner.discover(timeout=5.0, return_adv=True)
 
     devices = []
-    for d in discovered:
+    for d, adv in discovered.values():
         if d.address in known:
             entry = known[d.address]
             devices.append({
                 "mac": d.address,
                 "name": entry.get("name", d.name or "Unknown"),
                 "type": entry.get("type", detect_device_type(d.name or "")),
-                "rssi": d.rssi,
+                "rssi": adv.rssi,
                 "known": True,
             })
         elif auto_discover and d.name:
@@ -336,7 +341,7 @@ async def scan_and_print() -> None:
                     "mac": d.address,
                     "name": d.name,
                     "type": detect_device_type(d.name),
-                    "rssi": d.rssi,
+                    "rssi": adv.rssi,
                     "known": False,
                 })
 
