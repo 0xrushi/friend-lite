@@ -11,14 +11,18 @@ memory action proposals using their respective APIs.
 import asyncio
 import json
 import logging
-import os
+from datetime import datetime
 from typing import Any, Dict, List, Optional
+
+from advanced_omi_backend.model_registry import ModelDef, get_models_registry
+from advanced_omi_backend.openai_factory import create_openai_client
+from advanced_omi_backend.prompt_registry import get_prompt_registry
 
 from ..base import LLMProviderBase
 from ..prompts import (
-    FACT_RETRIEVAL_PROMPT,
+    REPROCESS_SPEAKER_UPDATE_PROMPT,
+    build_reprocess_speaker_messages,
     build_update_memory_messages,
-    get_update_memory_messages,
 )
 from ..update_memory_utils import (
     extract_assistant_xml_from_openai_response,
@@ -33,18 +37,6 @@ from ..utils import extract_json_from_text
 
 memory_logger = logging.getLogger("memory_service")
 
-# New: config-driven model registry + universal client
-from advanced_omi_backend.model_registry import ModelDef, get_models_registry
-
-
-def _is_langfuse_enabled() -> bool:
-    """Check if Langfuse is properly configured."""
-    return bool(
-        os.getenv("LANGFUSE_PUBLIC_KEY")
-        and os.getenv("LANGFUSE_SECRET_KEY")
-        and os.getenv("LANGFUSE_HOST")
-    )
-
 
 def _get_openai_client(api_key: str, base_url: str, is_async: bool = False):
     """Get OpenAI client with optional Langfuse tracing.
@@ -57,20 +49,7 @@ def _get_openai_client(api_key: str, base_url: str, is_async: bool = False):
     Returns:
         OpenAI client instance (with or without Langfuse tracing)
     """
-    if _is_langfuse_enabled():
-        # Use Langfuse-wrapped OpenAI for tracing
-        import langfuse.openai as openai
-        memory_logger.debug("Using OpenAI client with Langfuse tracing")
-    else:
-        # Use regular OpenAI client without tracing
-        from openai import AsyncOpenAI, OpenAI
-        openai = type('OpenAI', (), {'OpenAI': OpenAI, 'AsyncOpenAI': AsyncOpenAI})()
-        memory_logger.debug("Using OpenAI client without tracing")
-
-    if is_async:
-        return openai.AsyncOpenAI(api_key=api_key, base_url=base_url)
-    else:
-        return openai.OpenAI(api_key=api_key, base_url=base_url)
+    return create_openai_client(api_key=api_key, base_url=base_url, is_async=is_async)
 
 
 async def generate_openai_embeddings(
@@ -216,8 +195,15 @@ class OpenAIProvider(LLMProviderBase):
             List of extracted memory strings
         """
         try:
-            # Use the provided prompt or fall back to default
-            system_prompt = prompt if prompt.strip() else FACT_RETRIEVAL_PROMPT
+            # Use the provided prompt or fall back to registry default
+            if prompt and prompt.strip():
+                system_prompt = prompt
+            else:
+                registry = get_prompt_registry()
+                system_prompt = await registry.get_prompt(
+                    "memory.fact_retrieval",
+                    current_date=datetime.now().strftime("%Y-%m-%d"),
+                )
             
             # local models can only handle small chunks of input text
             text_chunks = chunk_text_with_spacy(text)
@@ -368,6 +354,97 @@ class OpenAIProvider(LLMProviderBase):
 
         except Exception as e:
             memory_logger.error(f"OpenAI propose_memory_actions failed: {e}")
+            return {}
+
+
+    async def propose_reprocess_actions(
+        self,
+        existing_memories: List[Dict[str, str]],
+        diff_context: str,
+        new_transcript: str,
+        custom_prompt: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Propose memory updates after speaker re-identification.
+
+        Sends the existing conversation memories, the speaker change diff,
+        and the corrected transcript to the LLM. Returns JSON with
+        ADD/UPDATE/DELETE/NONE actions.
+
+        The system prompt is resolved in priority order:
+        1. ``custom_prompt`` argument (if provided)
+        2. Langfuse override via the prompt registry
+           (prompt id ``memory.reprocess_speaker_update``)
+        3. Registered default from ``prompt_defaults.py``
+
+        Args:
+            existing_memories: List of {id, text} dicts for this conversation
+            diff_context: Formatted string of speaker changes
+            new_transcript: Full updated transcript with corrected speakers
+            custom_prompt: Optional custom system prompt
+
+        Returns:
+            Dictionary with ``memory`` key containing action list
+        """
+        try:
+            # Resolve prompt: explicit arg → Langfuse/registry → hardcoded fallback
+            if custom_prompt and custom_prompt.strip():
+                system_prompt = custom_prompt
+            else:
+                try:
+                    registry = get_prompt_registry()
+                    system_prompt = await registry.get_prompt(
+                        "memory.reprocess_speaker_update"
+                    )
+                except Exception as e:
+                    memory_logger.debug(
+                        f"Registry prompt fetch failed for "
+                        f"memory.reprocess_speaker_update: {e}, "
+                        f"using hardcoded fallback"
+                    )
+                    system_prompt = REPROCESS_SPEAKER_UPDATE_PROMPT
+
+            user_content = build_reprocess_speaker_messages(
+                existing_memories, diff_context, new_transcript
+            )
+
+            messages = [
+                {"role": "system", "content": system_prompt.strip()},
+                {"role": "user", "content": user_content},
+            ]
+
+            memory_logger.info(
+                f"🔄 Reprocess: asking LLM with {len(existing_memories)} existing memories "
+                f"and speaker diff"
+            )
+            memory_logger.debug(
+                f"🔄 Reprocess user content (first 300 chars): {user_content[:300]}..."
+            )
+
+            client = _get_openai_client(
+                api_key=self.api_key, base_url=self.base_url, is_async=True
+            )
+            response = await client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+                response_format={"type": "json_object"},
+            )
+            content = (response.choices[0].message.content or "").strip()
+
+            if not content:
+                memory_logger.warning("Reprocess LLM returned empty content")
+                return {}
+
+            result = json.loads(content)
+            memory_logger.info(f"🔄 Reprocess LLM returned: {result}")
+            return result
+
+        except json.JSONDecodeError as e:
+            memory_logger.error(f"Reprocess LLM returned invalid JSON: {e}")
+            return {}
+        except Exception as e:
+            memory_logger.error(f"propose_reprocess_actions failed: {e}")
             return {}
 
 

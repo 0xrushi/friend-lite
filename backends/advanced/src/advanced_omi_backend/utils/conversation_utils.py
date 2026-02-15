@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional
 
 from advanced_omi_backend.config import get_speech_detection_settings
 from advanced_omi_backend.llm_client import async_generate
+from advanced_omi_backend.prompt_registry import get_prompt_registry
 
 logger = logging.getLogger(__name__)
 
@@ -158,71 +159,20 @@ def analyze_speech(transcript_data: dict) -> dict:
     }
 
 
-async def generate_title(text: str, segments: Optional[list] = None) -> str:
+async def generate_title_and_summary(
+    text: str, segments: Optional[list] = None
+) -> tuple[str, str]:
     """
-    Generate an LLM-powered title from conversation text.
+    Generate title and short summary in a single LLM call using full conversation context.
 
     Args:
         text: Conversation transcript (used if segments not provided)
         segments: Optional list of speaker segments with structure:
             [{"speaker": str, "text": str, "start": float, "end": float}, ...]
-            If provided, uses speaker-aware conversation formatting
+            If provided, uses speaker-formatted text for richer context
 
     Returns:
-        str: Generated title (3-6 words) or fallback
-
-    Note:
-        Title intentionally does NOT include speaker names - focuses on topic/theme only.
-    """
-    # Format conversation text from segments if provided
-    if segments:
-        conversation_text = ""
-        for segment in segments[:10]:  # Use first 10 segments for title generation
-            segment_text = segment.text.strip() if segment.text else ""
-            if segment_text:
-                conversation_text += f"{segment_text}\n"
-        text = conversation_text if conversation_text.strip() else text
-
-    if not text or len(text.strip()) < 10:
-        return "Conversation"
-
-    try:
-        prompt = f"""Generate a concise, descriptive title (3-6 words) for this conversation transcript:
-
-"{text[:500]}"
-
-Rules:
-- Maximum 6 words
-- Capture the main topic or theme
-- Do NOT include speaker names or participants
-- No quotes or special characters
-- Examples: "Planning Weekend Trip", "Work Project Discussion", "Medical Appointment"
-
-Title:"""
-
-        title = await async_generate(prompt, temperature=0.3)
-        return title.strip().strip('"').strip("'") or "Conversation"
-
-    except Exception as e:
-        logger.warning(f"Failed to generate LLM title: {e}")
-        # Fallback to simple title generation
-        words = text.split()[:6]
-        title = " ".join(words)
-        return title[:40] + "..." if len(title) > 40 else title or "Conversation"
-
-
-async def generate_short_summary(text: str, segments: Optional[list] = None) -> str:
-    """
-    Generate a brief LLM-powered summary from conversation text.
-
-    Args:
-        text: Conversation transcript (used if segments not provided)
-        segments: Optional list of speaker segments with structure:
-            [{"speaker": str, "text": str, "start": float, "end": float}, ...]
-            If provided, includes speaker context in summary
-
-    Returns:
-        str: Generated short summary (1-2 sentences, max 120 chars) or fallback
+        Tuple of (title, short_summary)
     """
     # Format conversation text from segments if provided
     conversation_text = text
@@ -246,39 +196,52 @@ async def generate_short_summary(text: str, segments: Optional[list] = None) -> 
             include_speakers = len(speakers_in_conv) > 0
 
     if not conversation_text or len(conversation_text.strip()) < 10:
-        return "No content"
+        return "Conversation", "No content"
 
     try:
         speaker_instruction = (
-            '- Include speaker names when relevant (e.g., "John discusses X with Sarah")\n'
+            '- Include speaker names when relevant in the summary (e.g., "John discusses X with Sarah")\n'
             if include_speakers
             else ""
         )
 
-        prompt = f"""Generate a brief, informative summary (1-2 sentences, max 120 characters) for this conversation:
+        registry = get_prompt_registry()
+        prompt_text = await registry.get_prompt(
+            "conversation.title_summary",
+            speaker_instruction=speaker_instruction,
+        )
 
-"{conversation_text[:1000]}"
+        prompt = f"""{prompt_text}
 
-Rules:
-- Maximum 120 characters
-- 1-2 complete sentences
-{speaker_instruction}- Capture key topics and outcomes
-- Use present tense
-- Be specific and informative
+TRANSCRIPT:
+"{conversation_text}"
+"""
 
-Summary:"""
+        response = await async_generate(prompt, temperature=0.3)
 
-        summary = await async_generate(prompt, temperature=0.3)
-        return summary.strip().strip('"').strip("'") or "No content"
+        # Parse response for Title: and Summary: lines
+        title = None
+        summary = None
+        for line in response.strip().split("\n"):
+            line = line.strip()
+            if line.startswith("Title:"):
+                title = line.replace("Title:", "").strip().strip('"').strip("'")
+            elif line.startswith("Summary:"):
+                summary = line.replace("Summary:", "").strip().strip('"').strip("'")
+
+        title = title or "Conversation"
+        summary = summary or "No content"
+
+        return title, summary
 
     except Exception as e:
-        logger.warning(f"Failed to generate LLM short summary: {e}")
-        # Fallback to simple summary generation
-        return (
-            conversation_text[:120] + "..."
-            if len(conversation_text) > 120
-            else conversation_text or "No content"
-        )
+        logger.warning(f"Failed to generate title and summary: {e}")
+        # Fallback
+        words = text.split()[:6]
+        fallback_title = " ".join(words)
+        fallback_title = fallback_title[:40] + "..." if len(fallback_title) > 40 else fallback_title
+        fallback_summary = text[:120] + "..." if len(text) > 120 else text
+        return fallback_title or "Conversation", fallback_summary or "No content"
 
 
 
@@ -348,29 +311,18 @@ async def generate_detailed_summary(
 
 """
 
-        prompt = f"""Generate a comprehensive, detailed summary of this conversation transcript.
+        registry = get_prompt_registry()
+        prompt_text = await registry.get_prompt(
+            "conversation.detailed_summary",
+            speaker_instruction=speaker_instruction,
+            memory_section=memory_section,
+        )
 
-{memory_section}TRANSCRIPT:
+        prompt = f"""{prompt_text}
+
+TRANSCRIPT:
 "{conversation_text}"
-
-INSTRUCTIONS:
-Your task is to create a high-quality, detailed summary of a conversation transcription that captures the full information and context of what was discussed. This is NOT a brief summary - provide comprehensive coverage.
-
-Rules:
-- We know it's a conversation, so no need to say "This conversation involved..."
-- Provide complete coverage of all topics, points, and important details discussed
-- Correct obvious transcription errors and remove filler words (um, uh, like, you know)
-- Organize information logically by topic or chronologically as appropriate
-- Use clear, well-structured paragraphs or bullet points, but make the length relative to the amound of content.
-- Maintain the meaning and intent of what was said, but improve clarity and coherence
-- Include relevant context, decisions made, action items mentioned, and conclusions reached
-{speaker_instruction}- Write in a natural, flowing narrative style
-- Only include word-for-word quotes if it's more efficiency than rephrasing
-- Focus on substantive content - what was actually discussed and decided
-
-Think of this as creating a high-quality information set that someone could use to understand everything important that happened in this conversation without reading the full transcript.
-
-DETAILED SUMMARY:"""
+"""
 
         summary = await async_generate(prompt, temperature=0.3)
         return summary.strip().strip('"').strip("'") or "No meaningful content to summarize"

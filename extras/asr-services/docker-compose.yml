@@ -97,6 +97,7 @@ services:
       - ./model_cache:/models
       - ./debug:/app/debug
       - ./results:/app/results
+      - ../../config:/app/config:ro
     deploy:
       resources:
         reservations:
@@ -112,6 +113,9 @@ services:
       - DEVICE=${DEVICE:-cuda}
       - TORCH_DTYPE=${TORCH_DTYPE:-bfloat16}
       - MAX_NEW_TOKENS=${MAX_NEW_TOKENS:-8192}
+      # Quantization: "4bit", "8bit", or "" (none). 4bit recommended for <=24GB VRAM.
+      - QUANTIZATION=${QUANTIZATION:-4bit}
+      # Batching config: managed via config/defaults.yml (asr_services.vibevoice)
     restart: unless-stopped
 
   # ============================================================================

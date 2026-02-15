@@ -6,10 +6,15 @@ This module contains the prompts used by the LLM providers for:
 3. Answering questions from memory (MEMORY_ANSWER_PROMPT)
 4. Procedural memory for task tracking (PROCEDURAL_MEMORY_SYSTEM_PROMPT)
 5. Temporal and entity extraction (get_temporal_entity_extraction_prompt())
+
+NOTE: The canonical default text for each prompt is registered in
+``prompt_defaults.py``.  The constants below are kept for backward
+compatibility in callers that do not yet use the registry.
 """
 
 import json
 from datetime import datetime, timedelta
+from string import Template
 from typing import List, Optional
 
 from pydantic import BaseModel, Field
@@ -190,6 +195,80 @@ Following is a conversation between the user and the assistant. You have to extr
 You should detect the language of the user input and record the facts in the same language.
 
 """
+
+
+REPROCESS_SPEAKER_UPDATE_PROMPT = """
+You are a memory correction system. A conversation's transcript has been reprocessed with \
+updated speaker identification. The words spoken are the same, but speakers have been \
+re-identified more accurately. Your job is to update the existing memories so they \
+correctly attribute information to the right people.
+
+## Rules
+
+1. **UPDATE** — If a memory attributes information to a speaker whose label changed, \
+rewrite it with the correct speaker name. Keep the same `id`.
+2. **NONE** — If the memory is unaffected by the speaker changes, leave it unchanged.
+3. **DELETE** — If a memory is now nonsensical or completely wrong because the speaker \
+was misidentified (e.g., personal traits wrongly attributed), remove it.
+4. **ADD** — If the corrected transcript reveals important new facts that become clear \
+only with the correct speaker attribution, add them.
+
+## Important guidelines
+
+- Focus on **speaker attribution corrections**. This is the primary reason for reprocessing.
+- A change from "Speaker 0" to "John" means memories referencing "Speaker 0" must now \
+reference "John".
+- A change from "Alice" to "Bob" means facts previously attributed to "Alice" must be \
+attributed to "Bob" instead — this is critical because it changes *who* said or did something.
+- Preserve the factual content when only the speaker name changes.
+- Do NOT add memories that duplicate existing ones.
+- When you UPDATE, always include `old_memory` with the previous text.
+
+## Output format (strict JSON only)
+
+Return ONLY a valid JSON object with this structure:
+
+{
+    "memory": [
+        {
+            "id": "<existing_id or new_N for additions>",
+            "event": "UPDATE|NONE|DELETE|ADD",
+            "text": "<corrected or new memory text>",
+            "old_memory": "<previous memory text, only for UPDATE>"
+        }
+    ]
+}
+
+Do not output any text outside the JSON object.
+"""
+
+
+def build_reprocess_speaker_messages(
+    existing_memories: list,
+    diff_context: str,
+    new_transcript: str,
+) -> str:
+    """Build the user message for the reprocess-after-speaker-change LLM call.
+
+    Args:
+        existing_memories: List of dicts with ``id`` and ``text`` keys
+        diff_context: Formatted string of speaker changes
+        new_transcript: Full updated transcript with corrected speakers
+
+    Returns:
+        Formatted user message string
+    """
+    memories_json = json.dumps(existing_memories, ensure_ascii=False)
+
+    return (
+        "## Existing Memories for This Conversation\n"
+        f"{memories_json}\n\n"
+        "## Speaker Changes in Transcript\n"
+        f"{diff_context}\n\n"
+        "## Updated Full Transcript (with corrected speakers)\n"
+        f"{new_transcript}\n\n"
+        "Output:"
+    )
 
 
 PROCEDURAL_MEMORY_SYSTEM_PROMPT = """
