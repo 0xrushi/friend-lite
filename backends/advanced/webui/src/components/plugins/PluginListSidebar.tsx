@@ -1,5 +1,3 @@
-import { CheckCircle, Circle, AlertTriangle } from 'lucide-react'
-
 interface Plugin {
   plugin_id: string
   name: string
@@ -8,12 +6,19 @@ interface Plugin {
   status: 'active' | 'disabled' | 'error'
 }
 
+interface ConnectivityResult {
+  ok: boolean
+  message: string
+  latency_ms?: number
+}
+
 interface PluginListSidebarProps {
   plugins: Plugin[]
   selectedPluginId: string | null
   onSelectPlugin: (pluginId: string) => void
   onToggleEnabled: (pluginId: string, enabled: boolean) => void
   loading?: boolean
+  connectivity?: Record<string, ConnectivityResult>
 }
 
 export default function PluginListSidebar({
@@ -21,25 +26,51 @@ export default function PluginListSidebar({
   selectedPluginId,
   onSelectPlugin,
   onToggleEnabled,
-  loading = false
+  loading = false,
+  connectivity = {}
 }: PluginListSidebarProps) {
-  const getStatusIcon = (status: string, enabled: boolean) => {
-    if (!enabled) {
-      return <Circle className="h-4 w-4 text-gray-400" />
+  const getStatusDot = (plugin: Plugin) => {
+    if (!plugin.enabled) {
+      return (
+        <span title="Disabled" className="relative flex h-3 w-3">
+          <span className="h-3 w-3 rounded-full bg-gray-400" />
+        </span>
+      )
     }
 
-    switch (status) {
-      case 'active':
-        return <CheckCircle className="h-4 w-4 text-green-500" />
-      case 'error':
-        return <AlertTriangle className="h-4 w-4 text-red-500" />
-      default:
-        return <Circle className="h-4 w-4 text-gray-400" />
+    const conn = connectivity[plugin.plugin_id]
+
+    if (!conn) {
+      // No connectivity data yet — gray dot
+      return (
+        <span title="Checking..." className="relative flex h-3 w-3">
+          <span className="h-3 w-3 rounded-full bg-gray-400" />
+        </span>
+      )
     }
+
+    if (conn.ok) {
+      const tooltip = conn.latency_ms != null
+        ? `Connected (${conn.latency_ms}ms)`
+        : conn.message
+      return (
+        <span title={tooltip} className="relative flex h-3 w-3">
+          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
+          <span className="relative inline-flex rounded-full h-3 w-3 bg-green-500" />
+        </span>
+      )
+    }
+
+    // Not ok
+    return (
+      <span title={conn.message} className="relative flex h-3 w-3">
+        <span className="h-3 w-3 rounded-full bg-red-500" />
+      </span>
+    )
   }
 
-  const getStatusBadge = (status: string, enabled: boolean) => {
-    if (!enabled) {
+  const getStatusBadge = (plugin: Plugin) => {
+    if (!plugin.enabled) {
       return (
         <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400">
           Disabled
@@ -47,7 +78,26 @@ export default function PluginListSidebar({
       )
     }
 
-    switch (status) {
+    const conn = connectivity[plugin.plugin_id]
+    if (conn?.ok) {
+      const label = conn.latency_ms != null ? `Active (${conn.latency_ms}ms)` : 'Active'
+      return (
+        <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300">
+          {label}
+        </span>
+      )
+    }
+
+    if (conn && !conn.ok) {
+      return (
+        <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 dark:bg-red-900 text-red-700 dark:text-red-300">
+          Error
+        </span>
+      )
+    }
+
+    // Fallback to status-based badge
+    switch (plugin.status) {
       case 'active':
         return (
           <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300">
@@ -110,8 +160,8 @@ export default function PluginListSidebar({
           >
             {/* Plugin Header */}
             <div className="flex items-start justify-between mb-2">
-              <div className="flex items-start space-x-2 flex-1">
-                {getStatusIcon(plugin.status, plugin.enabled)}
+              <div className="flex items-center space-x-2 flex-1">
+                {getStatusDot(plugin)}
                 <div className="flex-1 min-w-0">
                   <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">
                     {plugin.name}
@@ -127,7 +177,7 @@ export default function PluginListSidebar({
 
             {/* Plugin Status and Toggle */}
             <div className="flex items-center justify-between">
-              {getStatusBadge(plugin.status, plugin.enabled)}
+              {getStatusBadge(plugin)}
 
               <label
                 className="flex items-center space-x-2 cursor-pointer"

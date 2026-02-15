@@ -257,6 +257,30 @@ class HAMCPClient:
             logger.warning(f"Unexpected areas format: {type(areas)}")
             return []
 
+    async def fetch_labels(self) -> List[str]:
+        """Fetch all labels from Home Assistant using Template API."""
+        template = "{{ labels() | to_json }}"
+        labels = await self._render_template(template)
+
+        if isinstance(labels, list):
+            logger.info(f"Fetched {len(labels)} labels from Home Assistant")
+            return labels
+        else:
+            logger.warning(f"Unexpected labels format: {type(labels)}")
+            return []
+
+    async def fetch_label_areas(self, label: str) -> List[str]:
+        """Fetch all area IDs that have a given label."""
+        template = f"{{{{ label_areas('{label}') | to_json }}}}"
+        areas = await self._render_template(template)
+
+        if isinstance(areas, list):
+            logger.info(f"Label '{label}' maps to {len(areas)} areas: {areas}")
+            return areas
+        else:
+            logger.warning(f"Unexpected label_areas format for '{label}': {type(areas)}")
+            return []
+
     async def fetch_area_entities(self, area_name: str) -> List[str]:
         """
         Fetch all entity IDs in a specific area.

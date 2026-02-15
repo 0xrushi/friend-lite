@@ -359,6 +359,24 @@ async def get_plugins_health(current_user: User = Depends(current_superuser)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/admin/plugins/connectivity")
+async def get_plugins_connectivity(current_user: User = Depends(current_superuser)):
+    """Live connectivity check for all initialized plugins. Admin only.
+
+    Runs each plugin's health_check() with a 10s timeout and returns results.
+    """
+    try:
+        from advanced_omi_backend.services.plugin_service import get_plugin_router
+        plugin_router = get_plugin_router()
+        if not plugin_router:
+            return {"plugins": {}}
+        results = await plugin_router.check_connectivity()
+        return {"plugins": results}
+    except Exception as e:
+        logger.error(f"Failed to check plugin connectivity: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/admin/plugins/metadata")
 async def get_plugins_metadata(current_user: User = Depends(current_superuser)):
     """Get plugin metadata for form-based configuration UI. Admin only.

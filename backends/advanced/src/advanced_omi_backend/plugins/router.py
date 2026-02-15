@@ -4,6 +4,7 @@ Plugin routing system for multi-level plugin architecture.
 Routes pipeline events to appropriate plugins based on access level and triggers.
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -222,7 +223,7 @@ class PluginRouter:
 
             # Check execution condition (wake_word, etc.)
             logger.info(f"   → Checking execution condition for '{plugin_id}'")
-            condition = await self._should_execute(plugin, data)
+            condition = await self._should_execute(plugin, data, event=event)
             if not condition.execute:
                 logger.info(f"   ⊘ Skipping '{plugin_id}': condition not met")
                 continue
@@ -284,16 +285,23 @@ class PluginRouter:
     _SKIP = ConditionResult(execute=False)
     _PASS = ConditionResult(execute=True)
 
-    async def _should_execute(self, plugin: BasePlugin, data: Dict) -> ConditionResult:
+    async def _should_execute(self, plugin: BasePlugin, data: Dict, event: Optional[str] = None) -> ConditionResult:
         """Check if plugin should be executed based on condition configuration.
 
         Returns a ConditionResult. The ``extra`` dict contains per-plugin data
         (e.g. wake word command extraction) that gets merged into a copy of data
         for the plugin's PluginContext — never mutating the shared data dict.
+
+        Button events bypass transcript-based conditions (wake_word) since they
+        have no transcript to match against.
         """
         condition_type = plugin.condition.get('type', 'always')
 
         if condition_type == 'always':
+            return self._PASS
+
+        # Button events bypass transcript-based conditions
+        if event and event in (PluginEvent.BUTTON_SINGLE_PRESS, PluginEvent.BUTTON_DOUBLE_PRESS):
             return self._PASS
 
         elif condition_type == 'wake_word':
@@ -408,6 +416,30 @@ class PluginRouter:
         except Exception:
             logger.debug("Failed to read events from Redis", exc_info=True)
             return []
+
+    async def check_connectivity(self) -> Dict[str, Dict[str, Any]]:
+        """Run health_check() on all initialized plugins with a 10s timeout each.
+
+        Returns:
+            Dict mapping plugin_id to health check result dict.
+        """
+        results: Dict[str, Dict[str, Any]] = {}
+
+        for plugin_id, plugin in self.plugins.items():
+            health = self.plugin_health.get(plugin_id)
+            if not health or health.status != PluginHealth.INITIALIZED:
+                results[plugin_id] = {"ok": False, "message": "Not initialized"}
+                continue
+
+            try:
+                result = await asyncio.wait_for(plugin.health_check(), timeout=10.0)
+                results[plugin_id] = result
+            except asyncio.TimeoutError:
+                results[plugin_id] = {"ok": False, "message": "Health check timed out (10s)"}
+            except Exception as e:
+                results[plugin_id] = {"ok": False, "message": f"Health check error: {e}"}
+
+        return results
 
     async def cleanup_all(self):
         """Clean up all registered plugins"""

@@ -92,6 +92,16 @@ class BasePlugin(ABC):
         """
         pass
 
+    async def health_check(self) -> Dict[str, Any]:
+        """
+        Live connectivity check using initialized clients.
+
+        Override in plugins that connect to external services.
+        Returns dict with at least 'ok' (bool) and 'message' (str).
+        Optionally includes 'latency_ms' (int).
+        """
+        return {"ok": True, "message": "No external service to check"}
+
     # Access-level specific methods (implement only what you need)
 
     async def on_transcript(self, context: PluginContext) -> Optional[PluginResult]:

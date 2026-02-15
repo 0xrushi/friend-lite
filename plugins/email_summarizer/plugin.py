@@ -115,6 +115,23 @@ class EmailSummarizerPlugin(BasePlugin):
 
         logger.info("✅ Email Summarizer plugin initialized successfully")
 
+    async def health_check(self) -> dict:
+        """Test SMTP connectivity using the initialized email service."""
+        import time
+
+        if not self.email_service:
+            return {"ok": False, "message": "Email service not initialized"}
+
+        try:
+            start = time.time()
+            success = await self.email_service.test_connection()
+            latency_ms = int((time.time() - start) * 1000)
+            if success:
+                return {"ok": True, "message": "SMTP connected", "latency_ms": latency_ms}
+            return {"ok": False, "message": "SMTP connection failed", "latency_ms": latency_ms}
+        except Exception as e:
+            return {"ok": False, "message": str(e)}
+
     async def cleanup(self):
         """Clean up plugin resources."""
         logger.info("Email Summarizer plugin cleanup complete")

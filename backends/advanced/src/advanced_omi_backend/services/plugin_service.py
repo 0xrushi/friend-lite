@@ -539,12 +539,15 @@ def get_plugin_metadata(
             env_var_schema["value"] = resolved or ""
 
     # Determine runtime health status from the live router
+    # Map internal statuses to frontend-expected values:
+    #   initialized → active, failed → error, registered → disabled
+    _STATUS_MAP = {"initialized": "active", "failed": "error", "registered": "disabled"}
     health_status = "unknown"
     health_error = None
     router = get_plugin_router()
     if router and plugin_id in router.plugin_health:
         h = router.plugin_health[plugin_id]
-        health_status = h.status
+        health_status = _STATUS_MAP.get(h.status, h.status)
         health_error = h.error
     elif not orchestration_config.get("enabled", False):
         health_status = "disabled"

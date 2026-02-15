@@ -54,6 +54,7 @@ export default function PluginSettingsForm({ className }: PluginSettingsFormProp
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const [testResult, setTestResult] = useState<any>(null)
+  const [connectivity, setConnectivity] = useState<Record<string, any>>({})
 
   const selectedPlugin = plugins.find((p) => p.plugin_id === selectedPluginId)
 
@@ -84,6 +85,11 @@ export default function PluginSettingsForm({ className }: PluginSettingsFormProp
 
       setMessage('Plugins loaded successfully')
       setTimeout(() => setMessage(''), 3000)
+
+      // Fetch live connectivity in background (non-blocking)
+      systemApi.getPluginsConnectivity()
+        .then((res) => setConnectivity(res.data.plugins || {}))
+        .catch(() => {}) // Silently ignore — dots stay gray
     } catch (err: any) {
       const status = err.response?.status
       if (status === 401) {
@@ -296,6 +302,7 @@ export default function PluginSettingsForm({ className }: PluginSettingsFormProp
               onSelectPlugin={handlePluginSelect}
               onToggleEnabled={handleToggleEnabled}
               loading={loading}
+              connectivity={connectivity}
             />
           </div>
 

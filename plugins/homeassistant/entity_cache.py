@@ -25,6 +25,9 @@ class EntityCache:
     entity_details: Dict[str, Dict] = field(default_factory=dict)
     """Full entity state data keyed by entity_id"""
 
+    label_areas: Dict[str, List[str]] = field(default_factory=dict)
+    """Map of label names to area names (e.g., {"hall": ["dining_room", "living_room"]})"""
+
     last_refresh: datetime = field(default_factory=datetime.now)
     """Timestamp of last cache refresh"""
 
@@ -94,12 +97,26 @@ class EntityCache:
                 matching_area = area_name
                 break
 
-        if not matching_area:
-            logger.warning(f"Area not found: {area}")
-            return []
+        if matching_area:
+            entities = self.area_entities.get(matching_area, [])
+        else:
+            # Fallback: check if it's a label that maps to multiple areas
+            matching_label = None
+            for label_name in self.label_areas:
+                if label_name.lower() == area_lower:
+                    matching_label = label_name
+                    break
 
-        # Get entities in area
-        entities = self.area_entities.get(matching_area, [])
+            if not matching_label:
+                logger.warning(f"Area not found: {area}")
+                return []
+
+            # Resolve label → areas → entities
+            real_areas = self.label_areas[matching_label]
+            logger.info(f"Resolved label '{area}' → areas {real_areas}")
+            entities = []
+            for real_area in real_areas:
+                entities.extend(self.area_entities.get(real_area, []))
 
         # Filter by entity type if specified
         if entity_type:
@@ -110,7 +127,7 @@ class EntityCache:
             ]
 
         logger.debug(
-            f"Found {len(entities)} entities in area '{matching_area}'"
+            f"Found {len(entities)} entities in area '{area}'"
             + (f" (type: {entity_type})" if entity_type else "")
         )
 

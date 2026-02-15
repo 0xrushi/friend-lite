@@ -28,7 +28,7 @@ class HomeAssistantPlugin(BasePlugin):
         -> Returns: PluginResult with "I've turned off the hall light"
     """
 
-    SUPPORTED_ACCESS_LEVELS: List[str] = ["transcript"]
+    SUPPORTED_ACCESS_LEVELS: List[str] = ["transcript", "button"]
 
     name = "Home Assistant"
     description = "Wake word device control with Home Assistant integration"
@@ -59,7 +59,8 @@ class HomeAssistantPlugin(BasePlugin):
         self.ha_url = config.get("ha_url", "http://localhost:8123")
         self.ha_token = config.get("ha_token", "")
         self.wake_word = config.get("wake_word", "vivi")
-        self.timeout = config.get("timeout", 30)
+        self.timeout = int(config.get("timeout", 30))
+        self.button_actions = config.get("button_actions", {})
 
     def register_prompts(self, registry) -> None:
         """Register Home Assistant prompts with the prompt registry."""
@@ -331,6 +332,108 @@ class HomeAssistantPlugin(BasePlugin):
             logger.error(f"Plugin action failed: {e}", exc_info=True)
             return PluginResult(success=False, message=f"Action failed: {e}")
 
+    async def on_button_event(self, context: PluginContext) -> Optional[PluginResult]:
+        """Handle button events using configured button_actions mappings.
+
+        Maps button event types (single_press, double_press) to HA service calls
+        using the button_actions config. Reuses the same entity resolution and
+        service call logic as on_plugin_action().
+        """
+        from .command_parser import ParsedCommand
+        from advanced_omi_backend.plugins.events import PluginEvent
+
+        # Map event to config key
+        if context.event == PluginEvent.BUTTON_DOUBLE_PRESS:
+            action_key = "double_press"
+        elif context.event == PluginEvent.BUTTON_SINGLE_PRESS:
+            action_key = "single_press"
+        else:
+            return None
+
+        action_config = self.button_actions.get(action_key)
+        if not action_config:
+            logger.debug(f"No button_actions config for '{action_key}'")
+            return None
+
+        if not self.mcp_client:
+            logger.error("MCP client not initialized for button event")
+            return PluginResult(
+                success=False,
+                message="Home Assistant is not connected",
+            )
+
+        try:
+            service = action_config.get("service", "toggle")
+            target_type = action_config.get("target_type", "area")
+            target = action_config.get("target", "")
+            entity_type = action_config.get("entity_type", "light")
+
+            if not target:
+                return PluginResult(success=False, message="No target in button_actions config")
+
+            parsed = ParsedCommand(
+                action=service,
+                target_type=target_type,
+                target=target,
+                entity_type=entity_type,
+                parameters={},
+            )
+
+            entity_ids = await self._resolve_entities(parsed)
+            domain = entity_ids[0].split(".")[0] if entity_ids else entity_type
+
+            logger.info(
+                f"Button {action_key}: {domain}.{service} for {len(entity_ids)} entities: {entity_ids}"
+            )
+            result = await self.mcp_client.call_service(
+                domain=domain, service=service, entity_ids=entity_ids
+            )
+
+            message = (
+                f"Button {action_key}: {domain}.{service} on {len(entity_ids)} "
+                f"{entity_type}{'s' if len(entity_ids) != 1 else ''} in {target}"
+            )
+            logger.info(f"Button action executed: {message}")
+
+            return PluginResult(
+                success=True,
+                data={
+                    "action": service,
+                    "entity_ids": entity_ids,
+                    "trigger": action_key,
+                    "ha_result": result,
+                },
+                message=message,
+                should_continue=True,
+            )
+
+        except ValueError as e:
+            logger.warning(f"Entity resolution failed for button action: {e}")
+            return PluginResult(success=False, message=str(e))
+        except MCPError as e:
+            logger.error(f"HA API error during button action: {e}")
+            return PluginResult(success=False, message=f"Home Assistant error: {e}")
+        except Exception as e:
+            logger.error(f"Button action failed: {e}", exc_info=True)
+            return PluginResult(success=False, message=f"Button action failed: {e}")
+
+    async def health_check(self) -> dict:
+        """Ping Home Assistant API using the initialized client."""
+        import time
+
+        if not self.mcp_client:
+            return {"ok": False, "message": "MCP client not initialized"}
+
+        try:
+            start = time.time()
+            result = await self.mcp_client._render_template("{{ 1 + 1 }}")
+            latency_ms = int((time.time() - start) * 1000)
+            if str(result).strip() == "2":
+                return {"ok": True, "message": "Connected", "latency_ms": latency_ms}
+            return {"ok": False, "message": f"Unexpected result: {result}", "latency_ms": latency_ms}
+        except Exception as e:
+            return {"ok": False, "message": str(e)}
+
     async def cleanup(self):
         """Clean up resources"""
         if self.mcp_client:
@@ -371,6 +474,19 @@ class HomeAssistantPlugin(BasePlugin):
                 area_entities[area] = entities
                 logger.debug(f"Area '{area}': {len(entities)} entities")
 
+            # Fetch labels and build label → areas mapping
+            label_areas_map = {}
+            try:
+                labels = await self.mcp_client.fetch_labels()
+                for label in labels:
+                    label_area_list = await self.mcp_client.fetch_label_areas(label)
+                    if label_area_list:
+                        label_areas_map[label] = label_area_list
+                if label_areas_map:
+                    logger.info(f"Label→area mappings: {label_areas_map}")
+            except Exception as e:
+                logger.warning(f"Failed to fetch labels (non-fatal): {e}")
+
             # Fetch all entity states
             entity_details = await self.mcp_client.fetch_entity_states()
             logger.debug(f"Fetched {len(entity_details)} entity states")
@@ -381,6 +497,7 @@ class HomeAssistantPlugin(BasePlugin):
             self.entity_cache = EntityCache(
                 areas=areas,
                 area_entities=area_entities,
+                label_areas=label_areas_map,
                 entity_details=entity_details,
                 last_refresh=datetime.now(),
             )
@@ -515,9 +632,10 @@ class HomeAssistantPlugin(BasePlugin):
 
             if not entities:
                 entity_desc = f"{parsed.entity_type}s" if parsed.entity_type else "entities"
+                available = list(self.entity_cache.areas) + list(self.entity_cache.label_areas.keys())
                 raise ValueError(
-                    f"No {entity_desc} found in area '{parsed.target}'. "
-                    f"Available areas: {', '.join(self.entity_cache.areas)}"
+                    f"No {entity_desc} found in area/label '{parsed.target}'. "
+                    f"Available: {', '.join(available)}"
                 )
 
             logger.info(

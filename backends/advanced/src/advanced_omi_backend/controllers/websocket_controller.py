@@ -1359,6 +1359,13 @@ async def handle_omi_websocket(
                 packet_count = 0
                 total_bytes = 0
 
+            elif header["type"] == "button-event":
+                button_data = header.get("data", {})
+                button_state = button_data.get("state", "unknown")
+                await _handle_button_event(
+                    client_state, button_state, user.user_id, client_id
+                )
+
             else:
                 # Unknown event type
                 application_logger.debug(
