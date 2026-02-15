@@ -525,67 +525,9 @@ async def transcribe_full_audio_job(
     if diarization_source:
         new_version.diarization_source = diarization_source
 
-    # Generate title and summary from transcript using LLM
-    if transcript_text and len(transcript_text.strip()) > 0:
-        try:
-            from advanced_omi_backend.llm_client import async_generate
-            from advanced_omi_backend.prompt_registry import get_prompt_registry
-
-            # Prepare prompt for LLM
-            registry = get_prompt_registry()
-            prompt_template = await registry.get_prompt("transcription.title_summary")
-            prompt = f"""{prompt_template}
-
-Transcript:
-{transcript_text[:2000]}"""
-
-            logger.info(f"🤖 Generating title/summary using LLM for conversation {conversation_id}")
-            llm_response = await async_generate(prompt, operation="title_summary")
-
-            # Parse LLM response
-            lines = llm_response.strip().split("\n")
-            title = None
-            summary = None
-
-            for line in lines:
-                if line.startswith("Title:"):
-                    title = line.replace("Title:", "").strip()
-                elif line.startswith("Summary:"):
-                    summary = line.replace("Summary:", "").strip()
-
-            # Use LLM-generated title/summary if valid, otherwise fallback
-            if title and len(title) > 0:
-                conversation.title = title[:50] + "..." if len(title) > 50 else title
-            else:
-                # Fallback to first sentence if LLM didn't provide title
-                first_sentence = transcript_text.split(".")[0].strip()
-                conversation.title = (
-                    first_sentence[:50] + "..." if len(first_sentence) > 50 else first_sentence
-                )
-
-            if summary and len(summary) > 0:
-                conversation.summary = summary[:150] + "..." if len(summary) > 150 else summary
-            else:
-                # Fallback to truncated transcript if LLM didn't provide summary
-                conversation.summary = (
-                    transcript_text[:150] + "..." if len(transcript_text) > 150 else transcript_text
-                )
-
-            logger.info(
-                f"✅ Generated title: '{conversation.title}', summary: '{conversation.summary}'"
-            )
-
-        except Exception as llm_error:
-            logger.warning(f"⚠️ LLM title/summary generation failed: {llm_error}")
-            # Fallback to simple truncation
-            first_sentence = transcript_text.split(".")[0].strip()
-            conversation.title = (
-                first_sentence[:50] + "..." if len(first_sentence) > 50 else first_sentence
-            )
-            conversation.summary = (
-                transcript_text[:150] + "..." if len(transcript_text) > 150 else transcript_text
-            )
-    else:
+    # Title/summary left as placeholder — generate_title_summary_job handles this
+    # after speaker recognition populates segments with identified names.
+    if not transcript_text or len(transcript_text.strip()) == 0:
         conversation.title = "Empty Conversation"
         conversation.summary = "No speech detected"
 

@@ -608,22 +608,6 @@ When creating plugins, generate complete plugin.py code based on the user's desc
     )
 
     # ------------------------------------------------------------------
-    # transcription.title_summary
-    # ------------------------------------------------------------------
-    registry.register_default(
-        "transcription.title_summary",
-        template="""\
-Based on this conversation transcript, generate a concise title and summary.
-
-Respond in this exact format:
-Title: <concise title under 50 characters>
-Summary: <brief summary under 150 characters>""",
-        name="Transcription Title & Summary",
-        description="Generates title and summary during transcription pipeline processing.",
-        category="transcription",
-    )
-
-    # ------------------------------------------------------------------
     # prompt_optimization.title_optimizer
     # ------------------------------------------------------------------
     registry.register_default(

@@ -8,9 +8,9 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from advanced_omi_backend.models.conversation import Conversation
+from advanced_omi_backend.plugins.base import BasePlugin, PluginContext, PluginResult
 from advanced_omi_backend.utils.logging_utils import mask_dict
 
-from advanced_omi_backend.plugins.base import BasePlugin, PluginContext, PluginResult
 from .email_service import SMTPEmailService
 from .templates import format_html_email, format_text_email
 
@@ -19,11 +19,16 @@ logger = logging.getLogger(__name__)
 
 class EmailSummarizerPlugin(BasePlugin):
     """
-    Plugin for sending email summaries after memory extraction.
+    Plugin for sending email summaries after conversation processing completes.
 
-    Subscribes to memory.processed events and:
-    1. Fetches conversation from DB (title, summary, transcript are ready by this point)
-    2. Retrieves user email from event data or database
+    Subscribes to conversation.complete events (which fire after all processing
+    jobs finish: speaker recognition, memory extraction, and title/summary
+    generation). This ensures the email contains the final title, summary with
+    speaker names, and detailed summary.
+
+    Flow:
+    1. Fetches conversation from DB (all fields are finalized by this point)
+    2. Retrieves user email from SMTP config
     3. Formats HTML and plain text emails
     4. Sends email via SMTP
     """
@@ -114,26 +119,26 @@ class EmailSummarizerPlugin(BasePlugin):
         """Clean up plugin resources."""
         logger.info("Email Summarizer plugin cleanup complete")
 
-    async def on_memory_processed(self, context: PluginContext) -> Optional[PluginResult]:
+    async def on_conversation_complete(self, context: PluginContext) -> Optional[PluginResult]:
         """
-        Send email summary after memory extraction completes.
+        Send email summary after all conversation processing completes.
 
-        By this point the conversation has its title, summary, and transcript
-        already generated in the DB, so no extra LLM call is needed.
+        This fires after speaker recognition, memory extraction, and title/summary
+        generation have all finished, so the conversation has its final title,
+        summary (with speaker names), and detailed summary.
 
         Args:
-            context: Plugin context with memory event data
+            context: Plugin context with conversation.complete event data
                 - conversation_id: str
-                - conversation: dict with conversation_id, user_id, user_email
-                - memories: list of memory IDs
-                - memory_count: int
+                - conversation: dict with client_id, user_id
+                - transcript: str
+                - duration: float
         """
         try:
             conversation_id = context.data.get('conversation_id', 'unknown')
-            memory_count = context.data.get('memory_count', 0)
             logger.info(
-                f"Processing memory.processed event for user: {context.user_id}, "
-                f"conversation: {conversation_id}, memories: {memory_count}"
+                f"Processing conversation.complete event for user: {context.user_id}, "
+                f"conversation: {conversation_id}"
             )
 
             # Fetch full conversation via Beanie model (has title, summary, transcript by now)
@@ -202,7 +207,6 @@ class EmailSummarizerPlugin(BasePlugin):
                         'recipient': user_email,
                         'conversation_id': conversation_id,
                         'title': title,
-                        'memory_count': memory_count,
                     },
                 )
             else:
@@ -210,7 +214,7 @@ class EmailSummarizerPlugin(BasePlugin):
                 return PluginResult(success=False, message=f"Failed to send email to {user_email}")
 
         except Exception as e:
-            logger.error(f"Error in email summarizer (memory.processed): {e}", exc_info=True)
+            logger.error(f"Error in email summarizer (conversation.complete): {e}", exc_info=True)
             return PluginResult(success=False, message=f"Error: {str(e)}")
 
     def _format_subject(self, created_at: Optional[datetime] = None) -> str:
