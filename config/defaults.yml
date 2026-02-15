@@ -245,11 +245,6 @@ memory:
     user_id: default
     timeout: 30
 
-  # Mycelia provider settings (used when provider: mycelia)
-  mycelia:
-    api_url: http://localhost:5173
-    timeout: 30
-
   # Obsidian Neo4j provider settings (legacy)
   obsidian:
     enabled: false
@@ -303,6 +298,41 @@ chat:
     Provide clear, concise, and accurate responses based on the context available to you.
 
 # ===========================
+# LLM Operation Configuration
+# ===========================
+# Per-operation LLM parameters. Each key is an operation name.
+# 'model' references a named entry in the models list above.
+# If 'model' is omitted, the operation uses defaults.llm.
+# Parameters (temperature, max_tokens, response_format) override
+# the model's model_params for that operation only.
+llm_operations:
+  memory_extraction:
+    temperature: 0.1
+    max_tokens: 2000
+    response_format: json
+  memory_update:
+    temperature: 0.1
+    max_tokens: 2000
+  memory_reprocess:
+    temperature: 0.1
+    max_tokens: 2000
+    response_format: json
+  title_summary:
+    temperature: 0.3
+  detailed_summary:
+    temperature: 0.3
+  entity_extraction:
+    temperature: 0.1
+    max_tokens: 2000
+    response_format: json
+  chat:
+    temperature: 0.7
+  prompt_optimization:
+    temperature: 0.3
+    max_tokens: 4000
+  plugin_assistant: {}
+
+# ===========================
 # Backend Configuration
 # ===========================
 backend:
@@ -335,6 +365,8 @@ backend:
     # When true: Use segments from transcription provider (e.g., mock provider in tests)
     # When false: Expect speaker service to create segments via diarization (default production behavior)
     use_provider_segments: false
+    # Transcription job timeout in seconds (default 15 min; increase for slow local STT)
+    job_timeout_seconds: 900
 
   # Diarization settings
   diarization:
@@ -366,3 +398,24 @@ backend:
   audio_storage:
     audio_base_path: /app/data
     audio_chunks_path: /app/data/audio_chunks
+
+# ===========================
+# Cron Jobs Configuration
+# ===========================
+cron_jobs:
+  speaker_finetuning:
+    description: "Process speaker diarization annotations and send to speaker recognition service for training"
+    enabled: false
+    schedule: "0 2 * * *"
+  asr_jargon_extraction:
+    description: "Extract jargon from recent memories and cache for ASR context boosting"
+    enabled: false
+    schedule: "*/30 * * * *"
+  asr_finetuning:
+    description: "Export annotated conversations to VibeVoice for ASR LoRA fine-tuning"
+    enabled: false
+    schedule: "0 3 * * 0"
+  prompt_optimization:
+    description: "Analyze user annotations and optimize LLM prompts"
+    enabled: false
+    schedule: "0 4 * * 0"

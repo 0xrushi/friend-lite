@@ -1,18 +1,8 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { Zap, RefreshCw, AlertCircle, AlertTriangle, CheckCircle, Clock, Play, ToggleLeft, ToggleRight, Edit3, X, Check } from 'lucide-react'
 import cronstrue from 'cronstrue'
 import { finetuningApi } from '../services/api'
-
-interface CronJob {
-  job_id: string
-  enabled: boolean
-  schedule: string
-  description: string
-  last_run: string | null
-  next_run: string | null
-  running: boolean
-  last_error: string | null
-}
+import { useFinetuningStatus, useCronJobs, useToggleCronJob, useUpdateCronSchedule, useRunCronJob, useProcessAnnotations, useDeleteOrphanedAnnotations } from '../hooks/useFinetuning'
 
 interface AnnotationTypeCounts {
   total: number
@@ -20,21 +10,6 @@ interface AnnotationTypeCounts {
   applied: number
   trained: number
   orphaned: number
-}
-
-interface FinetuningStatus {
-  pending_annotation_count: number
-  applied_annotation_count: number
-  trained_annotation_count: number
-  last_training_run: string | null
-  cron_status: {
-    enabled: boolean
-    schedule: string
-    last_run: string | null
-    next_run: string | null
-  }
-  annotation_counts?: Record<string, AnnotationTypeCounts>
-  orphaned_annotation_count?: number
 }
 
 function humanCron(expr: string): string {
@@ -55,12 +30,19 @@ const JOB_DISPLAY_NAMES: Record<string, string> = {
   asr_jargon_extraction: 'ASR Jargon Extraction',
 }
 
-const ANNOTATION_TYPE_CONFIG = [
-  { key: 'diarization', label: 'Diarization', description: 'Speaker identification corrections', color: 'green' as const },
-  { key: 'entity', label: 'Entity', description: 'Knowledge graph entity corrections', color: 'green' as const },
-  { key: 'transcript', label: 'Transcript', description: 'Transcript text corrections', color: 'green' as const },
-  { key: 'memory', label: 'Memory', description: 'Memory content corrections', color: 'green' as const },
-]
+const ANNOTATION_TYPE_DISPLAY: Record<string, { label: string; description: string }> = {
+  diarization: { label: 'Diarization', description: 'Speaker identification corrections' },
+  entity: { label: 'Entity', description: 'Knowledge graph entity corrections' },
+  transcript: { label: 'Transcript', description: 'Transcript text corrections' },
+  memory: { label: 'Memory', description: 'Memory content corrections' },
+  title: { label: 'Title', description: 'Conversation title corrections' },
+}
+
+function getAnnotationDisplay(key: string): { label: string; description: string } {
+  if (ANNOTATION_TYPE_DISPLAY[key]) return ANNOTATION_TYPE_DISPLAY[key]
+  const label = key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+  return { label, description: `${label} annotations` }
+}
 
 const COLOR_CLASSES = {
   blue: 'text-blue-600 dark:text-blue-400',
@@ -86,10 +68,12 @@ function StatCard({ label, value, color, subtitle }: {
 }
 
 export default function Finetuning() {
-  const [status, setStatus] = useState<FinetuningStatus | null>(null)
-  const [cronJobs, setCronJobs] = useState<CronJob[]>([])
-  const [loading, setLoading] = useState(true)
-  const [processing, setProcessing] = useState(false)
+  const { data: status = null, isLoading: statusLoading, error: statusError, refetch: refetchStatus } = useFinetuningStatus()
+  const { data: cronJobs = [], isLoading: cronLoading, error: cronError, refetch: refetchCron } = useCronJobs()
+
+  const loading = statusLoading || cronLoading
+  const queryError = statusError?.message || cronError?.message || null
+
   const [error, setError] = useState<string | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const [runningJobId, setRunningJobId] = useState<string | null>(null)
@@ -98,34 +82,24 @@ export default function Finetuning() {
   const [editingSchedule, setEditingSchedule] = useState<string | null>(null)
   const [scheduleInput, setScheduleInput] = useState('')
 
-  useEffect(() => {
-    loadAll()
-  }, [])
+  const toggleJob = useToggleCronJob()
+  const updateSchedule = useUpdateCronSchedule()
+  const runJob = useRunCronJob()
+  const processAnnotations = useProcessAnnotations()
+  const deleteOrphaned = useDeleteOrphanedAnnotations()
 
-  const loadAll = async () => {
-    try {
-      setLoading(true)
-      const [statusRes, cronRes] = await Promise.all([
-        finetuningApi.getStatus(),
-        finetuningApi.getCronJobs(),
-      ])
-      setStatus(statusRes.data)
-      setCronJobs(cronRes.data)
-      setError(null)
-    } catch (err: any) {
-      setError(err.message || 'Failed to load data')
-    } finally {
-      setLoading(false)
-    }
+  const loadAll = () => {
+    refetchStatus()
+    refetchCron()
   }
+
+  const displayError = queryError || error
 
   const handleProcessAnnotations = async () => {
     try {
-      setProcessing(true)
       setError(null)
       setSuccessMessage(null)
-      const response = await finetuningApi.processAnnotations('diarization')
-      const data = response.data
+      const data = await processAnnotations.mutateAsync('diarization')
       const totalProcessed = data.total_processed ?? 0
       const failedCount = data.failed_count ?? 0
 
@@ -139,11 +113,8 @@ export default function Finetuning() {
       } else {
         setSuccessMessage(`Successfully processed ${totalProcessed} annotations for training`)
       }
-      await loadAll()
     } catch (err: any) {
       setError(err.response?.data?.detail || err.message || 'Failed to process annotations')
-    } finally {
-      setProcessing(false)
     }
   }
 
@@ -152,14 +123,12 @@ export default function Finetuning() {
       setCleaningType(annotationType)
       setError(null)
       setSuccessMessage(null)
-      const response = await finetuningApi.deleteOrphanedAnnotations(annotationType)
-      const data = response.data
+      const data = await deleteOrphaned.mutateAsync(annotationType)
       if (data.deleted_count > 0) {
         setSuccessMessage(`Cleaned up ${data.deleted_count} orphaned ${annotationType} annotations`)
       } else {
         setSuccessMessage('No orphaned annotations found')
       }
-      await loadAll()
       setShowOrphanPanel(false)
     } catch (err: any) {
       setError(err.response?.data?.detail || err.message || 'Failed to clean orphaned annotations')
@@ -180,8 +149,7 @@ export default function Finetuning() {
   const handleToggleJob = async (jobId: string, currentEnabled: boolean) => {
     try {
       setError(null)
-      await finetuningApi.updateCronJob(jobId, { enabled: !currentEnabled })
-      await loadAll()
+      await toggleJob.mutateAsync({ jobId, enabled: !currentEnabled })
     } catch (err: any) {
       setError(err.response?.data?.detail || err.message || 'Failed to update job')
     }
@@ -192,14 +160,12 @@ export default function Finetuning() {
       setRunningJobId(jobId)
       setError(null)
       setSuccessMessage(null)
-      const result = await finetuningApi.runCronJob(jobId)
-      const data = result.data
+      const data = await runJob.mutateAsync(jobId)
       const jobName = JOB_DISPLAY_NAMES[jobId] || jobId
 
       if (data.error) {
         setError(`Job '${jobName}' failed: ${data.error}`)
       } else if (data.processed === 0 && data.message) {
-        // Job ran but had nothing to do — show as warning, not success
         setError(`${jobName}: ${data.message}`)
       } else if (data.processed !== undefined) {
         const parts: string[] = []
@@ -211,7 +177,6 @@ export default function Finetuning() {
       } else {
         setSuccessMessage(`Job '${jobName}' completed successfully`)
       }
-      await loadAll()
     } catch (err: any) {
       setError(err.response?.data?.detail || err.message || 'Failed to run job')
     } finally {
@@ -227,9 +192,8 @@ export default function Finetuning() {
   const handleSaveSchedule = async (jobId: string) => {
     try {
       setError(null)
-      await finetuningApi.updateCronJob(jobId, { schedule: scheduleInput })
+      await updateSchedule.mutateAsync({ jobId, schedule: scheduleInput })
       setEditingSchedule(null)
-      await loadAll()
     } catch (err: any) {
       setError(err.response?.data?.detail || err.message || 'Invalid cron expression')
     }
@@ -262,10 +226,10 @@ export default function Finetuning() {
       </div>
 
       {/* Error/Success Messages */}
-      {error && (
+      {displayError && (
         <div className="mb-4 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 rounded-lg flex items-start space-x-2">
           <AlertCircle className="h-5 w-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
-          <span className="text-red-700 dark:text-red-300">{error}</span>
+          <span className="text-red-700 dark:text-red-300">{displayError}</span>
         </div>
       )}
 
@@ -377,7 +341,7 @@ export default function Finetuning() {
 
       {/* Annotation Statistics — All Types */}
       {(() => {
-        const totalOrphaned = Object.values(status?.annotation_counts || {})
+        const totalOrphaned = Object.values((status?.annotation_counts || {}) as Record<string, AnnotationTypeCounts>)
           .reduce((sum, c) => sum + (c.orphaned || 0), 0)
 
         return (
@@ -402,9 +366,10 @@ export default function Finetuning() {
                   These annotations reference conversations that no longer exist.
                 </p>
                 <div className="space-y-2">
-                  {ANNOTATION_TYPE_CONFIG.map(({ key, label }) => {
-                    const orphaned = status?.annotation_counts?.[key]?.orphaned || 0
+                  {Object.entries((status?.annotation_counts || {}) as Record<string, AnnotationTypeCounts>).map(([key, counts]) => {
+                    const orphaned = counts.orphaned || 0
                     if (orphaned === 0) return null
+                    const { label } = getAnnotationDisplay(key)
                     return (
                       <div key={key} className="flex items-center justify-between">
                         <span className="text-sm text-gray-700 dark:text-gray-300">
@@ -437,9 +402,8 @@ export default function Finetuning() {
       })()}
       {status?.annotation_counts && (
         <div className="space-y-6 mb-6">
-          {ANNOTATION_TYPE_CONFIG.map(({ key, label, description, color }) => {
-            const counts = status.annotation_counts![key]
-            if (!counts) return null
+          {Object.entries(status.annotation_counts! as Record<string, AnnotationTypeCounts>).map(([key, counts]) => {
+            const { label, description } = getAnnotationDisplay(key)
             return (
               <div key={key}>
                 <div className="flex items-center space-x-2 mb-2">
@@ -450,7 +414,7 @@ export default function Finetuning() {
                   <StatCard label="Total" value={counts.total} />
                   <StatCard label="Pending" value={counts.pending} subtitle="Not yet applied" />
                   <StatCard label="Applied" value={counts.applied} color="blue" subtitle="Applied, not trained" />
-                  <StatCard label="Trained" value={counts.trained} color={color} subtitle="Sent to model" />
+                  <StatCard label="Trained" value={counts.trained} color="green" subtitle="Sent to model" />
                 </div>
               </div>
             )
@@ -475,10 +439,10 @@ export default function Finetuning() {
         </p>
         <button
           onClick={handleProcessAnnotations}
-          disabled={processing || (status?.applied_annotation_count || 0) === 0}
+          disabled={processAnnotations.isPending || (status?.applied_annotation_count || 0) === 0}
           className="flex items-center space-x-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
         >
-          {processing ? (
+          {processAnnotations.isPending ? (
             <>
               <RefreshCw className="h-5 w-5 animate-spin" />
               <span>Processing...</span>

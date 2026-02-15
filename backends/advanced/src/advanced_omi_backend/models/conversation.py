@@ -24,7 +24,6 @@ class Conversation(Document):
         """Supported memory providers."""
         CHRONICLE = "chronicle"
         OPENMEMORY_MCP = "openmemory_mcp"
-        MYCELIA = "mycelia"
         FRIEND_LITE = "friend_lite"  # Legacy value
 
     class ConversationStatus(str, Enum):
@@ -51,12 +50,22 @@ class Conversation(Document):
         end: float = Field(description="End time in seconds")
         confidence: Optional[float] = Field(None, description="Confidence score (0-1)")
 
+    class SegmentType(str, Enum):
+        """Type of transcript segment."""
+        SPEECH = "speech"
+        EVENT = "event"    # Non-speech: [laughter], [music], etc.
+        NOTE = "note"      # User-inserted annotation/tag
+
     class SpeakerSegment(BaseModel):
         """Individual speaker segment in a transcript."""
         start: float = Field(description="Start time in seconds")
         end: float = Field(description="End time in seconds")
         text: str = Field(description="Transcript text for this segment")
         speaker: str = Field(description="Speaker identifier")
+        segment_type: str = Field(
+            default="speech",
+            description="Type: speech, event (non-speech from ASR), or note (user-inserted)"
+        )
         identified_as: Optional[str] = Field(None, description="Speaker name from speaker recognition (None if not identified)")
         confidence: Optional[float] = Field(None, description="Confidence score (0-1)")
         words: List["Conversation.Word"] = Field(default_factory=list, description="Word-level timestamps for this segment")
@@ -385,7 +394,13 @@ class Conversation(Document):
             "user_id",
             "created_at",
             [("user_id", 1), ("deleted", 1), ("created_at", -1)],  # Compound index for paginated list queries
-            IndexModel([("external_source_id", 1)], sparse=True)  # Sparse index for deduplication
+            IndexModel([("external_source_id", 1)], sparse=True),  # Sparse index for deduplication
+            IndexModel(
+                [("title", "text"), ("summary", "text"), ("detailed_summary", "text"),
+                 ("transcript_versions.transcript", "text")],
+                weights={"title": 10, "summary": 5, "detailed_summary": 3, "transcript_versions.transcript": 1},
+                name="conversation_text_search",
+            ),
         ]
 
 

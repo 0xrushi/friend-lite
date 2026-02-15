@@ -41,6 +41,18 @@ async def get_conversations(
     return await conversation_controller.get_conversations(current_user, include_deleted, include_unprocessed, limit, offset)
 
 
+
+@router.get("/search")
+async def search_conversations(
+    q: str = Query(..., min_length=1, description="Text search query"),
+    limit: int = Query(50, ge=1, le=200, description="Max results to return"),
+    offset: int = Query(0, ge=0, description="Number of results to skip"),
+    current_user: User = Depends(current_active_user),
+):
+    """Full-text search across conversation titles, summaries, and transcripts."""
+    return await conversation_controller.search_conversations(q, current_user, limit, offset)
+
+
 @router.get("/{conversation_id}")
 async def get_conversation_detail(
     conversation_id: str,
@@ -48,6 +60,18 @@ async def get_conversation_detail(
 ):
     """Get a specific conversation with full transcript details."""
     return await conversation_controller.get_conversation(conversation_id, current_user)
+
+
+@router.get("/{conversation_id}/memories")
+async def get_conversation_memories(
+    conversation_id: str,
+    limit: int = Query(100, ge=1, le=500, description="Max memories to return"),
+    current_user: User = Depends(current_active_user),
+):
+    """Get memories extracted from a specific conversation."""
+    return await conversation_controller.get_conversation_memories(
+        conversation_id, current_user, limit
+    )
 
 
 # New reprocessing endpoints

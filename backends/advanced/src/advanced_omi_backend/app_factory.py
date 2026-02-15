@@ -130,14 +130,6 @@ async def lifespan(app: FastAPI):
         application_logger.error(f"Failed to create admin user: {e}")
         # Don't raise here as this is not critical for startup
 
-    # Sync admin user with Mycelia OAuth (if using Mycelia memory provider)
-    try:
-        from advanced_omi_backend.services.mycelia_sync import sync_admin_on_startup
-        await sync_admin_on_startup()
-    except Exception as e:
-        application_logger.error(f"Failed to sync admin with Mycelia OAuth: {e}")
-        # Don't raise here as this is not critical for startup
-
     # Initialize Redis connection for RQ
     try:
         from advanced_omi_backend.controllers.queue_controller import redis_conn
@@ -225,12 +217,18 @@ async def lifespan(app: FastAPI):
     try:
         from advanced_omi_backend.cron_scheduler import get_scheduler, register_cron_job
         from advanced_omi_backend.workers.finetuning_jobs import (
+            run_asr_finetuning_job,
             run_asr_jargon_extraction_job,
             run_speaker_finetuning_job,
         )
+        from advanced_omi_backend.workers.prompt_optimization_jobs import (
+            run_prompt_optimization_job,
+        )
 
         register_cron_job("speaker_finetuning", run_speaker_finetuning_job)
+        register_cron_job("asr_finetuning", run_asr_finetuning_job)
         register_cron_job("asr_jargon_extraction", run_asr_jargon_extraction_job)
+        register_cron_job("prompt_optimization", run_prompt_optimization_job)
 
         scheduler = get_scheduler()
         await scheduler.start()
@@ -256,11 +254,17 @@ async def lifespan(app: FastAPI):
                 if plugin.enabled:
                     try:
                         await plugin.initialize()
+                        plugin_router.mark_plugin_initialized(plugin_id)
                         application_logger.info(f"✅ Plugin '{plugin_id}' initialized")
                     except Exception as e:
+                        plugin_router.mark_plugin_failed(plugin_id, str(e))
                         application_logger.error(f"Failed to initialize plugin '{plugin_id}': {e}", exc_info=True)
 
-            application_logger.info(f"Plugins initialized: {len(plugin_router.plugins)} active")
+            health = plugin_router.get_health_summary()
+            application_logger.info(
+                f"Plugins initialized: {health['initialized']}/{health['total']} active"
+                + (f", {health['failed']} failed" if health['failed'] else "")
+            )
 
             # Store in app state for API access
             app.state.plugin_router = plugin_router

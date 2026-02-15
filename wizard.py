@@ -139,6 +139,7 @@ def select_services(transcription_provider=None):
         if service_name in auto_added:
             provider_label = {"vibevoice": "VibeVoice", "parakeet": "Parakeet"}.get(transcription_provider, transcription_provider)
             console.print(f"  ✅ {service_config['description']} ({provider_label}) [dim](auto-selected)[/dim]")
+            continue
 
         # LangFuse is handled separately via setup_langfuse_choice()
         if service_name == 'langfuse':

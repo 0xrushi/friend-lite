@@ -76,7 +76,7 @@ class MemoryServiceBase(ABC):
     @property
     @abstractmethod
     def provider_identifier(self) -> str:
-        """Return the provider identifier (e.g., 'chronicle', 'openmemory_mcp', 'mycelia')."""
+        """Return the provider identifier (e.g., 'chronicle', 'openmemory_mcp')."""
         ...
 
     @abstractmethod
@@ -205,6 +205,25 @@ class MemoryServiceBase(ABC):
         """
         return False
 
+    async def get_memories_by_source(
+        self, user_id: str, source_id: str, limit: int = 100
+    ) -> List[MemoryEntry]:
+        """Get all memories extracted from a specific source (conversation).
+
+        This is an optional method that providers can implement for fetching
+        memories linked to a particular conversation/source. Returns empty list
+        by default.
+
+        Args:
+            user_id: User identifier
+            source_id: Source/conversation identifier
+            limit: Maximum number of memories to return
+
+        Returns:
+            List of MemoryEntry objects for the specified source
+        """
+        return []
+
     async def reprocess_memory(
         self,
         transcript: str,
@@ -252,8 +271,8 @@ class MemoryServiceBase(ABC):
 
         Args:
             memory_id: Unique identifier of the memory to delete
-            user_id: Optional user ID for authentication (required for Mycelia provider)
-            user_email: Optional user email for authentication (required for Mycelia provider)
+            user_id: Optional user ID for authentication
+            user_email: Optional user email for authentication
 
         Returns:
             True if successfully deleted, False otherwise
@@ -321,12 +340,15 @@ class LLMProviderBase(ABC):
     """
 
     @abstractmethod
-    async def extract_memories(self, text: str, prompt: str) -> List[str]:
+    async def extract_memories(
+        self, text: str, prompt: str, user_id: Optional[str] = None,
+    ) -> List[str]:
         """Extract meaningful fact memories from text using an LLM.
 
         Args:
             text: Input text to extract memories from
             prompt: System prompt to guide the extraction process
+            user_id: Optional user ID for per-user prompt override resolution
 
         Returns:
             List of extracted fact memory strings

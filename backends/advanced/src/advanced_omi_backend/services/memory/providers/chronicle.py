@@ -154,7 +154,9 @@ class MemoryService(MemoryServiceBase):
             fact_memories_text = []
             if self.config.extraction_enabled and self.config.extraction_prompt:
                 fact_memories_text = await asyncio.wait_for(
-                    self.llm_provider.extract_memories(transcript, self.config.extraction_prompt),
+                    self.llm_provider.extract_memories(
+                        transcript, self.config.extraction_prompt, user_id=user_id,
+                    ),
                     timeout=self.config.timeout_seconds,
                 )
                 memory_logger.info(
@@ -312,6 +314,23 @@ class MemoryService(MemoryServiceBase):
         except Exception as e:
             memory_logger.error(f"Count memories failed: {e}")
             return None
+
+    async def get_memories_by_source(
+        self, user_id: str, source_id: str, limit: int = 100
+    ) -> List[MemoryEntry]:
+        """Get all memories extracted from a specific source (conversation)."""
+        if not self._initialized:
+            await self.initialize()
+
+        try:
+            memories = await self.vector_store.get_memories_by_source(user_id, source_id, limit)
+            memory_logger.info(
+                f"📚 Retrieved {len(memories)} memories for source {source_id} (user {user_id})"
+            )
+            return memories
+        except Exception as e:
+            memory_logger.error(f"Get memories by source failed: {e}")
+            return []
 
     async def get_memory(
         self, memory_id: str, user_id: Optional[str] = None
