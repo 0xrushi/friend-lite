@@ -11,6 +11,7 @@ LABEL = "com.chronicle.wearable-client"
 PLIST_PATH = Path.home() / "Library" / "LaunchAgents" / f"{LABEL}.plist"
 LOG_DIR = Path.home() / "Library" / "Logs" / "Chronicle"
 LOG_FILE = LOG_DIR / "wearable-client.log"
+APP_BUNDLE = Path.home() / "Applications" / "Chronicle Wearable.app"
 
 PROJECT_DIR = Path(__file__).resolve().parent
 
@@ -46,6 +47,39 @@ def _opus_dyld_path() -> str:
     except (subprocess.CalledProcessError, FileNotFoundError):
         pass
     return ""
+
+
+def _create_app_bundle() -> None:
+    """Create a minimal .app bundle so Spotlight/Raycast can find it."""
+    contents = APP_BUNDLE / "Contents"
+    macos = contents / "MacOS"
+    macos.mkdir(parents=True, exist_ok=True)
+
+    # Info.plist
+    info = {
+        "CFBundleName": "Chronicle Wearable",
+        "CFBundleIdentifier": LABEL,
+        "CFBundleVersion": "1.0",
+        "CFBundleExecutable": "launcher",
+        "LSUIElement": True,  # No dock icon
+    }
+    with open(contents / "Info.plist", "wb") as f:
+        plistlib.dump(info, f)
+
+    # Launcher script — kickstarts the launchd agent
+    launcher = macos / "launcher"
+    launcher.write_text(
+        f"#!/bin/bash\n"
+        f"launchctl kickstart gui/$(id -u)/{LABEL}\n"
+    )
+    launcher.chmod(0o755)
+
+
+def _remove_app_bundle() -> None:
+    """Remove the .app bundle."""
+    if APP_BUNDLE.exists():
+        shutil.rmtree(APP_BUNDLE)
+        print(f"Removed {APP_BUNDLE}")
 
 
 def _build_plist() -> dict:
@@ -116,6 +150,10 @@ def install() -> None:
         print(f"launchctl bootstrap failed: {result.stderr.strip()}")
         print("Try: launchctl bootstrap gui/$(id -u) " + str(PLIST_PATH))
 
+    _create_app_bundle()
+    print(f"Created launcher app: {APP_BUNDLE}")
+    print("You can now launch 'Chronicle Wearable' from Spotlight or Raycast.")
+
 
 def uninstall() -> None:
     """Unload the launchd agent and remove the plist."""
@@ -134,6 +172,23 @@ def uninstall() -> None:
 
     PLIST_PATH.unlink(missing_ok=True)
     print(f"Removed {PLIST_PATH}")
+    _remove_app_bundle()
+
+
+def kickstart() -> None:
+    """Restart the launchd agent (e.g. after user quit the menu bar app)."""
+    if not PLIST_PATH.exists():
+        print(f"Service not installed. Run './start.sh install' first.")
+        return
+
+    result = subprocess.run(
+        ["launchctl", "kickstart", f"gui/{os.getuid()}/{LABEL}"],
+        capture_output=True, text=True,
+    )
+    if result.returncode == 0:
+        print(f"Service '{LABEL}' started.")
+    else:
+        print(f"Failed to start: {result.stderr.strip()}")
 
 
 def status() -> None:

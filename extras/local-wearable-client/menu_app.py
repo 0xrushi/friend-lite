@@ -190,14 +190,19 @@ class BLEManager:
         logger.info("Connecting to %s [%s]", device["name"], device["mac"])
 
         self._disconnect_event = asyncio.Event()
+        # Wrap in a task so request_disconnect can cancel it
+        self._running_task = asyncio.current_task()
         try:
             self.state.update(status="connected", connected_device=device)
             self._save_last_connected(device["mac"])
             await connect_and_stream(device, backend_enabled=self.backend_enabled)
+        except asyncio.CancelledError:
+            logger.info("Connection cancelled by user")
         except Exception as e:
             logger.error("Connection error: %s", e, exc_info=True)
             self.state.update(status="error", error=str(e))
         finally:
+            self._running_task = None
             self.state.update(status="idle", connected_device=None)
             self._disconnect_event = None
             logger.info("Disconnected from %s", device["name"])
@@ -222,9 +227,10 @@ class BLEManager:
         """Request disconnection (called from UI thread)."""
         self._target_mac = None
         self._save_last_connected(None)
-        # The connection will end when the BLE device is no longer reachable,
-        # or we could cancel the running task. For now, clearing target_mac
-        # prevents auto-reconnect.
+        # Cancel the running connection task on the asyncio thread
+        task = self._running_task
+        if task and self.bg.loop:
+            self.bg.loop.call_soon_threadsafe(task.cancel)
 
     def request_scan(self) -> None:
         """Trigger an immediate scan (called from UI thread)."""

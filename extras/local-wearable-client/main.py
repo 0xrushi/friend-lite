@@ -8,6 +8,7 @@ CLI usage:
     ./start.sh scan         # One-shot scan, print nearby devices
     ./start.sh install      # Install launchd agent
     ./start.sh uninstall    # Remove launchd agent
+    ./start.sh kickstart    # Relaunch after quit
     ./start.sh status       # Show service status
     ./start.sh logs         # Tail log file
 """
@@ -371,6 +372,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("scan", help="One-shot scan — print nearby devices and exit")
     sub.add_parser("install", help="Install macOS launchd agent (auto-start on login)")
     sub.add_parser("uninstall", help="Remove macOS launchd agent")
+    sub.add_parser("kickstart", help="Relaunch the menu bar app (after quit)")
     sub.add_parser("status", help="Show launchd service status")
     sub.add_parser("logs", help="Tail service log file")
 
@@ -399,6 +401,10 @@ def main() -> None:
     elif command == "uninstall":
         from service import uninstall
         uninstall()
+
+    elif command == "kickstart":
+        from service import kickstart
+        kickstart()
 
     elif command == "status":
         from service import status
