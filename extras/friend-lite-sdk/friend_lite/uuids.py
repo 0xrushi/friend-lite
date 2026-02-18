@@ -1,5 +1,9 @@
 """UUID constants for wearable BLE services and characteristics."""
 
+# Standard BLE Battery Service (0x180F / 0x2A19)
+BATTERY_SERVICE_UUID = "0000180F-0000-1000-8000-00805F9B34FB"
+BATTERY_LEVEL_CHAR_UUID = "00002A19-0000-1000-8000-00805F9B34FB"
+
 # Shared audio characteristic UUID (all devices)
 OMI_AUDIO_CHAR_UUID = "19B10001-E8F2-537E-4F6C-D104768A1214"
 

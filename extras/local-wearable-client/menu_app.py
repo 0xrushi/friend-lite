@@ -36,6 +36,7 @@ class SharedState:
     nearby_devices: list[dict] = field(default_factory=list)  # [{name, mac, type, rssi}]
     error: Optional[str] = None
     chunks_sent: int = 0
+    battery_level: int = -1  # -1 = unknown
 
     def snapshot(self) -> dict:
         with self._lock:
@@ -45,6 +46,7 @@ class SharedState:
                 "nearby_devices": [d.copy() for d in self.nearby_devices],
                 "error": self.error,
                 "chunks_sent": self.chunks_sent,
+                "battery_level": self.battery_level,
             }
 
     def update(self, **kwargs) -> None:
@@ -193,9 +195,13 @@ class BLEManager:
         # Wrap in a task so request_disconnect can cancel it
         self._running_task = asyncio.current_task()
         try:
-            self.state.update(status="connected", connected_device=device)
+            self.state.update(status="connected", connected_device=device, battery_level=-1)
             self._save_last_connected(device["mac"])
-            await connect_and_stream(device, backend_enabled=self.backend_enabled)
+            await connect_and_stream(
+                device,
+                backend_enabled=self.backend_enabled,
+                on_battery_level=lambda level: self.state.update(battery_level=level),
+            )
         except asyncio.CancelledError:
             logger.info("Connection cancelled by user")
         except Exception as e:
@@ -203,7 +209,7 @@ class BLEManager:
             self.state.update(status="error", error=str(e))
         finally:
             self._running_task = None
-            self.state.update(status="idle", connected_device=None)
+            self.state.update(status="idle", connected_device=None, battery_level=-1)
             self._disconnect_event = None
             logger.info("Disconnected from %s", device["name"])
 
@@ -291,7 +297,9 @@ class WearableMenuApp(rumps.App):
         # Update status text
         if status == "connected" and snap["connected_device"]:
             dev = snap["connected_device"]
-            self.status_item.title = f"Connected: {dev['name']} [{dev['mac'][-8:]}]"
+            bat = snap["battery_level"]
+            bat_str = f" 🔋{bat}%" if bat >= 0 else ""
+            self.status_item.title = f"Connected: {dev['name']} [{dev['mac'][-8:]}]{bat_str}"
         elif status == "connecting":
             self.status_item.title = "Connecting..."
         elif status == "scanning":

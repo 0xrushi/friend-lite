@@ -18,7 +18,7 @@ import asyncio
 import logging
 import os
 import shutil
-from typing import Any
+from typing import Any, Callable
 
 import yaml
 from bleak import BleakScanner
@@ -158,7 +158,11 @@ def prompt_device_selection(devices: list[dict]) -> dict | None:
             return None
 
 
-async def connect_and_stream(device: dict, backend_enabled: bool = True) -> None:
+async def connect_and_stream(
+    device: dict,
+    backend_enabled: bool = True,
+    on_battery_level: Callable[[int], None] | None = None,
+) -> None:
     """Connect to a device, subscribe to audio (and buttons for OMI),
     and stream to the Chronicle backend until disconnected."""
 
@@ -244,6 +248,20 @@ async def connect_and_stream(device: dict, backend_enabled: bool = True) -> None
                 elif isinstance(conn, Neo1Connection):
                     logger.info("Waking Neo1 device...")
                     await conn.wake()
+
+                # Battery level
+                battery = await conn.read_battery_level()
+                if battery >= 0:
+                    logger.info("Battery level: %d%%", battery)
+                    if on_battery_level:
+                        on_battery_level(battery)
+                try:
+                    await conn.subscribe_battery(lambda level: (
+                        logger.info("Battery level: %d%%", level),
+                        on_battery_level(level) if on_battery_level else None,
+                    ))
+                except Exception:
+                    logger.debug("Battery notifications not supported by this device")
 
                 worker_tasks = [
                     asyncio.create_task(process_audio(), name="process_audio"),

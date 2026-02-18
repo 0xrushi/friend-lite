@@ -3,7 +3,7 @@ from typing import Callable, Optional
 
 from bleak import BleakClient, BleakScanner
 
-from .uuids import OMI_AUDIO_CHAR_UUID, OMI_BUTTON_CHAR_UUID
+from .uuids import BATTERY_LEVEL_CHAR_UUID, OMI_AUDIO_CHAR_UUID, OMI_BUTTON_CHAR_UUID
 
 
 def print_devices() -> None:
@@ -50,6 +50,32 @@ class WearableConnection:
         await self._client.disconnect()
         self._client = None
         self._disconnected.set()
+
+    async def read_battery_level(self) -> int:
+        """Read the current battery level (0-100). Returns -1 on failure."""
+        if self._client is None:
+            raise RuntimeError("Not connected to device")
+        try:
+            data = await self._client.read_gatt_char(BATTERY_LEVEL_CHAR_UUID)
+            if data:
+                return data[0]
+        except Exception:
+            pass
+        return -1
+
+    async def subscribe_battery(self, callback: Callable[[int], None]) -> None:
+        """Subscribe to battery level notifications.
+
+        *callback* receives a single int (0-100) each time the device
+        reports an updated level.
+        """
+        def _on_notify(_sender: int, data: bytearray) -> None:
+            if data:
+                callback(data[0])
+
+        if self._client is None:
+            raise RuntimeError("Not connected to device")
+        await self._client.start_notify(BATTERY_LEVEL_CHAR_UUID, _on_notify)
 
     async def subscribe_audio(self, callback: Callable[[int, bytearray], None]) -> None:
         await self.subscribe(OMI_AUDIO_CHAR_UUID, callback)
