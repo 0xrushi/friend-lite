@@ -2,6 +2,7 @@
 
 # Chronicle Backend Startup Script
 # Starts both the FastAPI backend and RQ workers
+# Usage: ./start.sh
 
 set -e
 
@@ -10,7 +11,8 @@ echo "🚀 Starting Chronicle Backend..."
 # Function to handle shutdown
 shutdown() {
     echo "🛑 Shutting down services..."
-    pkill -TERM -P $$
+    # Kill the backend process if running
+    [ -n "$BACKEND_PID" ] && kill -TERM $BACKEND_PID 2>/dev/null || true
     wait
     echo "✅ All services stopped"
     exit 0
@@ -52,7 +54,7 @@ sleep 2
 
 # Start the main FastAPI application
 echo "🌐 Starting FastAPI backend..."
-uv run --extra deepgram python3 src/advanced_omi_backend/main.py &
+python3 src/advanced_omi_backend/main.py &
 BACKEND_PID=$!
 
 # Wait for any process to exit

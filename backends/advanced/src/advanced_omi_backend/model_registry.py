@@ -4,87 +4,28 @@ Loads a single source of truth from config.yml and exposes model
 definitions (LLM, embeddings, etc.) in a provider-agnostic way.
 
 Now using Pydantic for robust validation and type safety.
+Environment variable resolution is handled by OmegaConf in the config module.
 """
 
 from __future__ import annotations
 
-import os
-import re
-import yaml
+import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-import logging
-from pydantic import BaseModel, Field, field_validator, model_validator, ConfigDict, ValidationError
+import yaml
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
-def _resolve_env(value: Any) -> Any:
-    """Resolve ``${VAR:-default}`` patterns inside a single value.
-    
-    This helper is intentionally minimal: it only operates on strings and leaves
-    all other types unchanged. Patterns of the form ``${VAR}`` or
-    ``${VAR:-default}`` are expanded using ``os.getenv``:
-    
-    - If the environment variable **VAR** is set, its value is used.
-    - Otherwise the optional ``default`` is used (or ``\"\"`` if omitted).
-    
-    Examples:
-        >>> os.environ.get("OLLAMA_MODEL")
-        >>> _resolve_env("${OLLAMA_MODEL:-llama3.1:latest}")
-        'llama3.1:latest'
-        
-        >>> os.environ["OLLAMA_MODEL"] = "llama3.2:latest"
-        >>> _resolve_env("${OLLAMA_MODEL:-llama3.1:latest}")
-        'llama3.2:latest'
-        
-        >>> _resolve_env("Bearer ${OPENAI_API_KEY:-}")
-        'Bearer '  # when OPENAI_API_KEY is not set
-    
-    Note:
-        Use :func:`_deep_resolve_env` to apply this logic to an entire
-        nested config structure (dicts/lists) loaded from YAML.
-    """
-    if not isinstance(value, str):
-        return value
-
-    pattern = re.compile(r"\$\{([^}:]+)(?::-(.*?))?\}")
-
-    def repl(match: re.Match[str]) -> str:
-        var, default = match.group(1), match.group(2)
-        return os.getenv(var, default or "")
-
-    return pattern.sub(repl, value)
-
-
-def _deep_resolve_env(data: Any) -> Any:
-    """Recursively resolve environment variables in nested structures.
-    
-    This walks arbitrary Python structures produced by ``yaml.safe_load`` and
-    applies :func:`_resolve_env` to every string it finds. Dictionaries and
-    lists are traversed deeply; scalars are passed through unchanged.
-    
-    Examples:
-        >>> os.environ["OPENAI_MODEL"] = "gpt-4o-mini"
-        >>> cfg = {
-        ...     "models": [
-        ...         {"model_name": "${OPENAI_MODEL:-gpt-4o-mini}"},
-        ...         {"model_url": "${OPENAI_BASE_URL:-https://api.openai.com/v1}"}
-        ...     ]
-        ... }
-        >>> resolved = _deep_resolve_env(cfg)
-        >>> resolved["models"][0]["model_name"]
-        'gpt-4o-mini'
-        >>> resolved["models"][1]["model_url"]
-        'https://api.openai.com/v1'
-    
-    This is what :func:`load_models_config` uses immediately after loading
-    ``config.yml`` so that all ``${VAR:-default}`` placeholders are resolved
-    before Pydantic validation and model registry construction.
-    """
-    if isinstance(data, dict):
-        return {k: _deep_resolve_env(v) for k, v in data.items()}
-    if isinstance(data, list):
-        return [_deep_resolve_env(v) for v in data]
-    return _resolve_env(data)
+# Import config merging for defaults.yml + config.yml integration
+# OmegaConf handles environment variable resolution (${VAR:-default} syntax)
+from advanced_omi_backend.config import get_config
 
 
 class ModelDef(BaseModel):
@@ -102,7 +43,7 @@ class ModelDef(BaseModel):
     
     name: str = Field(..., min_length=1, description="Unique model identifier")
     model_type: str = Field(..., description="Model type: llm, embedding, stt, tts, etc.")
-    model_provider: str = Field(default="unknown", description="Provider name: openai, ollama, deepgram, parakeet, etc.")
+    model_provider: str = Field(default="unknown", description="Provider name: openai, ollama, deepgram, parakeet, vibevoice, etc.")
     api_family: str = Field(default="openai", description="API family: openai, http, websocket, etc.")
     model_name: str = Field(default="", description="Provider-specific model name")
     model_url: str = Field(default="", description="Base URL for API requests")
@@ -112,6 +53,10 @@ class ModelDef(BaseModel):
     model_output: Optional[str] = Field(default=None, description="Output format: json, text, vector, etc.")
     embedding_dimensions: Optional[int] = Field(default=None, ge=1, description="Embedding vector dimensions")
     operations: Dict[str, Any] = Field(default_factory=dict, description="API operation definitions")
+    capabilities: List[str] = Field(
+        default_factory=list,
+        description="Provider capabilities: word_timestamps, segments, diarization (for STT providers)"
+    )
     
     @field_validator('model_name', mode='before')
     @classmethod
@@ -158,17 +103,87 @@ class ModelDef(BaseModel):
         return self
 
 
+class LLMOperationConfig(BaseModel):
+    """Per-operation LLM config as written in YAML.
+
+    Each field is optional so users can override only what they need;
+    unset fields are resolved from the model's model_params at runtime.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    model: Optional[str] = None
+    temperature: Optional[float] = None
+    max_tokens: Optional[int] = None
+    response_format: Optional[str] = None  # "json" → {"type": "json_object"}
+
+
+class ResolvedLLMOperation(BaseModel):
+    """Everything needed to make an LLM call. No further lookups required.
+
+    Works uniformly for OpenAI, Ollama, Groq, or any OpenAI-compatible provider.
+    The model_def carries all provider details (api_key, base_url, model_name).
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    model_def: ModelDef
+    temperature: float
+    max_tokens: Optional[int] = None
+    response_format: Optional[Dict[str, Any]] = None  # {"type": "json_object"} or None
+
+    @property
+    def model_name(self) -> str:
+        return self.model_def.model_name
+
+    @property
+    def api_key(self) -> Optional[str]:
+        return self.model_def.api_key
+
+    @property
+    def base_url(self) -> str:
+        return self.model_def.model_url
+
+    def to_api_params(self) -> Dict[str, Any]:
+        """Returns kwargs for client.chat.completions.create().
+
+        Works for OpenAI, Ollama, Groq — all OpenAI-compatible.
+        """
+        params: Dict[str, Any] = {
+            "model": self.model_def.model_name,
+            "temperature": self.temperature,
+        }
+        if self.max_tokens is not None:
+            params["max_tokens"] = self.max_tokens
+        if self.response_format is not None:
+            params["response_format"] = self.response_format
+        return params
+
+    def get_client(self, is_async: bool = False):
+        """Create an OpenAI-compatible client for this operation.
+
+        Uses create_openai_client which handles Langfuse tracing.
+        """
+        from advanced_omi_backend.openai_factory import create_openai_client
+
+        return create_openai_client(
+            api_key=self.model_def.api_key or "",
+            base_url=self.model_def.model_url,
+            is_async=is_async,
+        )
+
+
 class AppModels(BaseModel):
     """Application models registry.
-    
+
     Contains default model selections and all available model definitions.
     """
-    
+
     model_config = ConfigDict(
         extra='allow',
         validate_assignment=True,
     )
-    
+
     defaults: Dict[str, str] = Field(
         default_factory=dict,
         description="Default model names for each model_type"
@@ -184,6 +199,14 @@ class AppModels(BaseModel):
     speaker_recognition: Dict[str, Any] = Field(
         default_factory=dict,
         description="Speaker recognition service configuration"
+    )
+    chat: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Chat service configuration including system prompt"
+    )
+    llm_operations: Dict[str, LLMOperationConfig] = Field(
+        default_factory=dict,
+        description="Per-operation LLM configuration (temperature, model override, etc.)"
     )
     
     def get_by_name(self, name: str) -> Optional[ModelDef]:
@@ -234,11 +257,72 @@ class AppModels(BaseModel):
     
     def list_model_types(self) -> List[str]:
         """Get all unique model types in the registry.
-        
+
         Returns:
             Sorted list of model types
         """
         return sorted(set(m.model_type for m in self.models.values()))
+
+    def get_llm_operation(self, name: str) -> ResolvedLLMOperation:
+        """Resolve a named LLM operation to a self-contained config.
+
+        Resolution:
+          1. Look up llm_operations[name] (empty LLMOperationConfig if missing)
+          2. Resolve model_def: op.model → get_by_name, else defaults.llm
+          3. Merge parameters: operation > model_def.model_params > safe fallback
+          4. Return ResolvedLLMOperation ready for use
+
+        Args:
+            name: Operation name (e.g. "memory_extraction", "chat")
+
+        Returns:
+            ResolvedLLMOperation with model_def, temperature, max_tokens, response_format
+
+        Raises:
+            RuntimeError: If no model can be resolved for the operation
+        """
+        op_config = self.llm_operations.get(name, LLMOperationConfig())
+
+        # Resolve model definition
+        if op_config.model:
+            model_def = self.get_by_name(op_config.model)
+            if not model_def:
+                raise RuntimeError(
+                    f"LLM operation '{name}' references model '{op_config.model}' "
+                    f"which is not defined in the models list"
+                )
+        else:
+            model_def = self.get_default("llm")
+            if not model_def:
+                raise RuntimeError(
+                    f"No model specified for operation '{name}' and no default LLM defined"
+                )
+
+        # Merge parameters: operation config > model_params > safe fallback
+        model_params = model_def.model_params or {}
+
+        temperature = (
+            op_config.temperature
+            if op_config.temperature is not None
+            else model_params.get("temperature", 0.2)
+        )
+        max_tokens = (
+            op_config.max_tokens
+            if op_config.max_tokens is not None
+            else model_params.get("max_tokens")
+        )
+
+        # Convert "json" shorthand to OpenAI format
+        response_format = None
+        if op_config.response_format == "json":
+            response_format = {"type": "json_object"}
+
+        return ResolvedLLMOperation(
+            model_def=model_def,
+            temperature=float(temperature),
+            max_tokens=int(max_tokens) if max_tokens is not None else None,
+            response_format=response_format,
+        )
 
 
 # Global registry singleton
@@ -246,78 +330,54 @@ _REGISTRY: Optional[AppModels] = None
 
 
 def _find_config_path() -> Path:
-    """Find config.yml in expected locations.
-    
-    Search order:
-    1. CONFIG_FILE environment variable
-    2. Current working directory
-    3. /app/config.yml (Docker container)
-    4. Walk up from module directory
-    
-    Returns:
-        Path to config.yml (may not exist)
     """
-    # ENV override
-    cfg_env = os.getenv("CONFIG_FILE")
-    if cfg_env and Path(cfg_env).exists():
-        return Path(cfg_env)
+    Find config.yml using canonical path from config module.
 
-    # Common locations (container vs repo root)
-    candidates = [Path("config.yml"), Path("/app/config.yml")]
+    DEPRECATED: Use advanced_omi_backend.config.get_config_yml_path() directly.
+    Kept for backward compatibility.
 
-    # Also walk up from current file's parents defensively
-    try:
-        for parent in Path(__file__).resolve().parents:
-            c = parent / "config.yml"
-            if c.exists():
-                return c
-    except Exception:
-        pass
-
-    for c in candidates:
-        if c.exists():
-            return c
-    
-    # Last resort: return /app/config.yml path (may not exist yet)
-    return Path("/app/config.yml")
+    Returns:
+        Path to config.yml
+    """
+    from advanced_omi_backend.config import get_config_yml_path
+    return get_config_yml_path()
 
 
 def load_models_config(force_reload: bool = False) -> Optional[AppModels]:
-    """Load model configuration from config.yml.
-    
-    This function loads and parses the config.yml file, resolves environment
-    variables, validates model definitions using Pydantic, and caches the result.
-    
+    """Load model configuration from merged defaults.yml + config.yml.
+
+    This function loads defaults.yml and config.yml, merges them with user overrides,
+    validates model definitions using Pydantic, and caches the result.
+    Environment variables are resolved by OmegaConf during config loading.
+
     Args:
         force_reload: If True, reload from disk even if already cached
-        
+
     Returns:
         AppModels instance with validated configuration, or None if config not found
-        
+
     Raises:
         ValidationError: If config.yml has invalid model definitions
-        yaml.YAMLError: If config.yml has invalid YAML syntax
     """
     global _REGISTRY
     if _REGISTRY is not None and not force_reload:
         return _REGISTRY
 
-    cfg_path = _find_config_path()
-    if not cfg_path.exists():
+    # Get merged configuration (defaults + user config)
+    # OmegaConf resolves environment variables automatically
+    try:
+        raw = get_config(force_reload=force_reload)
+    except Exception as e:
+        logging.error(f"Failed to load merged configuration: {e}")
         return None
-
-    # Load and parse YAML
-    with cfg_path.open("r") as f:
-        raw = yaml.safe_load(f) or {}
-    
-    # Resolve environment variables
-    raw = _deep_resolve_env(raw)
 
     # Extract sections
     defaults = raw.get("defaults", {}) or {}
     model_list = raw.get("models", []) or []
     memory_settings = raw.get("memory", {}) or {}
     speaker_recognition_cfg = raw.get("speaker_recognition", {}) or {}
+    chat_settings = raw.get("chat", {}) or {}
+    llm_ops_raw = raw.get("llm_operations", {}) or {}
 
     # Parse and validate models using Pydantic
     models: Dict[str, ModelDef] = {}
@@ -331,12 +391,22 @@ def load_models_config(force_reload: bool = False) -> Optional[AppModels]:
             logging.warning(f"Failed to load model '{m.get('name', 'unknown')}': {e}")
             continue
 
+    # Parse LLM operation configs
+    llm_operations: Dict[str, LLMOperationConfig] = {}
+    for op_name, op_dict in llm_ops_raw.items():
+        try:
+            llm_operations[op_name] = LLMOperationConfig(**(op_dict or {}))
+        except ValidationError as e:
+            logging.warning(f"Failed to load llm_operation '{op_name}': {e}")
+
     # Create and cache registry
     _REGISTRY = AppModels(
         defaults=defaults,
         models=models,
         memory=memory_settings,
-        speaker_recognition=speaker_recognition_cfg
+        speaker_recognition=speaker_recognition_cfg,
+        chat=chat_settings,
+        llm_operations=llm_operations,
     )
     return _REGISTRY
 

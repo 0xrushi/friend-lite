@@ -20,6 +20,9 @@ This directory contains Chronicle's centralized configuration files.
 
 ```bash
 # Option 1: Run the interactive wizard (recommended)
+./wizard.sh
+
+# Or use direct command:
 uv run --with-requirements setup-requirements.txt python wizard.py
 
 # Option 2: Manual setup
@@ -69,7 +72,7 @@ Memory extraction and storage configuration:
 
 ```yaml
 memory:
-  provider: chronicle  # chronicle, openmemory_mcp, or mycelia
+  provider: chronicle  # chronicle or openmemory_mcp
   timeout_seconds: 1200
   extraction:
     enabled: true
@@ -98,9 +101,53 @@ The setup wizard automatically backs up `config.yml` before making changes:
 - Backups: `config.yml.backup.YYYYMMDD_HHMMSS`
 - These are gitignored automatically
 
+## ⚠️ Security: Never Hardcode Secrets in YAML Files
+
+### The Three-File Architecture
+
+Chronicle separates configuration for security:
+
+```
+config/plugins.yml           ← Orchestration (enabled, events)
+                             ← Env var references: ${SMTP_PASSWORD}
+                             ← Safe to commit ✅
+
+backends/advanced/.env       ← Actual secrets
+                             ← SMTP_PASSWORD=abc123
+                             ← Gitignored, never committed ✅
+
+plugins/{id}/config.yml      ← Plugin defaults
+                             ← Non-secret settings
+                             ← Can also use ${ENV_VAR} ✅
+```
+
+### ❌ WRONG:
+```yaml
+# config/plugins.yml
+smtp_password: xnetcqctkkfgzllh  # ❌ NEVER DO THIS!
+```
+
+### ✅ CORRECT:
+```yaml
+# config/plugins.yml
+smtp_password: ${SMTP_PASSWORD}  # ✅ Reference to .env
+```
+
+```bash
+# backends/advanced/.env
+SMTP_PASSWORD=abcdefghijklmnop  # ✅ Actual secret here
+```
+
+### Manual Review
+
+Before committing `config/plugins.yml`, manually verify:
+- No hardcoded passwords or API keys
+- All secrets use `${ENV_VAR}` syntax
+- Only orchestration settings (enabled, events, condition) are present
+
 ## Documentation
 
 For detailed configuration guides, see:
-- `/Docs/memory-configuration-guide.md` - Memory settings
-- `/backends/advanced/Docs/quickstart.md` - Setup guide
-- `/CLAUDE.md` - Project overview
+- `/backends/advanced/Docs/memories.md` - Memory settings
+- `/quickstart.md` - Setup guide
+- `/CLAUDE.md` - Project overview and technical reference

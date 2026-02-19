@@ -1,26 +1,17 @@
 """Memory service configuration utilities."""
 
 import logging
-import os
-import yaml
-from pathlib import Path
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 from typing import Any, Dict, Optional, Union
+
+import yaml
 
 from advanced_omi_backend.model_registry import get_models_registry
 from advanced_omi_backend.utils.config_utils import resolve_value
 
 memory_logger = logging.getLogger("memory_service")
-
-
-def _is_langfuse_enabled() -> bool:
-    """Check if Langfuse is properly configured."""
-    return bool(
-        os.getenv("LANGFUSE_PUBLIC_KEY")
-        and os.getenv("LANGFUSE_SECRET_KEY")
-        and os.getenv("LANGFUSE_HOST")
-    )
 
 
 class LLMProvider(Enum):
@@ -44,7 +35,6 @@ class MemoryProvider(Enum):
 
     CHRONICLE = "chronicle"  # Default sophisticated implementation
     OPENMEMORY_MCP = "openmemory_mcp"  # OpenMemory MCP backend
-    MYCELIA = "mycelia"  # Mycelia memory backend
 
 
 @dataclass
@@ -58,29 +48,33 @@ class MemoryConfig:
     vector_store_config: Dict[str, Any] = None
     embedder_config: Dict[str, Any] = None
     openmemory_config: Dict[str, Any] = None  # Configuration for OpenMemory MCP
-    mycelia_config: Dict[str, Any] = None  # Configuration for Mycelia
     extraction_prompt: str = None
     extraction_enabled: bool = True
     timeout_seconds: int = 1200
 
 
 def load_config_yml() -> Dict[str, Any]:
-    """Load config.yml from standard locations."""
-    # Check /app/config.yml (Docker) or root relative to file
-    current_dir = Path(__file__).parent.resolve()
-    # Path inside Docker: /app/config.yml (if mounted) or ../../../config.yml relative to src
-    paths = [
-        Path("/app/config.yml"),
-        current_dir.parent.parent.parent.parent.parent / "config.yml",  # Relative to src/
-        Path("./config.yml"),
-    ]
+    """
+    Load config.yml using canonical path from config module.
 
-    for path in paths:
-        if path.exists():
-            with open(path, "r") as f:
-                return yaml.safe_load(f) or {}
+    Returns:
+        Loaded config.yml as dictionary
 
-    raise FileNotFoundError(f"config.yml not found in any of: {[str(p) for p in paths]}")
+    Raises:
+        FileNotFoundError: If config.yml does not exist
+    """
+    from advanced_omi_backend.config import get_config_yml_path
+
+    config_path = get_config_yml_path()
+
+    if not config_path.exists():
+        raise FileNotFoundError(
+            f"config.yml not found at {config_path}. "
+            "Ensure config directory is mounted correctly."
+        )
+
+    with open(config_path, "r") as f:
+        return yaml.safe_load(f) or {}
 
 
 def create_openmemory_config(
@@ -96,20 +90,6 @@ def create_openmemory_config(
         "user_id": user_id,
         "timeout": timeout,
     }
-
-
-def create_mycelia_config(
-    api_url: str = "http://localhost:8080", api_key: str = None, timeout: int = 30, **kwargs
-) -> Dict[str, Any]:
-    """Create Mycelia configuration."""
-    config = {
-        "api_url": api_url,
-        "timeout": timeout,
-    }
-    if api_key:
-        config["api_key"] = api_key
-    config.update(kwargs)
-    return config
 
 
 def create_openai_config(
@@ -135,7 +115,7 @@ def create_openai_config(
 def create_qdrant_config(
     host: str = "localhost",
     port: int = 6333,
-    collection_name: str = "omi_memories",
+    collection_name: str = "chronicle_memories",
     embedding_dims: int = 1536,
 ) -> Dict[str, Any]:
     """Create Qdrant vector store configuration."""
@@ -185,43 +165,6 @@ def build_memory_config_from_env() -> MemoryConfig:
                 timeout_seconds=int(mem_settings.get("timeout_seconds", 1200)),
             )
 
-        # For Mycelia provider, build mycelia_config + llm_config (for temporal extraction)
-        if memory_provider_enum == MemoryProvider.MYCELIA:
-            # Registry-driven Mycelia configuration
-            mys = mem_settings.get("mycelia") or {}
-            api_url = mys.get("api_url", "http://localhost:5173")
-            timeout = int(mys.get("timeout", 30))
-            mycelia_config = create_mycelia_config(api_url=api_url, timeout=timeout)
-
-            # Use default LLM from registry for temporal extraction
-            llm_config = None
-            if reg:
-                llm_def = reg.get_default("llm")
-                if llm_def:
-                    llm_config = create_openai_config(
-                        api_key=llm_def.api_key or "",
-                        model=llm_def.model_name,
-                        base_url=llm_def.model_url,
-                    )
-                    memory_logger.info(
-                        f"🔧 Mycelia temporal extraction (registry): LLM={llm_def.model_name}"
-                    )
-            else:
-                memory_logger.warning(
-                    "Registry not available for Mycelia temporal extraction; disabled"
-                )
-
-            memory_logger.info(
-                f"🔧 Memory config: Provider=Mycelia, URL={mycelia_config['api_url']}"
-            )
-
-            return MemoryConfig(
-                memory_provider=memory_provider_enum,
-                mycelia_config=mycelia_config,
-                llm_config=llm_config,
-                timeout_seconds=int(mem_settings.get("timeout_seconds", timeout)),
-            )
-
         # For Chronicle provider, use registry-driven configuration
 
         # Registry-driven configuration only (no env-based branching)
@@ -258,7 +201,7 @@ def build_memory_config_from_env() -> MemoryConfig:
 
         host = str(vs_def.model_params.get("host", "qdrant"))
         port = int(vs_def.model_params.get("port", 6333))
-        collection_name = str(vs_def.model_params.get("collection_name", "omi_memories"))
+        collection_name = str(vs_def.model_params.get("collection_name", "chronicle_memories"))
         vector_store_config = create_qdrant_config(
             host=host,
             port=port,

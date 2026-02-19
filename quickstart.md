@@ -48,6 +48,10 @@ Think of it like having Siri/Alexa, but it's **your own AI** running on **your h
 - **Linux**: [Install Docker](https://docs.docker.com/engine/install/)
 - **After install**: Make sure Docker Desktop is running
 
+> **WSL Users**: Chronicle services will fail to start unless Docker
+> is installed and running inside WSL2
+> (or Docker Desktop with **WSL integration enabled**).
+
 **uv** (Python package manager):
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -111,44 +115,16 @@ git clone https://github.com/chronicle-ai/chronicle.git
 cd chronicle
 ```
 
-*The `--recursive` flag downloads the Mycelia submodule (see note below)*
-
-**If you already cloned without `--recursive`:**
-```bash
-git submodule update --init --recursive
-```
-
-<details>
-<summary><strong>📦 About the Mycelia Submodule (Optional - Click to expand)</strong></summary>
-
-**What is Mycelia?**
-Mycelia is an optional self-hosted AI memory system that Friend-Lite can use as an alternative memory backend. It provides:
-- Timeline-based memory visualization
-- Advanced audio processing with speaker diarization
-- MongoDB-based full-text search
-- MCP (Model Context Protocol) integration
-
-**Do I need it?**
-**Most users don't need Mycelia!** The default Friend-Lite memory system works great for most use cases. Only consider Mycelia if you:
-- Want timeline-based memory visualization
-- Need advanced speaker diarization features
-- Want to use MongoDB for memory storage instead of Qdrant
-
-**Runtime Dependencies (if using Mycelia):**
-- **Deno** - JavaScript/TypeScript runtime (install: `curl -fsSL https://deno.land/install.sh | sh`)
-- **MongoDB** - Database for memory storage
-- **Redis** - Caching layer
-- **FFmpeg** - Audio processing (usually pre-installed)
-
-**Build/Setup:**
-If you choose Mycelia as your memory provider during setup wizard, the wizard will configure the necessary services automatically. No manual build steps required!
-
-</details>
-
 **Run the setup wizard:**
 ```bash
+# Using convenience script (recommended)
+./wizard.sh
+
+# Or use direct command:
 uv run --with-requirements setup-requirements.txt python wizard.py
 ```
+
+**Note**: Convenience scripts (`./wizard.sh`, `./start.sh`, `./restart.sh`, `./stop.sh`, `./status.sh`) are wrappers around `wizard.py` and `services.py` that simplify the longer `uv run` commands.
 
 ### What the Setup Wizard Will Ask You
 
@@ -289,9 +265,14 @@ Before connecting your phone, make sure everything works:
 ### Service Issues
 
 **General Service Management:**
-- **Services not responding**: Try restarting with `./restart.sh` or `uv run --with-requirements setup-requirements.txt python services.py restart --all`
-- **Check service status**: Use `uv run --with-requirements setup-requirements.txt python services.py status`
-- **Stop all services**: Use `uv run --with-requirements setup-requirements.txt python services.py stop --all`
+- **Services not responding**: Try restarting with `./restart.sh`
+- **Check service status**: Use `./status.sh`
+- **Stop all services**: Use `./stop.sh`
+
+*Full commands (what the convenience scripts wrap):*
+- Restart: `uv run --with-requirements setup-requirements.txt python services.py restart --all`
+- Status: `uv run --with-requirements setup-requirements.txt python services.py status`
+- Stop: `uv run --with-requirements setup-requirements.txt python services.py stop --all`
 
 **Cloud Services (Deepgram/OpenAI):**
 - **Transcription not working**: Check Deepgram API key is correct
@@ -307,5 +288,5 @@ Before connecting your phone, make sure everything works:
 ## Need Help?
 
 - **Full Documentation**: [CLAUDE.md](CLAUDE.md) - Complete technical reference
-- **Architecture Details**: [Docs/features.md](Docs/features.md) - How everything works  
+- **Architecture Details**: [Docs/overview.md](Docs/overview.md) - How everything works
 - **Advanced Setup**: [Docs/init-system.md](Docs/init-system.md) - Power user options

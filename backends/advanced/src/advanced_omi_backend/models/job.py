@@ -13,10 +13,13 @@ import time
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Dict, Optional, Callable
 from functools import wraps
+from typing import Any, Callable, Dict, Optional
 
 import redis.asyncio as redis_async
+
+from advanced_omi_backend.prompt_defaults import register_all_defaults
+from advanced_omi_backend.prompt_registry import get_prompt_registry
 
 logger = logging.getLogger(__name__)
 
@@ -32,18 +35,21 @@ async def _ensure_beanie_initialized():
             return
         try:
             import os
-            from motor.motor_asyncio import AsyncIOMotorClient
+
             from beanie import init_beanie
-            from advanced_omi_backend.models.conversation import Conversation
-            from advanced_omi_backend.models.audio_file import AudioFile
-            from advanced_omi_backend.models.user import User                       
+            from motor.motor_asyncio import AsyncIOMotorClient
             from pymongo.errors import ConfigurationError
-  
+
+            from advanced_omi_backend.models.audio_chunk import AudioChunkDocument
+            from advanced_omi_backend.models.conversation import Conversation
+            from advanced_omi_backend.models.user import User
+            from advanced_omi_backend.models.waveform import WaveformData
+
             # Get MongoDB URI from environment
             mongodb_uri = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
 
             # Create MongoDB client
-            mongodb_database = os.getenv("MONGODB_DATABASE", "friend-lite")
+            mongodb_database = os.getenv("MONGODB_DATABASE", "chronicle")
             client = AsyncIOMotorClient(mongodb_uri)
             try:
                 database = client.get_default_database(mongodb_database)
@@ -54,11 +60,16 @@ async def _ensure_beanie_initialized():
             # Initialize Beanie
             await init_beanie(
                 database=database,
-                document_models=[User, Conversation, AudioFile],
+                document_models=[User, Conversation, AudioChunkDocument, WaveformData],
             )
 
             _beanie_initialized = True
             logger.info("✅ Beanie initialized in RQ worker process")
+
+            # Register prompt defaults (needed for title/summary generation etc.)
+            prompt_registry = get_prompt_registry()
+            register_all_defaults(prompt_registry)
+            logger.info("✅ Prompt registry initialized in RQ worker process")
 
         except Exception as e:
             logger.error(f"❌ Failed to initialize Beanie in RQ worker: {e}")
@@ -253,7 +264,9 @@ def async_job(redis: bool = True, beanie: bool = True, timeout: int = 300, resul
 
                         # Create Redis client if requested
                         if redis:
-                            from advanced_omi_backend.controllers.queue_controller import REDIS_URL
+                            from advanced_omi_backend.controllers.queue_controller import (
+                                REDIS_URL,
+                            )
                             redis_client = redis_async.from_url(REDIS_URL)
                             kwargs['redis_client'] = redis_client
                             logger.debug(f"Redis client created")

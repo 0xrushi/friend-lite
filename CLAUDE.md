@@ -18,7 +18,7 @@ This supports a comprehensive web dashboard for management.
 Chronicle includes an **interactive setup wizard** for easy configuration. The wizard guides you through:
 - Service selection (backend + optional services)
 - Authentication setup (admin account, JWT secrets)
-- Transcription provider configuration (Deepgram, Mistral, or offline ASR)
+- Transcription provider configuration (Deepgram or offline ASR)
 - LLM provider setup (OpenAI or Ollama)
 - Memory provider selection (Chronicle Native with Qdrant or OpenMemory MCP)
 - Network configuration and HTTPS setup
@@ -26,20 +26,21 @@ Chronicle includes an **interactive setup wizard** for easy configuration. The w
 
 ### Quick Start
 ```bash
-# Run the interactive setup wizard from project root
-uv run python wizard.py
+# Run the interactive setup wizard from project root (recommended)
+./wizard.sh
 
-# Or use the quickstart guide for step-by-step instructions
-# See quickstart.md for detailed walkthrough
+# Or use direct command:
+uv run --with-requirements setup-requirements.txt python wizard.py
+
+# For step-by-step instructions, see quickstart.md
 ```
+
+**Note on Convenience Scripts**: Chronicle provides wrapper scripts (`./wizard.sh`, `./start.sh`, `./restart.sh`, `./stop.sh`, `./status.sh`) that simplify the longer `uv run --with-requirements setup-requirements.txt python` commands. Use these for everyday operations.
 
 ### Setup Documentation
 For detailed setup instructions and troubleshooting, see:
 - **[@quickstart.md](quickstart.md)**: Beginner-friendly step-by-step setup guide
 - **[@Docs/init-system.md](Docs/init-system.md)**: Complete initialization system architecture and design
-- **[@Docs/getting-started.md](Docs/getting-started.md)**: Technical quickstart with advanced configuration
-- **[@backends/advanced/SETUP_SCRIPTS.md](backends/advanced/SETUP_SCRIPTS.md)**: Setup scripts reference and usage examples
-- **[@backends/advanced/Docs/quickstart.md](backends/advanced/Docs/quickstart.md)**: Backend-specific setup guide
 
 ### Wizard Architecture
 The initialization system uses a **root orchestrator pattern**:
@@ -85,72 +86,54 @@ cp .env.template .env  # Configure environment variables
 sudo rm -rf backends/advanced/data/
 ```
 
-### Testing Infrastructure
+### Running Tests
 
-#### Local Test Scripts
-The project includes simplified test scripts that mirror CI workflows:
+#### Quick Commands
+All test operations are managed through a simple Makefile interface:
 
 ```bash
-# Run all tests from project root
-./run-test.sh [advanced-backend|speaker-recognition|all]
+cd tests
 
-# Advanced backend tests only
-./run-test.sh advanced-backend
+# Full test workflow (recommended)
+make test              # Start containers + run all tests
 
-# Speaker recognition tests only
-./run-test.sh speaker-recognition
+# Or step by step
+make start             # Start test containers (with health checks)
+make test-all          # Run all test suites
+make stop              # Stop containers (preserves volumes)
 
-# Run all test suites (default)
-./run-test.sh all
+# Run specific test suites
+make test-endpoints    # API endpoint tests (~40 tests, fast)
+make test-integration  # End-to-end workflows (~15 tests, slower)
+make test-infra        # Infrastructure resilience (~5 tests)
+
+# Quick iteration (reuse existing containers)
+make test-quick        # Run tests without restarting containers
 ```
 
-#### Advanced Backend Integration Tests
+#### Container Management
+All container operations automatically preserve logs before cleanup:
+
 ```bash
-cd backends/advanced
-
-# Requires .env file with DEEPGRAM_API_KEY and OPENAI_API_KEY
-cp .env.template .env  # Configure API keys
-
-# Run full integration test suite
-./run-test.sh
-
-# Manual test execution (for debugging)
-source .env && export DEEPGRAM_API_KEY && export OPENAI_API_KEY
-uv run robot --outputdir test-results --loglevel INFO ../../tests/integration/integration_test.robot
-
-# Leave test containers running for debugging (don't auto-cleanup)
-CLEANUP_CONTAINERS=false source .env && export DEEPGRAM_API_KEY && export OPENAI_API_KEY
-uv run robot --outputdir test-results --loglevel INFO ../../tests/integration/integration_test.robot
-
-# Manual cleanup when needed
-docker compose -f docker-compose-test.yml down -v
+make start             # Start test containers
+make stop              # Stop containers (keep volumes)
+make restart           # Restart without rebuild
+make rebuild           # Rebuild images + restart (for code changes)
+make containers-clean  # SAVES LOGS → removes everything
+make status            # Show container health
+make logs SERVICE=<name>  # View specific service logs
 ```
 
-#### Test Configuration Flags
-- **CLEANUP_CONTAINERS** (default: true): Automatically stop and remove test containers after test completion
-  - Set to `false` for debugging: `CLEANUP_CONTAINERS=false ./run-test.sh`
-- **REBUILD** (default: true): Force rebuild containers with latest code changes
-- **FRESH_RUN** (default: true): Start with clean database and fresh containers
-- **TRANSCRIPTION_PROVIDER** (default: deepgram): Choose transcription provider (deepgram or parakeet)
+**Log Preservation:** All cleanup operations save container logs to `tests/logs/YYYY-MM-DD_HH-MM-SS/`
 
-#### Test Environment Variables
-Tests use isolated test environment with overridden credentials:
-- **Test Database**: `test_db` (MongoDB on port 27018, separate from production)
-- **Test Ports**: Backend (8001), Qdrant (6337/6338), WebUI (3001)
-- **Test Credentials**:
-  - `AUTH_SECRET_KEY`: test-jwt-signing-key-for-integration-tests
-  - `ADMIN_EMAIL`: test-admin@example.com
-  - `ADMIN_PASSWORD`: test-admin-password-123
-- **API Keys**: Loaded from `.env` file (DEEPGRAM_API_KEY, OPENAI_API_KEY)
-- **Test Settings**: `DISABLE_SPEAKER_RECOGNITION=true` to prevent segment duplication
+#### Test Environment
 
-#### Test Script Features
-- **Environment Compatibility**: Works with both local .env files and CI environment variables
-- **Isolated Test Environment**: Separate ports and database prevent conflicts with running services
-- **Automatic Cleanup**: Configurable via CLEANUP_CONTAINERS flag (default: true)
-- **Colored Output**: Clear progress indicators and error reporting
-- **Timeout Protection**: 15-minute timeout for advanced backend, 30-minute for speaker recognition
-- **Fresh Testing**: Clean database and containers for each test run
+Test services use isolated ports and database:
+- **Ports:** Backend (8001), MongoDB (27018), Redis (6380), Qdrant (6337/6338)
+- **Database:** `test_db` (separate from production)
+- **Credentials:** `test-admin@example.com` / `test-admin-password-123`
+
+**For complete test documentation, see `tests/README.md`**
 
 ### Mobile App Development
 ```bash
@@ -184,12 +167,12 @@ docker compose up --build
 ## Architecture Overview
 
 ### Key Components
-- **Audio Pipeline**: Real-time Opus/PCM → Application-level processing → Deepgram/Mistral transcription → memory extraction
+- **Audio Pipeline**: Real-time Opus/PCM → Application-level processing → Deepgram transcription → memory extraction
 - **Wyoming Protocol**: WebSocket communication uses Wyoming protocol (JSONL + binary) for structured audio sessions
 - **Unified Pipeline**: Job-based tracking system for all audio processing (WebSocket and file uploads)
 - **Job Tracker**: Tracks pipeline jobs with stage events (audio → transcription → memory) and completion status
 - **Task Management**: BackgroundTaskManager tracks all async tasks to prevent orphaned processes
-- **Unified Transcription**: Deepgram/Mistral transcription with fallback to offline ASR services
+- **Unified Transcription**: Deepgram transcription with fallback to offline ASR services
 - **Memory System**: Pluggable providers (Chronicle native or OpenMemory MCP)
 - **Authentication**: Email-based login with MongoDB ObjectId user system
 - **Client Management**: Auto-generated client IDs as `{user_id_suffix}-{device_name}`, centralized ClientManager
@@ -200,17 +183,18 @@ docker compose up --build
 ```yaml
 Required:
   - MongoDB: User data and conversations
+  - Redis: Job queues (RQ workers) and session state
+  - Qdrant: Vector storage for memory search
   - FastAPI Backend: Core audio processing
   - LLM Service: Memory extraction and action items (OpenAI or Ollama)
 
 Recommended:
-  - Vector Storage: Qdrant (Chronicle provider) or OpenMemory MCP server
-  - Transcription: Deepgram, Mistral, or offline ASR services
+  - Transcription: Deepgram or offline ASR services
 
 Optional:
   - Parakeet ASR: Offline transcription service
   - Speaker Recognition: Voice identification service
-  - Nginx Proxy: Load balancing and routing
+  - Caddy: HTTPS reverse proxy (auto-configured when HTTPS enabled)
   - OpenMemory MCP: For cross-client memory compatibility
 ```
 
@@ -224,9 +208,8 @@ Optional:
 6. **Versioned Processing**: Transcript and memory versions tracked with active version pointers
 7. **Memory Processing**: Pluggable providers (Chronicle native with individual facts or OpenMemory MCP delegation)
 8. **Memory Storage**: Direct Qdrant (Chronicle) or OpenMemory server (MCP provider)
-9. **Action Items**: Automatic task detection with "Simon says" trigger phrases
-10. **Audio Optimization**: Speech segment extraction removes silence automatically
-11. **Task Tracking**: BackgroundTaskManager ensures proper cleanup of all async operations
+9. **Audio Optimization**: Speech segment extraction removes silence automatically
+10. **Task Tracking**: BackgroundTaskManager ensures proper cleanup of all async operations
 
 ### Speech-Driven Architecture
 
@@ -283,8 +266,8 @@ QDRANT_BASE_URL=qdrant
 # Network Configuration
 HOST_IP=localhost
 BACKEND_PUBLIC_PORT=8000
-WEBUI_PORT=5173
-CORS_ORIGINS=http://localhost:3000,http://localhost:5173
+WEBUI_PORT=3010  # Production port (5173 is Vite dev server only)
+CORS_ORIGINS=http://localhost:3010,http://localhost:8000
 ```
 
 ### Memory Provider Configuration
@@ -329,12 +312,7 @@ Chronicle supports multiple transcription services:
 TRANSCRIPTION_PROVIDER=deepgram
 DEEPGRAM_API_KEY=your-deepgram-key-here
 
-# Option 2: Mistral (Voxtral models)
-TRANSCRIPTION_PROVIDER=mistral
-MISTRAL_API_KEY=your-mistral-key-here
-MISTRAL_MODEL=voxtral-mini-2507
-
-# Option 3: Local ASR (Parakeet)
+# Option 2: Local ASR (Parakeet)
 PARAKEET_ASR_URL=http://host.docker.internal:8767
 ```
 
@@ -347,12 +325,37 @@ OLLAMA_BASE_URL=http://ollama:11434
 SPEAKER_SERVICE_URL=http://speaker-recognition:8085
 ```
 
+### Plugin Security Architecture
+
+**Three-File Separation**:
+
+1. **backends/advanced/.env** - Secrets (gitignored)
+   ```bash
+   SMTP_PASSWORD=abcdefghijklmnop
+   OPENAI_API_KEY=sk-proj-...
+   ```
+
+2. **config/plugins.yml** - Orchestration (uses env var references)
+   ```yaml
+   plugins:
+     email_summarizer:
+       enabled: true
+       smtp_password: ${SMTP_PASSWORD}  # Reference, not actual value!
+   ```
+
+3. **plugins/{plugin_id}/config.yml** - Non-secret defaults
+   ```yaml
+   subject_prefix: "Conversation Summary"
+   ```
+
+**CRITICAL**: Never hardcode secrets in `config/plugins.yml`. Always use `${ENV_VAR}` syntax.
+
 ## Quick API Reference
 
 ### Common Endpoints
 - **GET /health**: Basic application health check
 - **GET /readiness**: Service dependency validation
-- **WS /ws_pcm**: Primary audio streaming endpoint (Wyoming protocol + raw PCM fallback)
+- **WS /ws**: Audio streaming endpoint with codec parameter (Wyoming protocol, supports pcm and opus codecs)
 - **GET /api/conversations**: User's conversations with transcripts
 - **GET /api/memories/search**: Semantic memory search with relevance scoring
 - **POST /auth/jwt/login**: Email-based login (returns JWT token)
@@ -370,6 +373,11 @@ curl -s -H "Authorization: Bearer YOUR_TOKEN" \
   http://localhost:8000/api/conversations
 ```
 
+### Backend API Interaction Rules
+- **Get token first**: Always authenticate in a separate Bash call, store the token, then use it in subsequent calls. Never chain login + API call in one command.
+- **Read .env with Read tool**: Use the Read tool to get values from `.env` files. Don't use `grep | sed | cut` in Bash to extract env values.
+- **Keep Bash simple**: Each Bash call should do one thing. Don't string together complex piped commands for backend queries.
+
 ### Development Reset Commands
 ```bash
 # Reset all data (development only)
@@ -381,6 +389,134 @@ docker compose down -v
 docker compose up --build -d
 ```
 
+## Add Existing Data
+
+### Audio File Upload & Processing
+
+The system supports processing existing audio files through the file upload API. This allows you to import and process pre-recorded conversations without requiring a live WebSocket connection.
+
+**Upload and Process WAV Files:**
+```bash
+export USER_TOKEN="your-jwt-token"
+
+# Upload single WAV file
+curl -X POST "http://localhost:8000/api/audio/upload" \
+  -H "Authorization: Bearer $USER_TOKEN" \
+  -F "files=@/path/to/audio.wav" \
+  -F "device_name=file_upload"
+
+# Upload multiple WAV files
+curl -X POST "http://localhost:8000/api/audio/upload" \
+  -H "Authorization: Bearer $USER_TOKEN" \
+  -F "files=@/path/to/recording1.wav" \
+  -F "files=@/path/to/recording2.wav" \
+  -F "device_name=import_batch"
+```
+
+**Response Example:**
+```json
+{
+  "message": "Successfully processed 2 audio files",
+  "processed_files": [
+    {
+      "filename": "recording1.wav",
+      "sample_rate": 16000,
+      "channels": 1,
+      "duration_seconds": 120.5,
+      "size_bytes": 3856000
+    },
+    {
+      "filename": "recording2.wav",
+      "sample_rate": 44100,
+      "channels": 2,
+      "duration_seconds": 85.2,
+      "size_bytes": 7532800
+    }
+  ],
+  "client_id": "user01-import_batch"
+}
+```
+
+## HAVPE Relay Configuration
+
+For ESP32 audio streaming using the HAVPE relay (`extras/havpe-relay/`):
+
+```bash
+# Environment variables for HAVPE relay
+export AUTH_USERNAME="user@example.com"       # Email address
+export AUTH_PASSWORD="your-password"
+export DEVICE_NAME="havpe"                    # Device identifier
+
+# Run the relay
+cd extras/havpe-relay
+uv run python main.py --backend-url http://your-server:8000 --backend-ws-url ws://your-server:8000
+```
+
+The relay will automatically:
+- Authenticate using `AUTH_USERNAME` (email address)
+- Generate client ID as `objectid_suffix-havpe`
+- Forward ESP32 audio to the backend with proper authentication
+- Handle token refresh and reconnection
+
+## Distributed Deployment
+
+### Single Machine vs Distributed Setup
+
+**Single Machine (Default):**
+```bash
+# Everything on one machine
+docker compose up --build -d
+```
+
+**Distributed Setup (GPU + Backend separation):**
+
+#### GPU Machine Setup
+```bash
+# Start GPU-accelerated services
+cd extras/asr-services
+docker compose up moonshine -d
+
+cd extras/speaker-recognition
+docker compose up --build -d
+
+# Ollama with GPU support
+docker run -d --gpus=all -p 11434:11434 \
+  -v ollama:/root/.ollama \
+  ollama/ollama:latest
+```
+
+#### Backend Machine Configuration
+```bash
+# .env configuration for distributed services
+OLLAMA_BASE_URL=http://[gpu-machine-tailscale-ip]:11434
+SPEAKER_SERVICE_URL=http://[gpu-machine-tailscale-ip]:8085
+PARAKEET_ASR_URL=http://[gpu-machine-tailscale-ip]:8080
+
+# Start lightweight backend services
+docker compose up --build -d
+```
+
+#### Tailscale Networking
+```bash
+# Install on each machine
+curl -fsSL https://tailscale.com/install.sh | sh
+sudo tailscale up
+
+# Find machine IPs
+tailscale ip -4
+```
+
+**Benefits of Distributed Setup:**
+- GPU services on dedicated hardware
+- Lightweight backend on VPS/Raspberry Pi
+- Automatic Tailscale IP support (100.x.x.x) - no CORS configuration needed
+- Encrypted inter-service communication
+
+**Service Examples:**
+- GPU machine: LLM inference, ASR, speaker recognition
+- Backend machine: FastAPI, WebUI, databases
+- Database machine: MongoDB, Qdrant (optional separation)
+
 ## Development Notes
 
 ### Package Management
@@ -389,12 +525,11 @@ docker compose up --build -d
 - **Docker**: Primary deployment method with docker-compose
 
 ### Testing Strategy
-- **Local Test Scripts**: Simplified scripts (`./run-test.sh`) mirror CI workflows for local development
-- **End-to-End Integration**: Robot Framework tests (`tests/integration/integration_test.robot`) validate complete audio processing pipeline
-- **Speaker Recognition Tests**: `test_speaker_service_integration.py` validates speaker identification
+- **Makefile-Based**: All test operations through simple `make` commands (`make test`, `make start`, `make stop`)
+- **Log Preservation**: Container logs always saved before cleanup (never lose debugging info)
+- **End-to-End Integration**: Robot Framework validates complete audio processing pipeline
 - **Environment Flexibility**: Tests work with both local .env files and CI environment variables
-- **Automated Cleanup**: Test containers are automatically removed after execution
-- **CI/CD Integration**: GitHub Actions use the same local test scripts for consistency
+- **CI/CD Integration**: Same test logic locally and in GitHub Actions
 
 ### Code Style
 - **Python**: Black formatter with 100-character line length, isort for imports
@@ -421,14 +556,10 @@ The system includes comprehensive health checks:
 - Memory debug system for transcript processing monitoring
 
 ### Integration Test Infrastructure
-- **Unified Test Scripts**: Local `./run-test.sh` scripts mirror GitHub Actions workflows
-- **Test Environment**: `docker-compose-test.yml` provides isolated services on separate ports
-- **Test Database**: Uses `test_db` database with isolated collections
-- **Service Ports**: Backend (8001), MongoDB (27018), Qdrant (6335/6336), WebUI (5174)
-- **Test Credentials**: Auto-generated `.env.test` files with secure test configurations
-- **Ground Truth**: Expected transcript established via `scripts/test_deepgram_direct.py`
-- **AI Validation**: OpenAI-powered transcript similarity comparison
-- **Test Audio**: 4-minute glass blowing tutorial (`extras/test-audios/DIY*mono*.wav`)
+- **Makefile Interface**: Simple `make` commands for all operations (see `tests/README.md`)
+- **Test Environment**: `docker-compose-test.yml` with isolated services on separate ports
+- **Test Database**: Uses `test_db` database (separate from production)
+- **Log Preservation**: All cleanup operations save logs to `tests/logs/` automatically
 - **CI Compatibility**: Same test logic runs locally and in GitHub Actions
 
 ### Cursor Rule Integration
@@ -437,12 +568,14 @@ Project includes `.cursor/rules/always-plan-first.mdc` requiring understanding b
 ## Extended Documentation
 
 For detailed technical documentation, see:
-- **[@docs/wyoming-protocol.md](docs/wyoming-protocol.md)**: WebSocket communication protocol details
-- **[@docs/memory-providers.md](docs/memory-providers.md)**: In-depth memory provider comparison and setup
-- **[@docs/versioned-processing.md](docs/versioned-processing.md)**: Transcript and memory versioning details
-- **[@docs/api-reference.md](docs/api-reference.md)**: Complete endpoint documentation with examples
-- **[@docs/speaker-recognition.md](docs/speaker-recognition.md)**: Advanced analysis and live inference features
-- **[@docs/distributed-deployment.md](docs/distributed-deployment.md)**: Multi-machine deployment with Tailscale
+- **[@Docs/overview.md](Docs/overview.md)**: Architecture overview and technical deep dive
+- **[@Docs/init-system.md](Docs/init-system.md)**: Initialization system and service management
+- **[@Docs/ssl-certificates.md](Docs/ssl-certificates.md)**: HTTPS/SSL setup details
+- **[@Docs/audio-pipeline-architecture.md](Docs/audio-pipeline-architecture.md)**: Audio pipeline design
+- **[@backends/advanced/Docs/auth.md](backends/advanced/Docs/auth.md)**: Authentication architecture
+- **[backends/advanced/Docs/architecture.md](backends/advanced/Docs/architecture.md)**: Backend architecture details
+- **[@backends/advanced/Docs/memories.md](backends/advanced/Docs/memories.md)**: Memory system documentation
+- **[@backends/advanced/Docs/plugin-development-guide.md](backends/advanced/Docs/plugin-development-guide.md)**: Plugin development guide
 
 ## Robot Framework Testing
 

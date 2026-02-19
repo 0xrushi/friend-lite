@@ -8,6 +8,7 @@ from typing import Optional
 
 from fastapi.responses import JSONResponse
 
+from advanced_omi_backend.models.conversation import Conversation
 from advanced_omi_backend.services.memory import get_memory_service
 from advanced_omi_backend.services.memory.base import MemoryEntry
 from advanced_omi_backend.users import User
@@ -123,7 +124,7 @@ async def delete_memory(memory_id: str, user: User):
             if memory_id not in memory_ids:
                 return JSONResponse(status_code=404, content={"message": "Memory not found"})
 
-        # Delete the memory (pass user_id and user_email for Mycelia authentication)
+        # Delete the memory
         audio_logger.info(f"Deleting memory {memory_id} for user_id={user.user_id}, email={user.email}")
         success = await memory_service.delete_memory(memory_id, user_id=user.user_id, user_email=user.email)
 
@@ -136,33 +137,6 @@ async def delete_memory(memory_id: str, user: User):
         audio_logger.error(f"Error deleting memory: {e}", exc_info=True)
         return JSONResponse(
             status_code=500, content={"message": f"Error deleting memory: {str(e)}"}
-        )
-
-
-async def get_memories_unfiltered(user: User, limit: int, user_id: Optional[str] = None):
-    """Get all memories including fallback transcript memories (for debugging). Users see only their own memories, admins can see all or filter by user."""
-    try:
-        memory_service = get_memory_service()
-
-        # Determine which user's memories to fetch
-        target_user_id = user.user_id
-        if user.is_superuser and user_id:
-            target_user_id = user_id
-
-        # Execute memory retrieval directly (now async)
-        memories = await memory_service.get_all_memories_unfiltered(target_user_id, limit)
-
-        return {
-            "memories": memories,
-            "count": len(memories),
-            "user_id": target_user_id,
-            "includes_fallback": True,
-        }
-
-    except Exception as e:
-        audio_logger.error(f"Error fetching unfiltered memories: {e}", exc_info=True)
-        return JSONResponse(
-            status_code=500, content={"message": f"Error fetching unfiltered memories: {str(e)}"}
         )
 
 
@@ -271,6 +245,28 @@ async def get_memory_by_id(memory_id: str, user: User, user_id: Optional[str] = 
         if memory:
             # Convert MemoryEntry to dict for JSON serialization
             memory_dict = memory.to_dict()
+
+            # Enrich with source conversation info if source_id exists in metadata
+            source_id = memory.metadata.get("source_id")
+            if source_id:
+                try:
+                    conversation = await Conversation.find_one(
+                        Conversation.conversation_id == source_id
+                    )
+                    if conversation:
+                        memory_dict["source_conversation"] = {
+                            "conversation_id": conversation.conversation_id,
+                            "title": conversation.title,
+                            "summary": conversation.summary,
+                            "created_at": (
+                                conversation.created_at.isoformat()
+                                if conversation.created_at
+                                else None
+                            ),
+                        }
+                except Exception as e:
+                    logger.warning(f"Failed to fetch source conversation {source_id}: {e}")
+
             return {"memory": memory_dict}
         else:
             return JSONResponse(status_code=404, content={"message": "Memory not found"})

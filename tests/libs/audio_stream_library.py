@@ -136,6 +136,15 @@ def stop_audio_stream(stream_id: str) -> int:
     return _manager.stop_stream(stream_id)
 
 
+def close_audio_stream_without_stop(stream_id: str) -> int:
+    """Close WebSocket connection without sending audio-stop event.
+
+    This simulates abrupt disconnection (network failure, client crash)
+    and should trigger websocket_disconnect end_reason.
+    """
+    return _manager.close_stream_without_stop(stream_id)
+
+
 def cleanup_all_streams():
     """Stop all active streams."""
     _manager.cleanup_all()

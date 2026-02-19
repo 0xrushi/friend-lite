@@ -8,19 +8,19 @@ import asyncio
 import logging
 import os
 import time
-from typing import Dict, Any
+from typing import Any, Dict
 
 import aiohttp
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from motor.motor_asyncio import AsyncIOMotorClient
 
-from advanced_omi_backend.controllers.queue_controller import redis_conn
 from advanced_omi_backend.client_manager import get_client_manager
+from advanced_omi_backend.controllers.queue_controller import redis_conn
 from advanced_omi_backend.llm_client import async_health_check
+from advanced_omi_backend.model_registry import get_models_registry
 from advanced_omi_backend.services.memory import get_memory_service
 from advanced_omi_backend.services.transcription import get_transcription_provider
-from advanced_omi_backend.model_registry import get_models_registry
 
 # Create router
 router = APIRouter(tags=["health"])
@@ -139,7 +139,6 @@ async def health_check():
             "chunk_dir": str(os.getenv("CHUNK_DIR", "./audio_chunks")),
             "active_clients": get_client_manager().get_client_count(),
             "new_conversation_timeout_minutes": float(os.getenv("NEW_CONVERSATION_TIMEOUT_MINUTES", "1.5")),
-            "audio_cropping_enabled": os.getenv("AUDIO_CROPPING_ENABLED", "true").lower() == "true",
             "llm_provider": (_llm_def.model_provider if _llm_def else None),
             "llm_model": (_llm_def.model_name if _llm_def else None),
             "llm_base_url": (_llm_def.model_url if _llm_def else None),
@@ -308,42 +307,6 @@ async def health_check():
             "provider": "openmemory_mcp",
             "critical": False,
         }
-    elif memory_provider == "mycelia":
-        # Mycelia memory service check
-        try:
-            # Test Mycelia memory service connection with timeout
-            test_success = await asyncio.wait_for(memory_service.test_connection(), timeout=8.0)
-            if test_success:
-                health_status["services"]["memory_service"] = {
-                    "status": "✅ Mycelia Memory Connected",
-                    "healthy": True,
-                    "provider": "mycelia",
-                    "critical": False,
-                }
-            else:
-                health_status["services"]["memory_service"] = {
-                    "status": "⚠️ Mycelia Memory Test Failed",
-                    "healthy": False,
-                    "provider": "mycelia",
-                    "critical": False,
-                }
-                overall_healthy = False
-        except asyncio.TimeoutError:
-            health_status["services"]["memory_service"] = {
-                "status": "⚠️ Mycelia Memory Timeout (8s) - Check Mycelia service",
-                "healthy": False,
-                "provider": "mycelia",
-                "critical": False,
-            }
-            overall_healthy = False
-        except Exception as e:
-            health_status["services"]["memory_service"] = {
-                "status": f"⚠️ Mycelia Memory Failed: {str(e)}",
-                "healthy": False,
-                "provider": "mycelia",
-                "critical": False,
-            }
-            overall_healthy = False
     else:
         health_status["services"]["memory_service"] = {
             "status": f"❌ Unknown memory provider: {memory_provider}",

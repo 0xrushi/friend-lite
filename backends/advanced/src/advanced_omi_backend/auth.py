@@ -117,7 +117,7 @@ def generate_jwt_for_user(user_id: str, user_email: str) -> str:
     """Generate a JWT token for a user to authenticate with external services.
 
     This function creates a JWT token that can be used to authenticate with
-    services that share the same AUTH_SECRET_KEY, such as Mycelia.
+    services that share the same AUTH_SECRET_KEY.
 
     Args:
         user_id: User's unique identifier (MongoDB ObjectId as string)
@@ -125,10 +125,6 @@ def generate_jwt_for_user(user_id: str, user_email: str) -> str:
 
     Returns:
         JWT token string valid for JWT_LIFETIME_SECONDS (default: 24 hours)
-
-    Example:
-        >>> token = generate_jwt_for_user("507f1f77bcf86cd799439011", "user@example.com")
-        >>> # Use token to call Mycelia API
     """
     # Create JWT payload matching Chronicle's standard format
     payload = {
@@ -224,6 +220,9 @@ async def create_admin_user_if_needed():
         existing_admin = await user_db.get_by_email(ADMIN_EMAIL)
 
         if existing_admin:
+            logger.debug(f"existing_admin.id = {existing_admin.id}, type = {type(existing_admin.id)}")
+            logger.debug(f"str(existing_admin.id) = {str(existing_admin.id)}")
+            logger.debug(f"existing_admin.user_id = {existing_admin.user_id}")
             logger.info(
                 f"✅ Admin user already exists: {existing_admin.user_id} ({existing_admin.email})"
             )

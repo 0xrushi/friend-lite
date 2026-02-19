@@ -74,7 +74,7 @@ class UserManager(BaseUserManager[User, PydanticObjectId]):
 **Admin-Only Registration:**
 ```bash
 # Create user with auto-generated MongoDB ObjectId
-curl -X POST "http://localhost:8000/api/create_user" \
+curl -X POST "http://localhost:8000/api/users" \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -100,13 +100,13 @@ curl -X POST "http://localhost:8000/auth/jwt/login" \
 
 #### Token-based (Recommended)
 ```javascript
-const ws = new WebSocket('ws://localhost:8000/ws_pcm?token=JWT_TOKEN&device_name=phone');
+const ws = new WebSocket('ws://localhost:8000/ws?codec=pcm&token=JWT_TOKEN&device_name=phone');
 ```
 
 #### Cookie-based
 ```javascript
 // Requires existing cookie from web login
-const ws = new WebSocket('ws://localhost:8000/ws_pcm?device_name=phone');
+const ws = new WebSocket('ws://localhost:8000/ws?codec=pcm&device_name=phone');
 ```
 
 ## Client ID Management
@@ -175,16 +175,17 @@ COOKIE_SECURE=false
 ### Authentication
 - `POST /auth/jwt/login` - JWT token authentication
 - `POST /auth/cookie/login` - Cookie-based authentication
-- `POST /auth/logout` - Logout (clear cookies)
+- `POST /auth/jwt/logout` - Logout (invalidate JWT token)
+- `POST /auth/cookie/logout` - Logout (clear cookies)
 
 ### User Management
-- `POST /api/create_user` - Create new user (admin only)
-- `GET /api/users/me` - Get current user info
-- `PATCH /api/users/me` - Update user profile
+- `POST /api/users` - Create new user (admin only)
+- `GET /users/me` - Get current user info
+- `PATCH /users/me` - Update user profile
 
 ### WebSocket Endpoints
-- `ws://host/ws` - Opus audio stream with auth
-- `ws://host/ws_pcm` - PCM audio stream with auth
+- `ws://host/ws?codec=opus` - Opus audio stream with auth
+- `ws://host/ws?codec=pcm` - PCM audio stream with auth (default)
 
 ## Error Handling
 
@@ -275,7 +276,7 @@ docker exec -it mongo-container mongosh chronicle
 docker compose logs chronicle-backend | grep -i auth
 
 # Test API endpoints
-curl -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/users/me
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8000/users/me
 ```
 
 ## Migration Guide

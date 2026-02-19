@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { Brain, Search, RefreshCw, Trash2, Calendar, Tag, X, Target } from 'lucide-react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { Brain, Search, RefreshCw, Trash2, Calendar, Tag, X, Target, Users, CheckSquare, ArrowUpDown } from 'lucide-react'
 import { memoriesApi, systemApi } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
+import { useMemories, useDeleteMemory } from '../hooks/useMemories'
+import { EntityList, PromisesList } from '../components/knowledge-graph'
 import '../styles/slider.css'
 
 interface Memory {
@@ -18,14 +20,16 @@ interface Memory {
   role?: string
 }
 
+type Tab = 'memories' | 'entities' | 'promises'
+type SortOrder = 'newest' | 'oldest'
+
 export default function Memories() {
   const navigate = useNavigate()
-  const [memories, setMemories] = useState<Memory[]>([])
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [activeTab, setActiveTab] = useState<Tab>((searchParams.get('tab') as Tab) || 'memories')
   const [searchQuery, setSearchQuery] = useState('')
-  const [showUnfiltered, setShowUnfiltered] = useState(false)
-  const [totalCount, setTotalCount] = useState<number | null>(null)
+  const [sortOrder, setSortOrder] = useState<SortOrder>('newest')
+  const [actionError, setActionError] = useState<string | null>(null)
 
   // Semantic search state
   const [semanticResults, setSemanticResults] = useState<Memory[]>([])
@@ -39,6 +43,26 @@ export default function Memories() {
   const [memoryProvider, setMemoryProvider] = useState<string>('')
 
   const { user } = useAuth()
+
+  const {
+    data: memoriesData,
+    isLoading: loading,
+    error: queryError,
+    refetch: refetchMemories,
+  } = useMemories(user?.id)
+
+  const memories = (() => {
+    if (!memoriesData) return []
+    const data = memoriesData.memories || memoriesData || []
+    return Array.isArray(data) ? data : []
+  })()
+  const totalCount = memoriesData?.total_count ?? null
+  const error = queryError?.message ?? actionError ?? null
+
+  const handleTabChange = (tab: Tab) => {
+    setActiveTab(tab)
+    setSearchParams({ tab })
+  }
 
   const loadSystemConfig = async () => {
     try {
@@ -56,48 +80,9 @@ export default function Memories() {
     }
   }
 
-  const loadMemories = async () => {
-    if (!user?.id) return
-
-    try {
-      setLoading(true)
-      const response = showUnfiltered
-        ? await memoriesApi.getUnfiltered(user.id)
-        : await memoriesApi.getAll(user.id)
-
-      console.log('🧠 Memories API response:', response.data)
-
-      // Handle the API response structure
-      const memoriesData = response.data.memories || response.data || []
-      const totalCount = response.data.total_count
-      console.log('🧠 Processed memories data:', memoriesData)
-      console.log('🧠 Total count:', totalCount)
-
-      // Log first few memories to inspect structure
-      if (memoriesData.length > 0) {
-        console.log('🧠 First memory object:', memoriesData[0])
-        console.log('🧠 Memory fields:', Object.keys(memoriesData[0]))
-      }
-
-      setMemories(Array.isArray(memoriesData) ? memoriesData : [])
-      // Store total count in state for display
-      setTotalCount(totalCount)
-      setError(null)
-    } catch (err: any) {
-      console.error('❌ Memory loading error:', err)
-      setError(err.message || 'Failed to load memories')
-    } finally {
-      setLoading(false)
-    }
-  }
-
   useEffect(() => {
     loadSystemConfig()
   }, [])
-
-  useEffect(() => {
-    loadMemories()
-  }, [user?.id, showUnfiltered])
 
   // Semantic search handlers
   const handleSemanticSearch = async () => {
@@ -125,9 +110,9 @@ export default function Memories() {
       setSemanticQuery(searchQuery.trim())
       setIsSemanticFilterActive(true)
       setSearchQuery('') // Clear search box
-      setError(null)
+      setActionError(null)
     } catch (err: any) {
-      setError(err.message || 'Semantic search failed')
+      setActionError(err.message || 'Semantic search failed')
     } finally {
       setSemanticLoading(false)
     }
@@ -141,18 +126,19 @@ export default function Memories() {
     setRelevanceThreshold(0) // Reset threshold
   }
 
+  const deleteMemoryMutation = useDeleteMemory()
+
   const handleDeleteMemory = async (memoryId: string) => {
     if (!confirm('Are you sure you want to delete this memory?')) return
 
     try {
-      await memoriesApi.delete(memoryId)
-      // Remove from both regular memories and semantic results if present
-      setMemories(memories.filter(m => m.id !== memoryId))
+      await deleteMemoryMutation.mutateAsync(memoryId)
+      // Also remove from semantic results if present
       if (isSemanticFilterActive) {
         setSemanticResults(semanticResults.filter(m => m.id !== memoryId))
       }
     } catch (err: any) {
-      setError(err.message || 'Failed to delete memory')
+      setActionError(err.message || 'Failed to delete memory')
     }
   }
 
@@ -174,7 +160,19 @@ export default function Memories() {
     (memory.category?.toLowerCase() || '').includes(searchQuery.toLowerCase())
   )
 
-  const formatDate = (dateInput: string | number) => {
+  // Apply sort order
+  const sortedMemories = [...filteredMemories].sort((a, b) => {
+    const dateA = new Date(a.created_at).getTime()
+    const dateB = new Date(b.created_at).getTime()
+    return sortOrder === 'newest' ? dateB - dateA : dateA - dateB
+  })
+
+  const formatDate = (dateInput: string | number | undefined | null) => {
+    // Handle missing/undefined dates
+    if (dateInput === undefined || dateInput === null || dateInput === '') {
+      return 'N/A'
+    }
+
     // Handle both timestamp numbers and date strings
     let date: Date
 
@@ -198,7 +196,7 @@ export default function Memories() {
     // Check if date is valid
     if (isNaN(date.getTime())) {
       console.warn('Invalid date:', dateInput)
-      return 'Invalid Date'
+      return 'N/A'
     }
 
     return date.toLocaleString()
@@ -254,9 +252,9 @@ export default function Memories() {
           <Brain className="h-6 w-6 text-blue-600" />
           <div>
             <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-              Memory Management
+              Knowledge & Memory
             </h1>
-            {memoryProvider && (
+            {memoryProvider && activeTab === 'memories' && (
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
                 Provider: {memoryProvider === 'chronicle' ? 'Chronicle' : memoryProvider === 'openmemory_mcp' ? 'OpenMemory MCP' : memoryProvider}
               </p>
@@ -265,22 +263,73 @@ export default function Memories() {
         </div>
       </div>
 
+      {/* Tab Navigation */}
+      <div className="flex space-x-1 mb-6 border-b border-gray-200 dark:border-gray-700">
+        <button
+          onClick={() => handleTabChange('memories')}
+          className={`flex items-center space-x-2 px-4 py-2 text-sm font-medium rounded-t-lg transition-colors ${
+            activeTab === 'memories'
+              ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-b-2 border-blue-600'
+              : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800'
+          }`}
+        >
+          <Brain className="h-4 w-4" />
+          <span>Memories</span>
+        </button>
+        <button
+          onClick={() => handleTabChange('entities')}
+          className={`flex items-center space-x-2 px-4 py-2 text-sm font-medium rounded-t-lg transition-colors ${
+            activeTab === 'entities'
+              ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-b-2 border-blue-600'
+              : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800'
+          }`}
+        >
+          <Users className="h-4 w-4" />
+          <span>Entities</span>
+        </button>
+        <button
+          onClick={() => handleTabChange('promises')}
+          className={`flex items-center space-x-2 px-4 py-2 text-sm font-medium rounded-t-lg transition-colors ${
+            activeTab === 'promises'
+              ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-b-2 border-blue-600'
+              : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800'
+          }`}
+        >
+          <CheckSquare className="h-4 w-4" />
+          <span>Promises</span>
+        </button>
+      </div>
+
+      {/* Tab Content */}
+      {activeTab === 'entities' && (
+        <EntityList
+          onEntityClick={(entity) => {
+            console.log('Entity clicked:', entity)
+            // Could navigate to entity detail page in the future
+          }}
+        />
+      )}
+
+      {activeTab === 'promises' && (
+        <PromisesList
+          onPromiseClick={(promise) => {
+            console.log('Promise clicked:', promise)
+            // Could navigate to conversation source
+            if (promise.source_conversation_id) {
+              navigate(`/conversations/${promise.source_conversation_id}`)
+            }
+          }}
+        />
+      )}
+
+      {activeTab === 'memories' && (
+        <>
+
       {/* Controls */}
       <div className="space-y-4 mb-6">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-4">
-            <label className="flex items-center space-x-2 text-sm">
-              <input
-                type="checkbox"
-                checked={showUnfiltered}
-                onChange={(e) => setShowUnfiltered(e.target.checked)}
-                className="rounded border-gray-300"
-              />
-              <span className="text-gray-700 dark:text-gray-300">Show unfiltered</span>
-            </label>
-          </div>
+        <div className="flex items-center justify-end">
           <button
-            onClick={loadMemories}
+            onClick={() => refetchMemories()}
             disabled={loading || !user}
             className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors disabled:opacity-50"
           >
@@ -392,7 +441,7 @@ export default function Memories() {
       {/* Status Messages */}
       {user && (memories.length > 0 || isSemanticFilterActive) && (
         <div className="mb-4">
-          <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-md p-4">
+          <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-md p-4 flex items-center justify-between">
             <p className="text-sm text-blue-700 dark:text-blue-300">
               {isSemanticFilterActive ? (
                 relevanceThreshold > 0 ? (
@@ -410,12 +459,23 @@ export default function Memories() {
                 )
               ) : (
                 totalCount !== null ? (
-                  `Showing ${memories.length} of ${totalCount} ${showUnfiltered ? 'unfiltered' : 'filtered'} memories`
+                  `Showing ${memories.length} of ${totalCount} memories`
                 ) : (
-                  `Showing ${showUnfiltered ? 'unfiltered' : 'filtered'} memories (${memories.length} found)`
+                  `Showing ${memories.length} memories`
                 )
               )}
             </p>
+            <div className="flex items-center space-x-2 ml-4">
+              <ArrowUpDown className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
+              <select
+                value={sortOrder}
+                onChange={(e) => setSortOrder(e.target.value as SortOrder)}
+                className="text-sm bg-white dark:bg-gray-800 border border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              >
+                <option value="newest">Newest first</option>
+                <option value="oldest">Oldest first</option>
+              </select>
+            </div>
           </div>
         </div>
       )}
@@ -467,7 +527,7 @@ export default function Memories() {
           </div>
 
           <div className="space-y-4">
-            {filteredMemories.map((memory) => (
+            {sortedMemories.map((memory) => (
               <div
                 key={memory.id}
                 className="bg-gray-50 dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600 hover:border-blue-400 dark:hover:border-blue-500 transition-colors group"
@@ -588,6 +648,8 @@ export default function Memories() {
             </button>
           )}
         </div>
+      )}
+      </>
       )}
     </div>
   )

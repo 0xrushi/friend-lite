@@ -1,7 +1,8 @@
 import { Link, useLocation, Outlet } from 'react-router-dom'
-import { Music, MessageSquare, MessageCircle, Brain, Users, Upload, Settings, LogOut, Sun, Moon, Shield, Radio, Layers, Calendar } from 'lucide-react'
+import { Music, MessageSquare, MessageCircle, Brain, Users, Upload, Settings, LogOut, Sun, Moon, Shield, Radio, Layers, Puzzle, Zap, Activity } from 'lucide-react'
 import { useAuth } from '../../contexts/AuthContext'
 import { useTheme } from '../../contexts/ThemeContext'
+import GlobalRecordingIndicator from './GlobalRecordingIndicator'
 
 export default function Layout() {
   const location = useLocation()
@@ -13,12 +14,14 @@ export default function Layout() {
     { path: '/chat', label: 'Chat', icon: MessageCircle },
     { path: '/conversations', label: 'Conversations', icon: MessageSquare },
     { path: '/memories', label: 'Memories', icon: Brain },
-    { path: '/timeline', label: 'Timeline', icon: Calendar },
     { path: '/users', label: 'User Management', icon: Users },
     ...(isAdmin ? [
       { path: '/upload', label: 'Upload Audio', icon: Upload },
-      { path: '/queue', label: 'Queue Management', icon: Layers },
-      { path: '/system', label: 'System State', icon: Settings },
+      { path: '/queue', label: 'Queue & Events', icon: Layers },
+      { path: '/plugins', label: 'Plugins', icon: Puzzle },
+      { path: '/finetuning', label: 'Fine-tuning', icon: Zap },
+      { path: '/system', label: 'System Status', icon: Activity },
+      { path: '/settings', label: 'Settings', icon: Settings },
     ] : []),
   ]
 
@@ -35,6 +38,9 @@ export default function Layout() {
               </h1>
             </div>
             <div className="flex items-center space-x-4">
+              {/* Global Recording Indicator */}
+              <GlobalRecordingIndicator />
+
               <button
                 onClick={toggleTheme}
                 className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-gray-600 dark:text-gray-300"
@@ -42,7 +48,7 @@ export default function Layout() {
               >
                 {isDark ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
               </button>
-              
+
               {/* User info */}
               <div className="flex items-center space-x-2 text-sm text-gray-700 dark:text-gray-300">
                 <div className="flex items-center space-x-1">

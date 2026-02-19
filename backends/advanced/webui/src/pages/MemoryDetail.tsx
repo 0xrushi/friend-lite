@@ -1,8 +1,10 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Calendar, Tag, Trash2, RefreshCw } from 'lucide-react'
-import { memoriesApi } from '../services/api'
+import { useQueryClient } from '@tanstack/react-query'
+import { ArrowLeft, Calendar, Tag, Trash2, RefreshCw, Edit3, Save, X, MessageSquare } from 'lucide-react'
+import { annotationsApi } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
+import { useMemoryDetail, useDeleteMemory } from '../hooks/useMemories'
 
 interface Memory {
   id: string
@@ -30,46 +32,98 @@ interface Memory {
   }
   hash?: string
   role?: string
+  source_conversation?: {
+    conversation_id: string
+    title?: string
+    summary?: string
+    created_at?: string
+  }
 }
 
 export default function MemoryDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const { user } = useAuth()
-  const [memory, setMemory] = useState<Memory | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const queryClient = useQueryClient()
 
-  const loadMemory = async () => {
-    if (!user?.id || !id) {
-      console.log('⏭️ MemoryDetail: Missing user or id', { userId: user?.id, memoryId: id })
+  const {
+    data: memoryData,
+    isLoading: loading,
+    error: queryError,
+  } = useMemoryDetail(id, user?.id)
+
+  const memory = memoryData as Memory | undefined
+
+  const error = queryError?.message ?? ((!loading && !memory) ? 'Memory not found' : null)
+
+  // Inline editing state
+  const [isEditing, setIsEditing] = useState(false)
+  const [editedContent, setEditedContent] = useState('')
+  const [isSaving, setIsSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+
+  const handleStartEdit = () => {
+    if (memory) {
+      setEditedContent(memory.memory)
+      setIsEditing(true)
+      setSaveError(null)
+    }
+  }
+
+  const handleCancelEdit = () => {
+    setIsEditing(false)
+    setEditedContent('')
+    setSaveError(null)
+  }
+
+  const handleSaveEdit = async () => {
+    if (!memory || !id || !user?.id) return
+
+    // Don't save if content hasn't changed
+    if (editedContent === memory.memory) {
+      setIsEditing(false)
       return
     }
 
-    try {
-      console.log('🔍 MemoryDetail: Loading memory', id)
-      setLoading(true)
-      setError(null)
-      const response = await memoriesApi.getById(id, user.id)
-      const memoryData = response.data.memory
-      console.log('📦 MemoryDetail: Loaded memory', memoryData?.id)
+    setIsSaving(true)
+    setSaveError(null)
 
-      if (memoryData) {
-        setMemory(memoryData)
-      } else {
-        setError('Memory not found')
-      }
+    try {
+      // Create annotation to update memory
+      await annotationsApi.createMemoryAnnotation({
+        memory_id: id,
+        original_text: memory.memory,
+        corrected_text: editedContent
+      })
+
+      // Update query cache
+      queryClient.setQueryData(['memory', id], {
+        ...memory,
+        memory: editedContent,
+        updated_at: new Date().toISOString()
+      })
+
+      setIsEditing(false)
+      console.log('✅ Memory updated successfully')
     } catch (err: any) {
-      console.error('❌ Failed to load memory:', err)
-      if (err.response?.status === 404) {
-        setError('Memory not found')
-      } else {
-        setError(err.message || 'Failed to load memory')
-      }
+      console.error('❌ Failed to save memory:', err)
+      setSaveError(err.response?.data?.detail || err.message || 'Failed to save changes')
     } finally {
-      setLoading(false)
+      setIsSaving(false)
     }
   }
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault()
+      handleSaveEdit()
+    } else if (e.key === 'Escape') {
+      e.preventDefault()
+      handleCancelEdit()
+    }
+  }
+
+  const deleteMemoryMutation = useDeleteMemory()
 
   const handleDelete = async () => {
     if (!memory || !id) return
@@ -78,30 +132,45 @@ export default function MemoryDetail() {
     if (!confirmed) return
 
     try {
-      await memoriesApi.delete(id)
+      await deleteMemoryMutation.mutateAsync(id)
       navigate('/memories')
     } catch (err: any) {
-      console.error('❌ Failed to delete memory:', err)
+      console.error('Failed to delete memory:', err)
       alert('Failed to delete memory: ' + (err.message || 'Unknown error'))
     }
   }
 
-  useEffect(() => {
-    loadMemory()
-  }, [id, user?.id])
-
-  const formatDate = (dateString: string) => {
-    try {
-      return new Date(dateString).toLocaleString('en-US', {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-      })
-    } catch {
-      return dateString
+  const formatDate = (dateInput: string | number | undefined | null) => {
+    if (dateInput === undefined || dateInput === null || dateInput === '') {
+      return 'N/A'
     }
+
+    let date: Date
+
+    if (typeof dateInput === 'number') {
+      date = dateInput > 1e10 ? new Date(dateInput) : new Date(dateInput * 1000)
+    } else if (typeof dateInput === 'string') {
+      if (dateInput.match(/^\d+$/)) {
+        const timestamp = parseInt(dateInput)
+        date = timestamp > 1e10 ? new Date(timestamp) : new Date(timestamp * 1000)
+      } else {
+        date = new Date(dateInput)
+      }
+    } else {
+      date = new Date(dateInput)
+    }
+
+    if (isNaN(date.getTime())) {
+      return 'N/A'
+    }
+
+    return date.toLocaleString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    })
   }
 
   const getMemoryTypeIcon = () => {
@@ -204,9 +273,67 @@ export default function MemoryDetail() {
                     {memory.metadata.name}
                   </h1>
                 )}
-                <p className="text-gray-700 dark:text-gray-300 leading-relaxed whitespace-pre-wrap">
-                  {memory.memory}
-                </p>
+
+                {/* Editable Memory Content */}
+                <div className="relative">
+                  {isEditing ? (
+                    // Edit mode
+                    <div className="space-y-3">
+                      <textarea
+                        value={editedContent}
+                        onChange={(e) => setEditedContent(e.target.value)}
+                        onKeyDown={handleKeyDown}
+                        className="w-full min-h-[150px] px-4 py-3 text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-900 border-2 border-blue-500 dark:border-blue-400 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 resize-y leading-relaxed"
+                        placeholder="Enter memory content..."
+                        autoFocus
+                        disabled={isSaving}
+                      />
+
+                      {saveError && (
+                        <div className="text-sm text-red-600 dark:text-red-400">
+                          {saveError}
+                        </div>
+                      )}
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={handleSaveEdit}
+                          disabled={isSaving || editedContent === memory.memory}
+                          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          <Save className="w-4 h-4" />
+                          {isSaving ? 'Saving...' : 'Save'}
+                        </button>
+                        <button
+                          onClick={handleCancelEdit}
+                          disabled={isSaving}
+                          className="flex items-center gap-2 px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          <X className="w-4 h-4" />
+                          Cancel
+                        </button>
+                        <span className="text-xs text-gray-500 dark:text-gray-400 ml-2">
+                          Ctrl+Enter to save, Esc to cancel
+                        </span>
+                      </div>
+                    </div>
+                  ) : (
+                    // View mode with hover to edit
+                    <div
+                      onClick={handleStartEdit}
+                      className="group cursor-pointer rounded-lg p-3 -mx-3 transition-colors hover:bg-yellow-50 dark:hover:bg-yellow-900/10"
+                      title="Click to edit"
+                    >
+                      <p className="text-gray-700 dark:text-gray-300 leading-relaxed whitespace-pre-wrap">
+                        {memory.memory}
+                      </p>
+                      <div className="opacity-0 group-hover:opacity-100 transition-opacity mt-2 flex items-center gap-1 text-sm text-gray-500 dark:text-gray-400">
+                        <Edit3 className="w-4 h-4" />
+                        <span>Click to edit</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </div>
@@ -302,18 +429,53 @@ export default function MemoryDetail() {
             </div>
           )}
 
-          {/* Additional Metadata */}
-          {memory.metadata && Object.keys(memory.metadata).filter(key =>
-            !['name', 'timeRanges', 'isPerson', 'isEvent', 'isPlace', 'extractedWith'].includes(key)
-          ).length > 0 && (
-            <div className="bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
-              <h3 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase mb-3">
-                Additional Data
+          {/* Source Conversation */}
+          {memory.source_conversation && (
+            <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+              <h3 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase mb-3 flex items-center gap-2">
+                <MessageSquare className="w-4 h-4" />
+                Source Conversation
               </h3>
-              <dl className="space-y-2 text-sm">
-                {Object.entries(memory.metadata)
-                  .filter(([key]) => !['name', 'timeRanges', 'isPerson', 'isEvent', 'isPlace', 'extractedWith'].includes(key))
-                  .map(([key, value]) => (
+              <div className="space-y-2">
+                <button
+                  onClick={() => navigate(`/conversations/${memory.source_conversation!.conversation_id}`)}
+                  className="text-sm font-medium text-blue-700 dark:text-blue-300 hover:underline text-left"
+                >
+                  {memory.source_conversation.title || 'Untitled Conversation'}
+                </button>
+                {memory.source_conversation.summary && (
+                  <p className="text-xs text-gray-600 dark:text-gray-400 line-clamp-3">
+                    {memory.source_conversation.summary}
+                  </p>
+                )}
+                {memory.source_conversation.created_at && (
+                  <p className="text-xs text-gray-500 dark:text-gray-500">
+                    {formatDate(memory.source_conversation.created_at)}
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Additional Metadata */}
+          {(() => {
+            const INTERNAL_KEYS = [
+              'name', 'timeRanges', 'isPerson', 'isEvent', 'isPlace', 'extractedWith',
+              'source_id', 'user_id', 'user_email', 'client_id', 'source', 'timestamp',
+              'extraction_enabled', 'client_name', 'mcp_server', 'chronicle_user_id',
+              'chronicle_user_email',
+            ]
+            const visibleEntries = memory.metadata
+              ? Object.entries(memory.metadata).filter(([key]) => !INTERNAL_KEYS.includes(key))
+              : []
+
+            return visibleEntries.length > 0 ? (
+              <div className="bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+                <h3 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase mb-3">
+                  Additional Data
+                </h3>
+                <dl className="space-y-2 text-sm">
+                  {visibleEntries.map(([key, value]) => (
                     <div key={key} className="flex justify-between items-start gap-2">
                       <dt className="text-gray-600 dark:text-gray-400 capitalize">{key}:</dt>
                       <dd className="text-gray-900 dark:text-gray-100 text-right truncate max-w-[150px]" title={String(value)}>
@@ -321,9 +483,10 @@ export default function MemoryDetail() {
                       </dd>
                     </div>
                   ))}
-              </dl>
-            </div>
-          )}
+                </dl>
+              </div>
+            ) : null
+          })()}
         </div>
       </div>
     </div>

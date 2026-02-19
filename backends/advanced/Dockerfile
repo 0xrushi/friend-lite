@@ -1,48 +1,98 @@
-FROM python:3.12-slim-bookworm AS builder
+# ============================================
+# Builder stage - install dependencies
+# ============================================
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS builder
 
-# Install system dependencies for building
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
+# Install system dependencies needed for building
+RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libsndfile1 \
     git \
     curl \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*
-    # portaudio19-dev \
 
-# Install uv
-COPY --from=ghcr.io/astral-sh/uv:0.6.10 /uv /uvx /bin/
+ENV UV_COMPILE_BYTECODE=1
+ENV UV_LINK_MODE=copy
 
-# Set up the working directory
 WORKDIR /app
 
-# Copy package structure and dependency files first
-COPY pyproject.toml README.md ./
-COPY uv.lock .
-RUN mkdir -p src/advanced_omi_backend
-COPY src/advanced_omi_backend/__init__.py src/advanced_omi_backend/
+# Copy dependency files first (cache-friendly)
+COPY pyproject.toml uv.lock ./
 
-# Install dependencies using uv with deepgram extra
-# Use cache mount for BuildKit, fallback for legacy builds
-# RUN --mount=type=cache,target=/root/.cache/uv \
-#     uv sync --extra deepgram
-# Fallback for legacy Docker builds (CI compatibility)
-RUN uv sync --extra deepgram
+# Export locked deps to requirements.txt (handles extras, git sources, custom indexes)
+# Install to system Python (no venv) - container IS the isolation
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv export --frozen --no-dev --extra deepgram --no-emit-project -o requirements.txt && \
+    uv pip install --system -r requirements.txt
 
-# Copy all application code
+
+# ============================================
+# Production stage
+# ============================================
+FROM python:3.12-slim-bookworm AS prod
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libsndfile1 \
+    curl \
+    ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy installed packages from builder
+COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+
+# Source layout needs PYTHONPATH
+ENV PYTHONPATH=/app/src
+
+# Copy application code
 COPY . .
 
-# Copy configuration files if they exist, otherwise they will be created from templates at runtime
-# The files are expected to exist, but we handle the case where they don't gracefully
-
+# Copy configuration files if they exist
 COPY diarization_config.json* ./
 
-
-# Copy and make startup scripts executable
+# Copy and make startup script executable
 COPY start.sh ./
-COPY start-workers.sh ./
-RUN chmod +x start.sh start-workers.sh
+RUN chmod +x start.sh
 
-# Run the application with workers
+CMD ["./start.sh"]
+
+
+# ============================================
+# Dev/Test stage - includes test dependencies
+# ============================================
+FROM python:3.12-slim-bookworm AS dev
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libsndfile1 \
+    curl \
+    ffmpeg \
+    build-essential \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# For dev, install deps + test group using uv temporarily
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+COPY pyproject.toml uv.lock ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv export --frozen --extra deepgram --group test --no-emit-project -o requirements.txt && \
+    uv pip install --system -r requirements.txt && \
+    rm /bin/uv /bin/uvx
+
+ENV PYTHONPATH=/app/src
+
+# Copy application code
+COPY . .
+
+# Copy configuration files if they exist
+COPY diarization_config.json* ./
+
+# Copy and make startup script executable
+COPY start.sh ./
+RUN chmod +x start.sh
+
 CMD ["./start.sh"]

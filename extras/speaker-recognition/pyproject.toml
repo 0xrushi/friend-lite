@@ -8,8 +8,10 @@ dependencies = [
     "fastapi>=0.115.12",
     "uvicorn>=0.34.2",
     "scipy>=1.10.0",
-    "pyannote.audio>=3.3.2",
+    "pyannote.audio>=4.0",
+    "torchcodec<0.10",  # 0.10+ requires PyTorch newer than 2.9
     "aiohttp>=3.8.0",
+    "httpx>=0.27.0",
     "python-multipart>=0.0.6",
     "pydantic>=2.0.0",
     "soundfile>=0.12",
@@ -19,6 +21,8 @@ dependencies = [
     "pydub>=0.25.1",
     "yt-dlp>=2025.7.21",
     "websockets>=12.0",
+    "pyyaml>=6.0.0",
+    "omegaconf>=2.3.0",
     # Audio processing and visualization
     "librosa>=0.10.0",
     "plotly>=5.18.0",
@@ -43,11 +47,6 @@ cpu = [
     "torchaudio>=2.0.0",
 ]
 
-cu121 = [
-    "torch>=2.0.0",
-    "torchaudio>=2.0.0",
-]
-
 cu126 = [
     "torch>=2.0.0",
     "torchaudio>=2.0.0",
@@ -62,7 +61,6 @@ cu128 = [
 conflicts = [
     [
         { extra = "cpu" },
-        { extra = "cu121" },
         { extra = "cu126" },
         { extra = "cu128" },
     ],
@@ -71,13 +69,11 @@ conflicts = [
 [tool.uv.sources]
 torch = [
     { index = "pytorch-cpu", extra = "cpu" },
-    { index = "pytorch-cu121", extra = "cu121" },
     { index = "pytorch-cu126", extra = "cu126" },
     { index = "pytorch-cu128", extra = "cu128" },
 ]
 torchaudio = [
     { index = "pytorch-cpu", extra = "cpu" },
-    { index = "pytorch-cu121", extra = "cu121" },
     { index = "pytorch-cu126", extra = "cu126" },
     { index = "pytorch-cu128", extra = "cu128" },
 ]
@@ -85,11 +81,6 @@ torchaudio = [
 [[tool.uv.index]]
 name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
-explicit = true
-
-[[tool.uv.index]]
-name = "pytorch-cu121"
-url = "https://download.pytorch.org/whl/cu121"
 explicit = true
 
 [[tool.uv.index]]

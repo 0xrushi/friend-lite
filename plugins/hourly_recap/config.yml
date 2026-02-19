@@ -1,0 +1,22 @@
+# Hourly Recap Plugin Configuration
+#
+# This file contains non-secret configuration for the hourly recap plugin.
+# Secrets (SMTP credentials) are stored in backends/advanced/.env
+# Plugin orchestration (enabled, events) is in config/plugins.yml
+
+# How far back to look for conversations (in minutes)
+lookback_minutes: 60
+
+# SMTP Configuration (reads from .env)
+smtp_host: ${SMTP_HOST}
+smtp_port: ${SMTP_PORT:-587}
+smtp_username: ${SMTP_USERNAME}
+smtp_password: ${SMTP_PASSWORD}
+smtp_use_tls: ${SMTP_USE_TLS:-true}
+
+# Email sender configuration
+from_email: ${FROM_EMAIL}
+from_name: ${FROM_NAME:-Chronicle AI}
+
+# Email content settings
+subject_prefix: "Hourly Recap"
