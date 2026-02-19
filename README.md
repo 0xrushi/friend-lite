@@ -2,9 +2,15 @@
 
 Self-hostable AI system that captures audio/video data from OMI devices and other sources to generate memories, action items, and contextual insights about your conversations and daily interactions.
 
-## Quick Start → [Get Started](quickstart.md)
+## Quick Start
 
-Run setup wizard, start services, access at http://localhost:5173
+```bash
+curl -fsSL https://raw.githubusercontent.com/SimpleOpenSoftware/chronicle/main/install.sh | sh
+```
+
+This clones the latest release, installs dependencies, and launches the interactive setup wizard.
+
+For step-by-step instructions, see the [setup guide](quickstart.md).
 
 ## Screenshots
 
