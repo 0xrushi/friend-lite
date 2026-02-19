@@ -302,8 +302,8 @@ class PluginRouter:
         if condition_type == 'always':
             return self._PASS
 
-        # Button events bypass transcript-based conditions
-        if event and event in (PluginEvent.BUTTON_SINGLE_PRESS, PluginEvent.BUTTON_DOUBLE_PRESS):
+        # Button and starred events bypass transcript-based conditions (no transcript to match)
+        if event and event in (PluginEvent.BUTTON_SINGLE_PRESS, PluginEvent.BUTTON_DOUBLE_PRESS, PluginEvent.CONVERSATION_STARRED):
             return self._PASS
 
         elif condition_type == 'wake_word':
@@ -354,6 +354,8 @@ class PluginRouter:
             return await plugin.on_conversation_complete(context)
         elif event in (PluginEvent.MEMORY_PROCESSED,):
             return await plugin.on_memory_processed(context)
+        elif event == PluginEvent.CONVERSATION_STARRED:
+            return await plugin.on_conversation_starred(context)
         elif event in (PluginEvent.BUTTON_SINGLE_PRESS, PluginEvent.BUTTON_DOUBLE_PRESS):
             return await plugin.on_button_event(context)
         elif event == PluginEvent.PLUGIN_ACTION:

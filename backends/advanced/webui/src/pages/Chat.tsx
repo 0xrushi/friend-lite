@@ -13,12 +13,6 @@ interface ChatMessage {
   memories_used: string[]
 }
 
-interface StreamingEvent {
-  type: 'token' | 'memory_context' | 'complete' | 'error'
-  data: any
-  timestamp: number
-}
-
 interface MemoryContext {
   memory_ids: string[]
   memory_count: number
@@ -198,21 +192,31 @@ export default function Chat() {
             }
 
             try {
-              const event: StreamingEvent = JSON.parse(data)
+              const chunk = JSON.parse(data)
 
-              switch (event.type) {
-                case 'memory_context':
-                  setMemoryContext(event.data)
-                  break
-                case 'token':
-                  accumulatedContent += event.data
-                  setStreamingMessage(accumulatedContent)
-                  break
-                case 'complete':
-                  setStreamingMessage('')
-                  break
-                case 'error':
-                  throw new Error(event.data.error)
+              // Handle OpenAI-style error object
+              if (chunk.error) {
+                throw new Error(chunk.error.message || 'Unknown error')
+              }
+
+              // Chronicle metadata (memory context, session info)
+              if (chunk.chronicle_metadata) {
+                const meta = chunk.chronicle_metadata
+                if (meta.memory_count !== undefined) {
+                  setMemoryContext({ memory_ids: meta.memory_ids || [], memory_count: meta.memory_count })
+                }
+              }
+
+              // Content delta
+              const delta = chunk.choices?.[0]?.delta
+              if (delta?.content) {
+                accumulatedContent += delta.content
+                setStreamingMessage(accumulatedContent)
+              }
+
+              // Finish reason
+              if (chunk.choices?.[0]?.finish_reason === 'stop') {
+                setStreamingMessage('')
               }
             } catch (parseError) {
               console.error('Failed to parse streaming event:', parseError)

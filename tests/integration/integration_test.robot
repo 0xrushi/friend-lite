@@ -236,17 +236,16 @@ Verify Chat Integration
 
     Log    Chat session created successfully: ${session_id}    INFO
 
-    # Try to send a message (if endpoint is available)
+    # Send a message via OpenAI-compatible completions endpoint (non-streaming)
     ${conversation_id}=    Set Variable    ${conversation}[conversation_id]
-    ${message_data}=       Create Dictionary    content=What did we discuss about glass blowing in conversation ${conversation_id}?
-    ${msg_status}=        Run Keyword And Return Status
-    ...    POST On Session    ${session_alias}    /api/chat/sessions/${session_id}/messages    json=${message_data}    expected_status=200
+    ${user_msg}=           Create Dictionary    role=user    content=What did we discuss about glass blowing in conversation ${conversation_id}?
+    @{messages}=           Create List    ${user_msg}
+    ${body}=               Create Dictionary    messages=${messages}    stream=${False}    session_id=${session_id}
+    ${msg_response}=       POST On Session    ${session_alias}    /api/chat/completions    json=${body}    expected_status=200
 
-    IF    ${msg_status}
-        Log    Chat message functionality is available    INFO
-    ELSE
-        Log    Chat message endpoints not available or not implemented - skipping message test    WARN
-    END
+    ${msg_data}=    Set Variable    ${msg_response.json()}
+    Dictionary Should Contain Key    ${msg_data}    choices
+    Log    Chat completions endpoint responded successfully    INFO
 
     # Clean up chat session
     ${response}=    DELETE On Session    ${session_alias}    /api/chat/sessions/${session_id}    expected_status=any

@@ -162,6 +162,10 @@ class Conversation(Document):
     end_reason: Optional["Conversation.EndReason"] = Field(None, description="Reason why the conversation ended")
     completed_at: Optional[datetime] = Field(None, description="When the conversation was completed/closed")
 
+    # Star/favorite
+    starred: bool = Field(False, description="Whether this conversation is starred/favorited")
+    starred_at: Optional[datetime] = Field(None, description="When the conversation was starred")
+
     # Summary fields (auto-generated from transcript)
     title: Optional[str] = Field(None, description="Auto-generated conversation title")
     summary: Optional[str] = Field(None, description="Auto-generated short summary (1-2 sentences)")

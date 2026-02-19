@@ -4,12 +4,12 @@ import { useQueryClient } from '@tanstack/react-query'
 import {
   ArrowLeft, Calendar, User, Trash2, RefreshCw, MoreVertical,
   RotateCcw, Zap, Play, Pause,
-  Save, X, Pencil, Brain, Clock, Database, Layers
+  Save, X, Pencil, Brain, Clock, Database, Layers, Star
 } from 'lucide-react'
 import { annotationsApi, speakerApi, BACKEND_URL } from '../services/api'
 import {
   useConversationDetail, useConversationMemories,
-  useDeleteConversation, useReprocessTranscript, useReprocessMemory, useReprocessSpeakers
+  useDeleteConversation, useReprocessTranscript, useReprocessMemory, useReprocessSpeakers, useToggleStar
 } from '../hooks/useConversations'
 import ConversationVersionHeader from '../components/ConversationVersionHeader'
 import { WaveformDisplay } from '../components/audio/WaveformDisplay'
@@ -59,6 +59,8 @@ interface Conversation {
   memory_version_count?: number
   active_transcript_version_number?: number
   active_memory_version_number?: number
+  starred?: boolean
+  starred_at?: string
 }
 
 export default function ConversationDetail() {
@@ -91,11 +93,25 @@ export default function ConversationDetail() {
   const [reprocessingMemory, setReprocessingMemory] = useState(false)
   const [reprocessingSpeakers, setReprocessingSpeakers] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
+  const toggleStarMutation = useToggleStar()
 
-  // Audio playback state
+  const handleToggleStar = async () => {
+    if (!id) return
+    try {
+      await toggleStarMutation.mutateAsync(id)
+    } catch (err: any) {
+      setActionError(err?.response?.data?.error || 'Failed to toggle star')
+    }
+  }
+
+  // Audio playback state — chunk-based (10s windows loaded on demand)
+  const CHUNK_WINDOW = 10 // seconds per audio chunk window
   const [playingSegment, setPlayingSegment] = useState<string | null>(null)
   const [audioCurrentTime, setAudioCurrentTime] = useState<number>(0)
   const audioRefs = useRef<{ [key: string]: HTMLAudioElement }>({})
+  const [activeAudioKey, setActiveAudioKey] = useState<string | null>(null)
+  const [isAudioPaused, setIsAudioPaused] = useState(false)
+  const handleSeekRef = useRef<(time: number, totalDuration?: number) => void>(() => {})
 
   // Detailed summary expand
   const [showDetailedSummary, setShowDetailedSummary] = useState(false)
@@ -181,24 +197,100 @@ export default function ConversationDetail() {
     return `${mins}:${secs.toString().padStart(2, '0')}`
   }
 
-  // Seek handler for waveform
-  const handleSeek = useCallback((time: number) => {
+  // Chunk-based seek handler: loads a 10s audio window on demand via waveform click
+  const handleSeek = useCallback((time: number, totalDuration?: number) => {
     if (!id) return
-    const audioElement = audioRefs.current[id]
-    if (!audioElement) return
-    if (audioElement.readyState < 1) {
-      audioElement.addEventListener('loadedmetadata', () => {
-        audioElement.currentTime = time
-      }, { once: true })
+    const windowStart = Math.floor(time / CHUNK_WINDOW) * CHUNK_WINDOW
+    const cacheKey = `${id}_${windowStart}`
+
+    // If time exceeds total duration, stop playback
+    const dur = totalDuration ?? conversation?.audio_total_duration
+    if (dur !== undefined && time >= dur) {
+      setActiveAudioKey(null)
+      setIsAudioPaused(false)
       return
     }
-    const wasPlaying = !audioElement.paused
-    if (wasPlaying) audioElement.pause()
-    audioElement.currentTime = time
-    if (wasPlaying) {
-      audioElement.play().catch(() => {})
+
+    // Pause any currently playing audio
+    if (activeAudioKey && audioRefs.current[activeAudioKey]) {
+      audioRefs.current[activeAudioKey].pause()
     }
-  }, [id])
+
+    // Helper to play an audio element at the right offset
+    const playAt = (audio: HTMLAudioElement, absoluteTime: number) => {
+      const localTime = absoluteTime - windowStart
+      const startPlaying = () => {
+        audio.currentTime = Math.max(0, localTime)
+        audio.play().catch(err => console.warn('Playback failed:', err))
+      }
+      if (audio.readyState >= 2) {
+        startPlaying()
+      } else {
+        audio.addEventListener('canplay', startPlaying, { once: true })
+      }
+      setActiveAudioKey(cacheKey)
+      setIsAudioPaused(false)
+    }
+
+    // Check cache first
+    if (audioRefs.current[cacheKey]) {
+      playAt(audioRefs.current[cacheKey], time)
+      return
+    }
+
+    // Fetch audio chunk via authenticated API
+    const token = localStorage.getItem(getStorageKey('token')) || ''
+    fetch(`${BACKEND_URL}/api/conversations/${id}/audio-segments?start=${windowStart}&duration=${CHUNK_WINDOW}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(r => {
+        if (!r.ok) throw new Error(`Audio fetch failed: ${r.status}`)
+        return r.blob()
+      })
+      .then(blob => {
+        const blobUrl = URL.createObjectURL(blob)
+        const audio = new Audio(blobUrl)
+
+        // Track playback position
+        audio.addEventListener('timeupdate', () => {
+          setAudioCurrentTime(windowStart + audio.currentTime)
+        })
+
+        // Auto-load next window on end for seamless playback
+        audio.addEventListener('ended', () => {
+          const nextStart = windowStart + CHUNK_WINDOW
+          handleSeekRef.current(nextStart, dur)
+        })
+
+        // Cache it
+        audioRefs.current[cacheKey] = audio
+        playAt(audio, time)
+      })
+      .catch(err => console.warn('Failed to load audio chunk:', err))
+  }, [id, activeAudioKey, conversation?.audio_total_duration])
+
+  // Keep ref in sync
+  handleSeekRef.current = handleSeek
+
+  // Toggle play/pause for the conversation's active audio
+  const handleTogglePlayback = useCallback(() => {
+    if (!id) return
+    if (activeAudioKey && activeAudioKey.startsWith(id + '_')) {
+      const audio = audioRefs.current[activeAudioKey]
+      if (audio) {
+        if (audio.paused) {
+          audio.play().catch(err => console.warn('Resume failed:', err))
+          setIsAudioPaused(false)
+        } else {
+          audio.pause()
+          setIsAudioPaused(true)
+        }
+        return
+      }
+    }
+    // No active audio — start from beginning
+    handleSeek(0, conversation?.audio_total_duration)
+  }, [id, activeAudioKey, handleSeek, conversation?.audio_total_duration])
 
   // Segment play/pause
   const handleSegmentPlayPause = (segmentIndex: number, segment: Segment) => {
@@ -496,6 +588,14 @@ export default function ConversationDetail() {
           Back to Conversations
         </button>
 
+        <div className="flex items-center space-x-1">
+          <button
+            onClick={handleToggleStar}
+            className="p-2 rounded-full hover:bg-yellow-100 dark:hover:bg-yellow-900/30 transition-colors"
+            title={conversation.starred ? 'Unstar conversation' : 'Star conversation'}
+          >
+            <Star className={`h-5 w-5 ${conversation.starred ? 'fill-yellow-400 text-yellow-400' : 'text-gray-400 dark:text-gray-500'}`} />
+          </button>
         <div className="relative">
           <button
             onClick={(e) => {
@@ -545,6 +645,7 @@ export default function ConversationDetail() {
               </button>
             </div>
           )}
+        </div>
         </div>
       </div>
 
@@ -651,7 +752,7 @@ export default function ConversationDetail() {
             )}
           </div>
 
-          {/* Audio Player */}
+          {/* Audio Player — chunk-based (no full WAV download) */}
           {conversation.audio_chunks_count && conversation.audio_chunks_count > 0 && (
             <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-6">
               <h2 className="font-medium text-gray-900 dark:text-gray-100 mb-3">Audio</h2>
@@ -666,19 +767,22 @@ export default function ConversationDetail() {
                 />
               )}
 
-              <audio
-                ref={(el) => {
-                  if (el && id) audioRefs.current[id] = el
-                }}
-                controls
-                className="w-full h-10 mt-2"
-                preload="metadata"
-                src={`${BACKEND_URL}/api/audio/get_audio/${id}?token=${localStorage.getItem(getStorageKey('token')) || ''}`}
-                onTimeUpdate={(e) => {
-                  const ct = e.currentTarget?.currentTime
-                  if (ct !== undefined) setAudioCurrentTime(ct)
-                }}
-              />
+              {/* Play/pause + time display */}
+              <div className="flex items-center gap-3 mt-2">
+                <button
+                  onClick={handleTogglePlayback}
+                  className="p-2 rounded-full bg-blue-600 hover:bg-blue-700 text-white transition-colors"
+                  title={activeAudioKey && !isAudioPaused ? 'Pause' : 'Play'}
+                >
+                  {activeAudioKey && !isAudioPaused
+                    ? <Pause className="w-4 h-4" />
+                    : <Play className="w-4 h-4" />}
+                </button>
+                <span className="text-sm text-gray-600 dark:text-gray-400 font-mono">
+                  {formatDuration(audioCurrentTime)}
+                  {conversation.audio_total_duration ? ` / ${formatDuration(conversation.audio_total_duration)}` : ''}
+                </span>
+              </div>
             </div>
           )}
 

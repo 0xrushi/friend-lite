@@ -925,7 +925,8 @@ def main():
 
     # Service Management Commands
     console.print("2. Start all configured services:")
-    console.print("   [cyan]uv run --with-requirements setup-requirements.txt python services.py start --all --build[/cyan]")
+    console.print("   [cyan]./start.sh[/cyan]")
+    console.print("   [dim]Or: uv run --with-requirements setup-requirements.txt python services.py start --all --build[/dim]")
     console.print("")
     console.print("3. Or start individual services:")
     
@@ -960,11 +961,13 @@ def main():
     
     console.print("")
     console.print("3. Check service status:")
-    console.print("   [cyan]uv run --with-requirements setup-requirements.txt python services.py status[/cyan]")
-    
+    console.print("   [cyan]./status.sh[/cyan]")
+    console.print("   [dim]Or: uv run --with-requirements setup-requirements.txt python services.py status[/dim]")
+
     console.print("")
     console.print("4. Stop services when done:")
-    console.print("   [cyan]uv run --with-requirements setup-requirements.txt python services.py stop --all[/cyan]")
+    console.print("   [cyan]./stop.sh[/cyan]")
+    console.print("   [dim]Or: uv run --with-requirements setup-requirements.txt python services.py stop --all[/dim]")
     
     console.print(f"\n🚀 [bold]Enjoy Chronicle![/bold]")
     

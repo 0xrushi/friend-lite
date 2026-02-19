@@ -28,6 +28,7 @@ class PluginEvent(str, Enum):
     TRANSCRIPT_STREAMING = ("transcript.streaming", "Real-time transcript segments during a live conversation")
     TRANSCRIPT_BATCH = ("transcript.batch", "Batch transcript from file upload processing")
     MEMORY_PROCESSED = ("memory.processed", "After memories are extracted from a conversation")
+    CONVERSATION_STARRED = ("conversation.starred", "Fires when a conversation is starred or unstarred")
 
     # Button events (from OMI device)
     BUTTON_SINGLE_PRESS = ("button.single_press", "OMI device button single press")
@@ -56,6 +57,7 @@ class ButtonActionType(str, Enum):
     """Types of actions a button press can trigger (from test_button_actions plugin config)."""
 
     CLOSE_CONVERSATION = "close_conversation"
+    STAR_CONVERSATION = "star_conversation"
     CALL_PLUGIN = "call_plugin"
 
 

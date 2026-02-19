@@ -183,17 +183,18 @@ docker compose up --build
 ```yaml
 Required:
   - MongoDB: User data and conversations
+  - Redis: Job queues (RQ workers) and session state
+  - Qdrant: Vector storage for memory search
   - FastAPI Backend: Core audio processing
   - LLM Service: Memory extraction and action items (OpenAI or Ollama)
 
 Recommended:
-  - Vector Storage: Qdrant (Chronicle provider) or OpenMemory MCP server
   - Transcription: Deepgram or offline ASR services
 
 Optional:
   - Parakeet ASR: Offline transcription service
   - Speaker Recognition: Voice identification service
-  - Nginx Proxy: Load balancing and routing
+  - Caddy: HTTPS reverse proxy (auto-configured when HTTPS enabled)
   - OpenMemory MCP: For cross-client memory compatibility
 ```
 
@@ -207,9 +208,8 @@ Optional:
 6. **Versioned Processing**: Transcript and memory versions tracked with active version pointers
 7. **Memory Processing**: Pluggable providers (Chronicle native with individual facts or OpenMemory MCP delegation)
 8. **Memory Storage**: Direct Qdrant (Chronicle) or OpenMemory server (MCP provider)
-9. **Action Items**: Automatic task detection with "Simon says" trigger phrases
-10. **Audio Optimization**: Speech segment extraction removes silence automatically
-11. **Task Tracking**: BackgroundTaskManager ensures proper cleanup of all async operations
+9. **Audio Optimization**: Speech segment extraction removes silence automatically
+10. **Task Tracking**: BackgroundTaskManager ensures proper cleanup of all async operations
 
 ### Speech-Driven Architecture
 
@@ -266,8 +266,8 @@ QDRANT_BASE_URL=qdrant
 # Network Configuration
 HOST_IP=localhost
 BACKEND_PUBLIC_PORT=8000
-WEBUI_PORT=5173
-CORS_ORIGINS=http://localhost:3000,http://localhost:5173
+WEBUI_PORT=3010  # Production port (5173 is Vite dev server only)
+CORS_ORIGINS=http://localhost:3010,http://localhost:8000
 ```
 
 ### Memory Provider Configuration
@@ -400,13 +400,13 @@ The system supports processing existing audio files through the file upload API.
 export USER_TOKEN="your-jwt-token"
 
 # Upload single WAV file
-curl -X POST "http://localhost:8000/api/process-audio-files" \
+curl -X POST "http://localhost:8000/api/audio/upload" \
   -H "Authorization: Bearer $USER_TOKEN" \
   -F "files=@/path/to/audio.wav" \
   -F "device_name=file_upload"
 
 # Upload multiple WAV files
-curl -X POST "http://localhost:8000/api/process-audio-files" \
+curl -X POST "http://localhost:8000/api/audio/upload" \
   -H "Authorization: Bearer $USER_TOKEN" \
   -F "files=@/path/to/recording1.wav" \
   -F "files=@/path/to/recording2.wav" \
@@ -568,12 +568,14 @@ Project includes `.cursor/rules/always-plan-first.mdc` requiring understanding b
 ## Extended Documentation
 
 For detailed technical documentation, see:
-- **[@docs/wyoming-protocol.md](docs/wyoming-protocol.md)**: WebSocket communication protocol details
-- **[@docs/memory-providers.md](docs/memory-providers.md)**: In-depth memory provider comparison and setup
-- **[@docs/versioned-processing.md](docs/versioned-processing.md)**: Transcript and memory versioning details
-- **[@docs/api-reference.md](docs/api-reference.md)**: Complete endpoint documentation with examples
-- **[@docs/speaker-recognition.md](docs/speaker-recognition.md)**: Advanced analysis and live inference features
-- **[@docs/distributed-deployment.md](docs/distributed-deployment.md)**: Multi-machine deployment with Tailscale
+- **[@Docs/overview.md](Docs/overview.md)**: Architecture overview and technical deep dive
+- **[@Docs/init-system.md](Docs/init-system.md)**: Initialization system and service management
+- **[@Docs/ssl-certificates.md](Docs/ssl-certificates.md)**: HTTPS/SSL setup details
+- **[@Docs/audio-pipeline-architecture.md](Docs/audio-pipeline-architecture.md)**: Audio pipeline design
+- **[@backends/advanced/Docs/auth.md](backends/advanced/Docs/auth.md)**: Authentication architecture
+- **[backends/advanced/Docs/architecture.md](backends/advanced/Docs/architecture.md)**: Backend architecture details
+- **[@backends/advanced/Docs/memories.md](backends/advanced/Docs/memories.md)**: Memory system documentation
+- **[@backends/advanced/Docs/plugin-development-guide.md](backends/advanced/Docs/plugin-development-guide.md)**: Plugin development guide
 
 ## Robot Framework Testing
 

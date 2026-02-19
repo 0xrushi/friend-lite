@@ -76,11 +76,13 @@ Get Chat Statistics
     RETURN    ${response}
 
 Send Chat Message
-    [Documentation]    Send a message to a chat session
-    [Arguments]    ${session_id}    ${message_content}    ${expected_status}=201
+    [Documentation]    Send a message via OpenAI-compatible completions endpoint (non-streaming)
+    [Arguments]    ${session_id}    ${message_content}    ${expected_status}=200
 
-    ${message_data}=    Create Dictionary    content=${message_content}
-    ${response}=        POST On Session    api    /api/chat/sessions/${session_id}/messages    json=${message_data}    expected_status=${expected_status}
+    ${user_msg}=        Create Dictionary    role=user    content=${message_content}
+    @{messages}=        Create List    ${user_msg}
+    ${body}=            Create Dictionary    messages=${messages}    stream=${False}    session_id=${session_id}
+    ${response}=        POST On Session    api    /api/chat/completions    json=${body}    expected_status=${expected_status}
 
     RETURN    ${response}
 

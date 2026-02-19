@@ -66,6 +66,8 @@ class TestButtonActionsPlugin(BasePlugin):
 
         if action_type == ButtonActionType.CLOSE_CONVERSATION:
             return await self._handle_close_conversation(context, action_config)
+        elif action_type == ButtonActionType.STAR_CONVERSATION:
+            return await self._handle_star_conversation(context, action_config)
         elif action_type == ButtonActionType.CALL_PLUGIN:
             return await self._handle_call_plugin(context, action_config)
 
@@ -99,6 +101,31 @@ class TestButtonActionsPlugin(BasePlugin):
         else:
             logger.warning(f"Failed to close conversation for session {session_id[:12]}")
             return PluginResult(success=False, message="Failed to close conversation")
+
+    async def _handle_star_conversation(
+        self, context: PluginContext, action_config: dict
+    ) -> PluginResult:
+        """Star/unstar the current conversation via PluginServices."""
+        if not context.services:
+            logger.error("PluginServices not available in context")
+            return PluginResult(success=False, message="Services not available")
+
+        session_id = context.data.get("session_id")
+        if not session_id:
+            logger.warning("No session_id in button event data, cannot star conversation")
+            return PluginResult(success=False, message="No active session")
+
+        success = await context.services.star_conversation(session_id=session_id)
+
+        if success:
+            logger.info(f"Button press toggled star for session {session_id[:12]}")
+            return PluginResult(
+                success=True,
+                message="Conversation star toggled by button press",
+            )
+        else:
+            logger.warning(f"Failed to toggle star for session {session_id[:12]}")
+            return PluginResult(success=False, message="Failed to toggle conversation star")
 
     async def _handle_call_plugin(
         self, context: PluginContext, action_config: dict

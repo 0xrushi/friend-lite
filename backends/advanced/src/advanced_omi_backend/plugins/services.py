@@ -57,6 +57,43 @@ class PluginServices:
 
         return await request_conversation_close(self._async_redis, session_id, reason=reason.value)
 
+    async def star_conversation(self, session_id: str) -> bool:
+        """Toggle the star on the current conversation for a session.
+
+        Looks up the current conversation from Redis and calls toggle_star().
+
+        Args:
+            session_id: The streaming session ID
+
+        Returns:
+            True if the star toggle was successful
+        """
+        from advanced_omi_backend.controllers.conversation_controller import toggle_star
+        from advanced_omi_backend.models.conversation import Conversation
+        from advanced_omi_backend.users import User
+
+        # Look up current conversation_id from Redis
+        conversation_id = await self._async_redis.get(f"conversation:current:{session_id}")
+        if not conversation_id:
+            logger.warning(f"No current conversation for session {session_id}")
+            return False
+
+        # Find conversation to get user_id
+        conversation = await Conversation.find_one(Conversation.conversation_id == conversation_id)
+        if not conversation:
+            logger.warning(f"Conversation {conversation_id} not found for starring")
+            return False
+
+        # Look up user
+        user = await User.get(conversation.user_id)
+        if not user:
+            logger.warning(f"User {conversation.user_id} not found for starring")
+            return False
+
+        result = await toggle_star(conversation_id, user)
+        # toggle_star returns a dict on success, JSONResponse on error
+        return isinstance(result, dict) and "starred" in result
+
     async def call_plugin(
         self,
         plugin_id: str,

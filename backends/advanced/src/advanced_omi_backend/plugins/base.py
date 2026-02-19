@@ -152,6 +152,21 @@ class BasePlugin(ABC):
         """
         pass
 
+    async def on_conversation_starred(self, context: PluginContext) -> Optional[PluginResult]:
+        """
+        Called when a conversation is starred or unstarred.
+
+        Context data contains:
+            - conversation_id: str - Conversation identifier
+            - starred: bool - New starred state (True = starred, False = unstarred)
+            - starred_at: str or None - ISO timestamp when starred (None if unstarred)
+            - title: str or None - Conversation title
+
+        Returns:
+            PluginResult with success status, optional message, and should_continue flag
+        """
+        pass
+
     async def on_button_event(self, context: PluginContext) -> Optional[PluginResult]:
         """
         Called when a device button event is received.

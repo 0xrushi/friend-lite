@@ -107,17 +107,21 @@ export const authApi = {
 }
 
 export const conversationsApi = {
-  getAll: (includeDeleted?: boolean, includeUnprocessed?: boolean, limit?: number, offset?: number) => api.get('/api/conversations', {
+  getAll: (includeDeleted?: boolean, includeUnprocessed?: boolean, limit?: number, offset?: number, starredOnly?: boolean, sortBy?: string, sortOrder?: string) => api.get('/api/conversations', {
     params: {
       ...(includeDeleted !== undefined && { include_deleted: includeDeleted }),
       ...(includeUnprocessed !== undefined && { include_unprocessed: includeUnprocessed }),
+      ...(starredOnly !== undefined && { starred_only: starredOnly }),
       ...(limit !== undefined && { limit }),
       ...(offset !== undefined && { offset }),
+      ...(sortBy !== undefined && { sort_by: sortBy }),
+      ...(sortOrder !== undefined && { sort_order: sortOrder }),
     }
   }),
   getById: (id: string) => api.get(`/api/conversations/${id}`),
   search: (query: string, limit?: number, offset?: number) =>
     api.get('/api/conversations/search', { params: { q: query, limit, offset } }),
+  star: (id: string) => api.post(`/api/conversations/${id}/star`),
   delete: (id: string) => api.delete(`/api/conversations/${id}`),
   restore: (id: string) => api.post(`/api/conversations/${id}/restore`),
   permanentDelete: (id: string) => api.delete(`/api/conversations/${id}`, {
@@ -470,17 +474,20 @@ export const chatApi = {
   // Health check
   getHealth: () => api.get('/api/chat/health'),
   
-  // Streaming chat (returns EventSource for Server-Sent Events)
+  // Streaming chat — OpenAI-compatible completions endpoint
   sendMessage: (message: string, sessionId?: string, includeObsidianMemory?: boolean) => {
-    const requestBody: any = { message }
+    const requestBody: Record<string, unknown> = {
+      messages: [{ role: 'user', content: message }],
+      stream: true,
+    }
     if (sessionId) {
       requestBody.session_id = sessionId
     }
     if (includeObsidianMemory) {
       requestBody.include_obsidian_memory = includeObsidianMemory
     }
-    
-    return fetch(`${BACKEND_URL}/api/chat/send`, {
+
+    return fetch(`${BACKEND_URL}/api/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

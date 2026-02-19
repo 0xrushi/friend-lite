@@ -11,6 +11,7 @@ from pathlib import Path
 
 import redis.asyncio as aioredis
 from fastapi.responses import JSONResponse
+from pymongo.errors import OperationFailure
 
 from advanced_omi_backend.client_manager import (
     client_belongs_to_user,
@@ -21,6 +22,7 @@ from advanced_omi_backend.controllers.queue_controller import (
     JOB_RESULT_TTL,
     default_queue,
     memory_queue,
+    start_post_conversation_jobs,
     transcription_queue,
 )
 from advanced_omi_backend.controllers.session_controller import (
@@ -29,7 +31,7 @@ from advanced_omi_backend.controllers.session_controller import (
 from advanced_omi_backend.models.audio_chunk import AudioChunkDocument
 from advanced_omi_backend.models.conversation import Conversation
 from advanced_omi_backend.models.job import JobPriority
-from advanced_omi_backend.plugins.events import ConversationCloseReason
+from advanced_omi_backend.plugins.events import ConversationCloseReason, PluginEvent
 from advanced_omi_backend.users import User
 from advanced_omi_backend.workers.conversation_jobs import generate_title_summary_job
 from advanced_omi_backend.services.memory import get_memory_service
@@ -150,6 +152,8 @@ async def get_conversation(conversation_id: str, user: User):
             "memory_version_count": conversation.memory_version_count,
             "active_transcript_version_number": conversation.active_transcript_version_number,
             "active_memory_version_number": conversation.active_memory_version_number,
+            "starred": conversation.starred,
+            "starred_at": conversation.starred_at.isoformat() if conversation.starred_at else None,
         }
 
         return {"conversation": response}
@@ -197,6 +201,7 @@ def _conversation_to_list_dict(conv: Conversation) -> dict:
         "client_id": conv.client_id,
         "audio_chunks_count": conv.audio_chunks_count,
         "audio_total_duration": conv.audio_total_duration,
+        "duration_seconds": conv.audio_total_duration,
         "audio_compression_ratio": conv.audio_compression_ratio,
         "created_at": conv.created_at.isoformat() if conv.created_at else None,
         "deleted": conv.deleted,
@@ -216,15 +221,125 @@ def _conversation_to_list_dict(conv: Conversation) -> dict:
         "memory_version_count": conv.memory_version_count,
         "active_transcript_version_number": conv.active_transcript_version_number,
         "active_memory_version_number": conv.active_memory_version_number,
+        "starred": conv.starred,
+        "starred_at": conv.starred_at.isoformat() if conv.starred_at else None,
     }
+
+
+def _raw_doc_to_list_dict(doc: dict) -> dict:
+    """Convert a raw pymongo document (projected) to a list-view dict.
+
+    Computes segment_count, memory_count etc. from the lightweight projected
+    version arrays without loading full transcript/word data.
+    """
+    active_tv = doc.get("active_transcript_version")
+    active_mv = doc.get("active_memory_version")
+
+    # Compute segment_count from projected transcript_versions
+    segment_count = 0
+    transcript_versions = doc.get("transcript_versions") or []
+    for tv in transcript_versions:
+        if tv.get("version_id") == active_tv:
+            segment_count = len(tv.get("segments", []))
+            break
+
+    # Compute memory_count from projected memory_versions
+    memory_count = 0
+    memory_versions = doc.get("memory_versions") or []
+    for mv in memory_versions:
+        if mv.get("version_id") == active_mv:
+            memory_count = mv.get("memory_count", 0)
+            break
+
+    # Compute active version numbers (1-based)
+    active_transcript_version_number = None
+    for i, tv in enumerate(transcript_versions):
+        if tv.get("version_id") == active_tv:
+            active_transcript_version_number = i + 1
+            break
+
+    active_memory_version_number = None
+    for i, mv in enumerate(memory_versions):
+        if mv.get("version_id") == active_mv:
+            active_memory_version_number = i + 1
+            break
+
+    created_at = doc.get("created_at")
+    deleted_at = doc.get("deleted_at")
+    starred_at = doc.get("starred_at")
+
+    return {
+        "conversation_id": doc.get("conversation_id"),
+        "user_id": doc.get("user_id"),
+        "client_id": doc.get("client_id"),
+        "audio_chunks_count": doc.get("audio_chunks_count"),
+        "audio_total_duration": doc.get("audio_total_duration"),
+        "duration_seconds": doc.get("audio_total_duration"),
+        "audio_compression_ratio": doc.get("audio_compression_ratio"),
+        "created_at": created_at.isoformat() if created_at else None,
+        "deleted": doc.get("deleted", False),
+        "deletion_reason": doc.get("deletion_reason"),
+        "deleted_at": deleted_at.isoformat() if deleted_at else None,
+        "processing_status": doc.get("processing_status"),
+        "always_persist": doc.get("always_persist", False),
+        "title": doc.get("title"),
+        "summary": doc.get("summary"),
+        "detailed_summary": doc.get("detailed_summary"),
+        "active_transcript_version": active_tv,
+        "active_memory_version": active_mv,
+        "segment_count": segment_count,
+        "has_memory": len(memory_versions) > 0,
+        "memory_count": memory_count,
+        "transcript_version_count": len(transcript_versions),
+        "memory_version_count": len(memory_versions),
+        "active_transcript_version_number": active_transcript_version_number,
+        "active_memory_version_number": active_memory_version_number,
+        "starred": doc.get("starred", False),
+        "starred_at": starred_at.isoformat() if starred_at else None,
+    }
+
+
+# Projection for list view — excludes heavy transcript/word data
+_LIST_PROJECTION = {
+    "conversation_id": 1,
+    "user_id": 1,
+    "client_id": 1,
+    "audio_chunks_count": 1,
+    "audio_total_duration": 1,
+    "audio_compression_ratio": 1,
+    "created_at": 1,
+    "deleted": 1,
+    "deletion_reason": 1,
+    "deleted_at": 1,
+    "processing_status": 1,
+    "always_persist": 1,
+    "title": 1,
+    "summary": 1,
+    "detailed_summary": 1,
+    "starred": 1,
+    "starred_at": 1,
+    "active_transcript_version": 1,
+    "active_memory_version": 1,
+    # Lightweight version metadata (exclude transcript, words, segment text)
+    "transcript_versions.version_id": 1,
+    "transcript_versions.segments": 1,
+    "memory_versions.version_id": 1,
+    "memory_versions.memory_count": 1,
+}
+
+
+ALLOWED_SORT_FIELDS = {"created_at", "title", "audio_total_duration"}
 
 
 async def get_conversations(
     user: User,
     include_deleted: bool = False,
     include_unprocessed: bool = False,
+    starred_only: bool = False,
     limit: int = 200,
     offset: int = 0,
+    sort_by: str = "created_at",
+    sort_order: str = "desc",
 ):
     """Get conversations with speech only (speech-driven architecture).
 
@@ -234,6 +349,9 @@ async def get_conversations(
     """
     try:
         user_filter = {} if user.is_superuser else {"user_id": str(user.user_id)}
+
+        if starred_only:
+            user_filter["starred"] = True
 
         # Build query conditions — single $or when orphans are requested
         conditions = []
@@ -268,42 +386,46 @@ async def get_conversations(
         else:
             query = {**user_filter, "$or": conditions}
 
-        total = await Conversation.find(query).count()
+        # Validate and build sort
+        if sort_by not in ALLOWED_SORT_FIELDS:
+            sort_by = "created_at"
+        sort_direction = 1 if sort_order == "asc" else -1
 
-        user_conversations = (
-            await Conversation.find(query)
-            .sort(-Conversation.created_at)
-            .skip(offset)
-            .limit(limit)
-            .to_list()
-        )
+        collection = Conversation.get_pymongo_collection()
+
+        total = await collection.count_documents(query)
+
+        cursor = collection.find(query, _LIST_PROJECTION)
+        cursor = cursor.sort(sort_by, sort_direction).skip(offset).limit(limit)
+        raw_docs = await cursor.to_list(length=limit)
 
         # Mark orphans in results (lightweight in-memory check on the page)
         orphan_ids: set = set()
         if include_unprocessed:
-            for conv in user_conversations:
+            for doc in raw_docs:
+                conv_id = doc.get("conversation_id")
                 is_orphan_type1 = (
-                    conv.always_persist
-                    and conv.processing_status in ("pending_transcription", "transcription_failed")
-                    and not conv.deleted
+                    doc.get("always_persist")
+                    and doc.get("processing_status") in ("pending_transcription", "transcription_failed")
+                    and not doc.get("deleted")
                 )
                 is_orphan_type2 = (
-                    conv.deleted
-                    and conv.deletion_reason in (
+                    doc.get("deleted")
+                    and doc.get("deletion_reason") in (
                         "no_meaningful_speech",
                         "audio_file_not_ready",
                         "no_meaningful_speech_batch_transcription",
                     )
-                    and (conv.audio_chunks_count or 0) > 0
+                    and (doc.get("audio_chunks_count") or 0) > 0
                 )
                 if is_orphan_type1 or is_orphan_type2:
-                    orphan_ids.add(conv.conversation_id)
+                    orphan_ids.add(conv_id)
 
-        # Build response with explicit curated fields - minimal for list view
+        # Build response from projected documents - no Beanie model overhead
         conversations = []
-        for conv in user_conversations:
-            d = _conversation_to_list_dict(conv)
-            d["is_orphan"] = conv.conversation_id in orphan_ids
+        for doc in raw_docs:
+            d = _raw_doc_to_list_dict(doc)
+            d["is_orphan"] = doc.get("conversation_id") in orphan_ids
             conversations.append(d)
 
         return {
@@ -338,14 +460,35 @@ async def search_conversations(
             {"$sort": {"score": -1}},
             {
                 "$facet": {
-                    "results": [{"$skip": offset}, {"$limit": limit}],
+                    "results": [
+                        {"$skip": offset},
+                        {"$limit": limit},
+                        {"$project": {**_LIST_PROJECTION, "score": 1}},
+                    ],
                     "count": [{"$count": "total"}],
                 }
             },
         ]
 
-        cursor = collection.aggregate(pipeline)
-        facet_result = await cursor.to_list(length=1)
+        try:
+            cursor = collection.aggregate(pipeline)
+            facet_result = await cursor.to_list(length=1)
+        except OperationFailure as op_err:
+            if op_err.code == 27:  # No text index
+                logger.warning(
+                    "Text search failed: no text index on conversations collection. "
+                    "Restart the backend to let Beanie create the index."
+                )
+                return {
+                    "conversations": [],
+                    "total": 0,
+                    "limit": limit,
+                    "offset": offset,
+                    "query": query,
+                    "error": "Text search index not available. Try restarting the backend.",
+                }
+            raise
+
         facet = facet_result[0] if facet_result else {"results": [], "count": []}
 
         raw_docs = facet.get("results", [])
@@ -355,9 +498,9 @@ async def search_conversations(
         conversations = []
         for doc in raw_docs:
             score = doc.pop("score", 0)
-            conv = Conversation.model_validate(doc)
-            d = _conversation_to_list_dict(conv)
+            d = _raw_doc_to_list_dict(doc)
             d["score"] = round(score, 4)
+            d["is_orphan"] = False
             conversations.append(d)
 
         return {
@@ -588,6 +731,56 @@ async def restore_conversation(conversation_id: str, user: User) -> JSONResponse
         )
 
 
+async def toggle_star(conversation_id: str, user: User):
+    """Toggle the starred/favorite status of a conversation."""
+    try:
+        conversation = await Conversation.find_one(Conversation.conversation_id == conversation_id)
+        if not conversation:
+            return JSONResponse(status_code=404, content={"error": "Conversation not found"})
+
+        if not user.is_superuser and conversation.user_id != str(user.user_id):
+            return JSONResponse(status_code=403, content={"error": "Access forbidden"})
+
+        # Toggle
+        conversation.starred = not conversation.starred
+        conversation.starred_at = datetime.utcnow() if conversation.starred else None
+        await conversation.save()
+
+        logger.info(
+            f"Conversation {conversation_id} {'starred' if conversation.starred else 'unstarred'} "
+            f"by user {user.user_id}"
+        )
+
+        # Dispatch plugin event (fire-and-forget)
+        try:
+            from advanced_omi_backend.services.plugin_service import get_plugin_router
+
+            plugin_router = get_plugin_router()
+            if plugin_router:
+                await plugin_router.dispatch_event(
+                    event=PluginEvent.CONVERSATION_STARRED,
+                    user_id=str(user.user_id),
+                    data={
+                        "conversation_id": conversation_id,
+                        "starred": conversation.starred,
+                        "starred_at": conversation.starred_at.isoformat() if conversation.starred_at else None,
+                        "title": conversation.title,
+                    },
+                )
+        except Exception as e:
+            logger.warning(f"Failed to dispatch conversation.starred event: {e}")
+
+        return {
+            "conversation_id": conversation_id,
+            "starred": conversation.starred,
+            "starred_at": conversation.starred_at.isoformat() if conversation.starred_at else None,
+        }
+
+    except Exception as e:
+        logger.error(f"Error toggling star for conversation {conversation_id}: {e}")
+        return JSONResponse(status_code=500, content={"error": "Error toggling star"})
+
+
 async def reprocess_orphan(conversation_id: str, user: User):
     """Reprocess an orphan audio session - restore if deleted and enqueue full processing chain."""
     try:
@@ -649,61 +842,25 @@ async def reprocess_orphan(conversation_id: str, user: User):
             meta={"conversation_id": conversation_id},
         )
 
-        # Job 2: Speaker recognition (conditional)
-        speaker_config = get_service_config("speaker_recognition")
-        speaker_enabled = speaker_config.get("enabled", True)
-        speaker_dependency = transcript_job
-        speaker_job = None
-
-        if speaker_enabled:
-            speaker_job = transcription_queue.enqueue(
-                recognise_speakers_job,
-                conversation_id,
-                version_id,
-                depends_on=transcript_job,
-                job_timeout=600,
-                result_ttl=JOB_RESULT_TTL,
-                job_id=f"orphan_speaker_{conversation_id[:8]}",
-                description=f"Recognize speakers for orphan {conversation_id[:8]}",
-                meta={"conversation_id": conversation_id},
-            )
-            speaker_dependency = speaker_job
-
-        # Job 3: Extract memories
-        memory_job = memory_queue.enqueue(
-            process_memory_job,
-            conversation_id,
-            depends_on=speaker_dependency,
-            job_timeout=1800,
-            result_ttl=JOB_RESULT_TTL,
-            job_id=f"orphan_memory_{conversation_id[:8]}",
-            description=f"Extract memories for orphan {conversation_id[:8]}",
-            meta={"conversation_id": conversation_id},
-        )
-
-        # Job 4: Generate title/summary
-        title_summary_job = default_queue.enqueue(
-            generate_title_summary_job,
-            conversation_id,
-            job_timeout=300,
-            result_ttl=JOB_RESULT_TTL,
-            depends_on=memory_job,
-            job_id=f"orphan_title_{conversation_id[:8]}",
-            description=f"Generate title/summary for orphan {conversation_id[:8]}",
-            meta={"conversation_id": conversation_id, "trigger": "reprocess_orphan"},
+        # Chain post-transcription jobs (speaker recognition → memory → title/summary → event dispatch)
+        post_jobs = start_post_conversation_jobs(
+            conversation_id=conversation_id,
+            user_id=str(user.user_id),
+            transcript_version_id=version_id,
+            depends_on_job=transcript_job,
+            end_reason="reprocess_orphan",
         )
 
         logger.info(
             f"Enqueued orphan reprocessing chain for {conversation_id}: "
-            f"transcribe={transcript_job.id} → speaker={'skipped' if not speaker_job else speaker_job.id} "
-            f"→ memory={memory_job.id} → title={title_summary_job.id}"
+            f"transcribe={transcript_job.id} → post_jobs={post_jobs}"
         )
 
         return JSONResponse(
             content={
                 "message": f"Orphan reprocessing started for conversation {conversation_id}",
                 "job_id": transcript_job.id,
-                "title_summary_job_id": title_summary_job.id,
+                "title_summary_job_id": post_jobs.get("title_summary"),
                 "version_id": version_id,
                 "status": "queued",
             }
@@ -772,85 +929,25 @@ async def reprocess_transcript(conversation_id: str, user: User):
         )
         logger.info(f"📥 RQ: Enqueued transcription job {transcript_job.id}")
 
-        # Check if speaker recognition is enabled
-        speaker_config = get_service_config("speaker_recognition")
-        speaker_enabled = speaker_config.get(
-            "enabled", True
-        )  # Default to True for backward compatibility
-
-        # Job 2: Recognize speakers (conditional - only if enabled)
-        speaker_dependency = transcript_job  # Start with transcription job
-        speaker_job = None
-
-        if speaker_enabled:
-            speaker_job = transcription_queue.enqueue(
-                recognise_speakers_job,
-                conversation_id,
-                version_id,
-                depends_on=transcript_job,
-                job_timeout=600,
-                result_ttl=JOB_RESULT_TTL,
-                job_id=f"speaker_{conversation_id[:8]}",
-                description=f"Recognize speakers for {conversation_id[:8]}",
-                meta={"conversation_id": conversation_id},
-            )
-            speaker_dependency = speaker_job  # Chain for next job
-            logger.info(
-                f"📥 RQ: Enqueued speaker recognition job {speaker_job.id} (depends on {transcript_job.id})"
-            )
-        else:
-            logger.info(
-                f"⏭️  Speaker recognition disabled, skipping speaker job for conversation {conversation_id[:8]}"
-            )
-
-        # Job 3: Extract memories
-        # Depends on speaker job if it was created, otherwise depends on transcription
-        # Note: redis_client is injected by @async_job decorator, don't pass it directly
-        memory_job = memory_queue.enqueue(
-            process_memory_job,
-            conversation_id,
-            depends_on=speaker_dependency,  # Either speaker_job or transcript_job
-            job_timeout=1800,
-            result_ttl=JOB_RESULT_TTL,
-            job_id=f"memory_{conversation_id[:8]}",
-            description=f"Extract memories for {conversation_id[:8]}",
-            meta={"conversation_id": conversation_id},
+        # Chain post-transcription jobs (speaker recognition → memory → title/summary → event dispatch)
+        post_jobs = start_post_conversation_jobs(
+            conversation_id=conversation_id,
+            user_id=str(user.user_id),
+            transcript_version_id=version_id,
+            depends_on_job=transcript_job,
+            end_reason="reprocess_transcript",
         )
-        if speaker_job:
-            logger.info(
-                f"📥 RQ: Enqueued memory job {memory_job.id} (depends on speaker job {speaker_job.id})"
-            )
-        else:
-            logger.info(
-                f"📥 RQ: Enqueued memory job {memory_job.id} (depends on transcript job {transcript_job.id})"
-            )
 
-        # Job 4: Regenerate title/summary (depends on memory job to avoid race condition
-        # and to ensure fresh memories are available for context-enriched summaries)
-        title_summary_job = default_queue.enqueue(
-            generate_title_summary_job,
-            conversation_id,
-            job_timeout=300,
-            result_ttl=JOB_RESULT_TTL,
-            depends_on=memory_job,
-            job_id=f"title_summary_{conversation_id[:8]}",
-            description=f"Regenerate title/summary for {conversation_id[:8]}",
-            meta={"conversation_id": conversation_id, "trigger": "reprocess_transcript"},
-        )
         logger.info(
-            f"📥 RQ: Enqueued title/summary job {title_summary_job.id} (depends on memory job {memory_job.id})"
-        )
-
-        job = transcript_job  # For backward compatibility with return value
-        logger.info(
-            f"Created transcript reprocessing job {job.id} (version: {version_id}) for conversation {conversation_id}"
+            f"Created transcript reprocessing job {transcript_job.id} (version: {version_id}) "
+            f"for conversation {conversation_id}, post_jobs={post_jobs}"
         )
 
         return JSONResponse(
             content={
                 "message": f"Transcript reprocessing started for conversation {conversation_id}",
-                "job_id": job.id,
-                "title_summary_job_id": title_summary_job.id,
+                "job_id": transcript_job.id,
+                "title_summary_job_id": post_jobs.get("title_summary"),
                 "version_id": version_id,
                 "status": "queued",
             }

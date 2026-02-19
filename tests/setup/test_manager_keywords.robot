@@ -204,3 +204,15 @@ Test Cleanup
     # Try to cleanup audio streams if the keyword exists (websocket tests)
     Run Keyword And Ignore Error    Cleanup All Audio Streams
     Flush In Progress Jobs
+    # Clean up Redis audio/transcription state to prevent streaming consumer
+    # from re-discovering and re-processing completed streams (zombie tasks)
+    Cleanup Redis Audio State
+
+Cleanup Redis Audio State
+    [Documentation]    Delete audio/transcription Redis keys between tests.
+    ...                Without this, the streaming consumer re-discovers completed streams,
+    ...                spawns zombie process_stream tasks that each open a Deepgram WebSocket
+    ...                connection. After several tests, accumulated zombie connections exhaust
+    ...                Deepgram's concurrent connection limit, causing later tests to fail.
+    ${redis_clear_script}=    Set Variable    redis-cli --scan --pattern "audio:*" | xargs -r redis-cli DEL; redis-cli --scan --pattern "transcription:*" | xargs -r redis-cli DEL; redis-cli --scan --pattern "conversation:current:*" | xargs -r redis-cli DEL
+    Run Process    docker    exec    ${REDIS_CONTAINER}    sh    -c    ${redis_clear_script}    shell=True

@@ -721,6 +721,73 @@ class StreamingTranscriptionConsumer:
             self.active_streams.pop(stream_name, None)
             logger.debug(f"Removed {stream_name} from active streams tracking")
 
+            # Attempt to delete the stream if all consumer groups have finished processing.
+            # This prevents the discovery loop from re-discovering the stream during the
+            # TTL window (set by cleanup_client_state) and spawning zombie process_stream tasks.
+            try:
+                await self._try_delete_finished_stream(stream_name)
+            except Exception as e:
+                logger.debug(f"Stream cleanup check failed for {stream_name} (non-fatal): {e}")
+
+    async def _try_delete_finished_stream(self, stream_name: str):
+        """
+        Delete a Redis stream if all consumer groups have finished processing.
+
+        Both consumer groups (streaming-transcription and audio_persistence) read from
+        the same stream. We only delete when both have 0 pending messages to avoid
+        breaking the other consumer. If any group still has pending messages or not all
+        expected groups are registered, the 60s TTL fallback handles cleanup.
+        """
+        _EXPECTED_GROUPS = {"streaming-transcription", "audio_persistence"}
+
+        if not await self.redis_client.exists(stream_name):
+            return
+
+        groups = await self.redis_client.execute_command('XINFO', 'GROUPS', stream_name)
+        if not groups:
+            return
+
+        # Parse all groups — XINFO GROUPS returns a flat key-value array per group
+        registered_names = set()
+        total_pending = 0
+        for group in groups:
+            group_dict = {}
+            for i in range(0, len(group), 2):
+                key = group[i].decode() if isinstance(group[i], bytes) else str(group[i])
+                value = group[i + 1]
+                if isinstance(value, bytes):
+                    try:
+                        value = value.decode()
+                    except UnicodeDecodeError:
+                        value = str(value)
+                group_dict[key] = value
+
+            name = group_dict.get("name", "")
+            pending = int(group_dict.get("pending", 0))
+            registered_names.add(name)
+            total_pending += pending
+
+        if not _EXPECTED_GROUPS.issubset(registered_names):
+            logger.debug(
+                f"Stream {stream_name}: not all consumer groups registered yet "
+                f"(found: {registered_names}), skipping delete"
+            )
+            return
+
+        if total_pending > 0:
+            logger.debug(
+                f"Stream {stream_name} still has {total_pending} pending messages "
+                f"across consumer groups, skipping delete"
+            )
+            return
+
+        # All expected groups registered, all have 0 pending — safe to delete
+        await self.redis_client.delete(stream_name)
+        logger.info(
+            f"Deleted stream {stream_name} "
+            f"(all {len(_EXPECTED_GROUPS)} consumer groups have 0 pending)"
+        )
+
     async def start_consuming(self):
         """
         Start consuming audio streams and processing through streaming transcription.

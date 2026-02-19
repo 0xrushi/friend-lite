@@ -33,12 +33,18 @@ async def close_current_conversation(
 async def get_conversations(
     include_deleted: bool = Query(False, description="Include soft-deleted conversations"),
     include_unprocessed: bool = Query(False, description="Include orphan audio sessions (always_persist with failed/pending transcription)"),
+    starred_only: bool = Query(False, description="Only return starred/favorited conversations"),
     limit: int = Query(200, ge=1, le=500, description="Max conversations to return"),
     offset: int = Query(0, ge=0, description="Number of conversations to skip"),
+    sort_by: str = Query("created_at", description="Sort field: created_at, title, audio_total_duration"),
+    sort_order: str = Query("desc", description="Sort direction: asc or desc"),
     current_user: User = Depends(current_active_user)
 ):
     """Get conversations. Admins see all conversations, users see only their own."""
-    return await conversation_controller.get_conversations(current_user, include_deleted, include_unprocessed, limit, offset)
+    return await conversation_controller.get_conversations(
+        current_user, include_deleted, include_unprocessed, starred_only, limit, offset,
+        sort_by=sort_by, sort_order=sort_order,
+    )
 
 
 
@@ -348,6 +354,15 @@ async def get_audio_segment(
             "X-Audio-Duration": str(end - start)
         }
     )
+
+
+@router.post("/{conversation_id}/star")
+async def toggle_star(
+    conversation_id: str,
+    current_user: User = Depends(current_active_user)
+):
+    """Toggle the starred/favorite status of a conversation."""
+    return await conversation_controller.toggle_star(conversation_id, current_user)
 
 
 @router.delete("/{conversation_id}")

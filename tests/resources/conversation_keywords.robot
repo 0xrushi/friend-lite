@@ -234,6 +234,19 @@ Verify Conversation Always Persist Flag
 
     Log    ✅ Conversation ${conversation_id} has always_persist=True
 
+Star Conversation
+    [Documentation]    Toggle the starred status of a conversation
+    [Arguments]    ${conversation_id}
+
+    ${response}=    POST On Session    api    /api/conversations/${conversation_id}/star    expected_status=200
+    RETURN    ${response.json()}
+
+Get Starred Conversations
+    [Documentation]    Get only starred/favorited conversations
+    &{params}=    Create Dictionary    starred_only=true
+    ${response}=    GET On Session    api    /api/conversations    params=${params}    expected_status=200
+    RETURN    ${response.json()}[conversations]
+
 Verify Placeholder Conversation Title
     [Documentation]    Verify conversation has placeholder title
     [Arguments]    ${conversation_id}

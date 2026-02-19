@@ -4,12 +4,21 @@ import { conversationsApi } from '../services/api'
 interface ConversationListOpts {
   includeDeleted?: boolean
   includeUnprocessed?: boolean
+  starredOnly?: boolean
+  limit?: number
+  offset?: number
+  sortBy?: string
+  sortOrder?: string
 }
 
 export function useConversations(opts: ConversationListOpts = {}) {
   return useQuery({
     queryKey: ['conversations', opts],
-    queryFn: () => conversationsApi.getAll(opts.includeDeleted, opts.includeUnprocessed).then(r => r.data),
+    queryFn: () => conversationsApi.getAll(
+      opts.includeDeleted, opts.includeUnprocessed,
+      opts.limit, opts.offset, opts.starredOnly,
+      opts.sortBy, opts.sortOrder,
+    ).then(r => r.data),
   })
 }
 
@@ -87,6 +96,17 @@ export function useReprocessSpeakers() {
       conversationsApi.reprocessSpeakers(conversationId, transcriptVersionId || 'active'),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['conversations'] })
+    },
+  })
+}
+
+export function useToggleStar() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => conversationsApi.star(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['conversations'] })
+      queryClient.invalidateQueries({ queryKey: ['conversation'] })
     },
   })
 }

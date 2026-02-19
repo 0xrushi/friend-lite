@@ -546,7 +546,7 @@ def show_status():
     
     console.print(table)
     
-    console.print("\n💡 [dim]Use 'python services.py start --all' to start all configured services[/dim]")
+    console.print("\n💡 [dim]Use './start.sh' to start all configured services[/dim]")
 
 def main():
     parser = argparse.ArgumentParser(description="Chronicle Service Management")

@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
-import { MessageSquare, RefreshCw, Calendar, User, Play, Pause, MoreVertical, RotateCcw, Zap, ChevronDown, ChevronUp, Trash2, Save, X, Check, AlertTriangle, Pencil, Search, Brain } from 'lucide-react'
+import { MessageSquare, RefreshCw, Calendar, User, Play, Pause, MoreVertical, RotateCcw, Zap, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Trash2, Save, X, Check, AlertTriangle, Pencil, Search, Brain, Star, ArrowUpDown, Clock } from 'lucide-react'
 import { conversationsApi, annotationsApi, speakerApi, BACKEND_URL } from '../services/api'
-import { useConversations, useDeleteConversation, useReprocessTranscript, useReprocessMemory, useReprocessSpeakers, useReprocessOrphan } from '../hooks/useConversations'
+import { useConversations, useDeleteConversation, useReprocessTranscript, useReprocessMemory, useReprocessSpeakers, useReprocessOrphan, useToggleStar } from '../hooks/useConversations'
 import ConversationVersionHeader from '../components/ConversationVersionHeader'
 import { getStorageKey } from '../utils/storage'
 import { WaveformDisplay } from '../components/audio/WaveformDisplay'
@@ -44,6 +44,8 @@ interface Conversation {
   always_persist?: boolean
   processing_status?: string
   is_orphan?: boolean
+  starred?: boolean
+  starred_at?: string
 }
 
 // Speaker color palette for consistent colors across conversations
@@ -60,19 +62,52 @@ const SPEAKER_COLOR_PALETTE = [
   'text-cyan-600 dark:text-cyan-400',
 ];
 
+const PAGE_SIZE = 20
+
+const SORT_OPTIONS = [
+  { label: 'Date (newest)', sortBy: 'created_at', sortOrder: 'desc' },
+  { label: 'Date (oldest)', sortBy: 'created_at', sortOrder: 'asc' },
+  { label: 'Duration (longest)', sortBy: 'audio_total_duration', sortOrder: 'desc' },
+  { label: 'Title (A-Z)', sortBy: 'title', sortOrder: 'asc' },
+] as const
+
 export default function Conversations() {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const [debugMode, setDebugMode] = useState(false)
+  const [starredOnly, setStarredOnly] = useState(false)
+  const [sortIdx, setSortIdx] = useState(0)
+  const [page, setPage] = useState(0)
+
+  const sortOption = SORT_OPTIONS[sortIdx]
 
   const {
     data: conversationsData,
     isLoading: loading,
     error: queryError,
     refetch,
-  } = useConversations({ includeUnprocessed: debugMode || undefined })
+  } = useConversations({
+    includeUnprocessed: debugMode || undefined,
+    starredOnly: starredOnly || undefined,
+    limit: PAGE_SIZE,
+    offset: page * PAGE_SIZE,
+    sortBy: sortOption.sortBy,
+    sortOrder: sortOption.sortOrder,
+  })
 
   const conversations: Conversation[] = conversationsData?.conversations ?? []
+  const totalConversations: number = conversationsData?.total ?? 0
+  const totalPages = Math.max(1, Math.ceil(totalConversations / PAGE_SIZE))
+
+  // Stable query key matching what useConversations uses, for setQueryData calls
+  const conversationsQueryKey = useMemo(() => ['conversations', {
+    includeUnprocessed: debugMode || undefined,
+    starredOnly: starredOnly || undefined,
+    limit: PAGE_SIZE,
+    offset: page * PAGE_SIZE,
+    sortBy: sortOption.sortBy,
+    sortOrder: sortOption.sortOrder,
+  }], [debugMode, starredOnly, page, sortOption])
   const [actionError, setActionError] = useState<string | null>(null)
   const error = queryError?.message ?? actionError ?? null
 
@@ -80,10 +115,13 @@ export default function Conversations() {
   const [expandedTranscripts, setExpandedTranscripts] = useState<Set<string>>(new Set())
   // Detailed summary expand/collapse state
   const [expandedDetailedSummaries, setExpandedDetailedSummaries] = useState<Set<string>>(new Set())
-  // Audio playback state
+  // Audio playback state — chunk-based (10s windows loaded on demand)
   const [playingSegment, setPlayingSegment] = useState<string | null>(null) // Format: "audioUuid-segmentIndex"
   const [audioCurrentTime, setAudioCurrentTime] = useState<{ [conversationId: string]: number }>({})
   const audioRefs = useRef<{ [key: string]: HTMLAudioElement }>({})
+  const [activeAudioKey, setActiveAudioKey] = useState<string | null>(null) // "{conversationId}_{windowStart}"
+  const [activeChunk, setActiveChunk] = useState<{ conversationId: string; start: number; end: number } | null>(null)
+  const [isAudioPaused, setIsAudioPaused] = useState(false)
 
   // Reprocessing state
   const [openDropdown, setOpenDropdown] = useState<string | null>(null)
@@ -153,53 +191,110 @@ export default function Conversations() {
     return speakers
   }, [enrolledSpeakers, diarizationAnnotations])
 
-  // Stable seek handler for waveform click-to-seek
-  const handleSeek = useCallback((conversationId: string, time: number) => {
-    const audioElement = audioRefs.current[conversationId];
+  // Chunk-based seek handler: loads a 10s audio window on demand via waveform click
+  const CHUNK_WINDOW = 10 // seconds per audio chunk window
+  // Ref to hold the latest handleSeek so event listeners can call it without stale closure
+  const handleSeekRef = useRef<(conversationId: string, time: number, totalDuration?: number) => void>(() => {})
 
-    if (!audioElement) {
-      return;
+  const handleSeek = useCallback((conversationId: string, time: number, totalDuration?: number) => {
+    const windowStart = Math.floor(time / CHUNK_WINDOW) * CHUNK_WINDOW
+    const windowEnd = windowStart + CHUNK_WINDOW
+    const cacheKey = `${conversationId}_${windowStart}`
+
+    // If time exceeds total duration, stop playback
+    if (totalDuration !== undefined && time >= totalDuration) {
+      setActiveAudioKey(null)
+      setActiveChunk(null)
+      setIsAudioPaused(false)
+      return
     }
 
-    // Check if audio is ready for seeking (readyState >= 1 means HAVE_METADATA)
-    if (audioElement.readyState < 1) {
-      console.warn(`⚠️ Audio not ready for seeking (readyState=${audioElement.readyState})`);
-      // Try again after metadata loads
-      audioElement.addEventListener('loadedmetadata', () => {
-        audioElement.currentTime = time;
-      }, { once: true });
-      return;
+    // Pause any currently playing audio
+    if (activeAudioKey && audioRefs.current[activeAudioKey]) {
+      audioRefs.current[activeAudioKey].pause()
     }
 
-    try {
-      // Force a small delay to ensure audio is ready
-      const wasPlaying = !audioElement.paused;
-
-      // Pause before seeking (helps with seeking reliability)
-      if (wasPlaying) {
-        audioElement.pause();
+    // Helper to play an audio element at the right offset
+    const playAt = (audio: HTMLAudioElement, absoluteTime: number) => {
+      const localTime = absoluteTime - windowStart
+      const startPlaying = () => {
+        audio.currentTime = Math.max(0, localTime)
+        audio.play().catch(err => console.warn('Playback failed:', err))
       }
 
-      // Set the seek position
-      audioElement.currentTime = time;
+      if (audio.readyState >= 2) {
+        startPlaying()
+      } else {
+        audio.addEventListener('canplay', startPlaying, { once: true })
+      }
 
-      // Verify the seek worked
-      setTimeout(() => {
-        if (Math.abs(audioElement.currentTime - time) > 1.0) {
-          console.error(`Seek failed! Requested ${time.toFixed(2)}s but got ${audioElement.currentTime.toFixed(2)}s`);
+      setActiveAudioKey(cacheKey)
+      setActiveChunk({ conversationId, start: windowStart, end: windowEnd })
+      setIsAudioPaused(false)
+    }
+
+    // Check cache first
+    if (audioRefs.current[cacheKey]) {
+      playAt(audioRefs.current[cacheKey], time)
+      return
+    }
+
+    // Fetch audio chunk via authenticated API, then create blob URL for Audio element
+    const token = localStorage.getItem(getStorageKey('token')) || ''
+    fetch(`${BACKEND_URL}/api/conversations/${conversationId}/audio-segments?start=${windowStart}&duration=${CHUNK_WINDOW}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(r => {
+        if (!r.ok) throw new Error(`Audio fetch failed: ${r.status}`)
+        return r.blob()
+      })
+      .then(blob => {
+        const blobUrl = URL.createObjectURL(blob)
+        const audio = new Audio(blobUrl)
+
+        // Track playback position
+        audio.addEventListener('timeupdate', () => {
+          setAudioCurrentTime(prev => ({
+            ...prev,
+            [conversationId]: windowStart + audio.currentTime,
+          }))
+        })
+
+        // Auto-load next window on end for seamless playback
+        audio.addEventListener('ended', () => {
+          const nextStart = windowStart + CHUNK_WINDOW
+          handleSeekRef.current(conversationId, nextStart, totalDuration)
+        })
+
+        // Cache it
+        audioRefs.current[cacheKey] = audio
+        playAt(audio, time)
+      })
+      .catch(err => console.warn('Failed to load audio chunk:', err))
+  }, [activeAudioKey])
+
+  // Keep ref in sync
+  handleSeekRef.current = handleSeek
+
+  // Toggle play/pause for a conversation's active audio
+  const handleTogglePlayback = useCallback((conversationId: string, totalDuration?: number) => {
+    // Check if this conversation currently has an active audio key
+    if (activeAudioKey && activeAudioKey.startsWith(conversationId + '_')) {
+      const audio = audioRefs.current[activeAudioKey]
+      if (audio) {
+        if (audio.paused) {
+          audio.play().catch(err => console.warn('Resume failed:', err))
+          setIsAudioPaused(false)
+        } else {
+          audio.pause()
+          setIsAudioPaused(true)
         }
-      }, 100);
-
-      // Resume playback if it was playing
-      if (wasPlaying) {
-        audioElement.play().catch(err => {
-          console.warn('Could not resume playback after seek:', err);
-        });
+        return
       }
-    } catch (err) {
-      console.error('❌ Seek failed:', err);
     }
-  }, []); // Empty deps - uses ref which is always stable
+    // No active audio for this conversation — start from beginning
+    handleSeek(conversationId, 0, totalDuration)
+  }, [activeAudioKey, handleSeek])
 
   const loadEnrolledSpeakers = async () => {
     try {
@@ -529,6 +624,15 @@ export default function Conversations() {
   }
 
   const deleteConversationMutation = useDeleteConversation()
+  const toggleStarMutation = useToggleStar()
+
+  const handleToggleStar = async (conversationId: string) => {
+    try {
+      await toggleStarMutation.mutateAsync(conversationId)
+    } catch (err: any) {
+      setActionError(err?.response?.data?.error || 'Failed to toggle star')
+    }
+  }
 
   const handleDeleteConversation = async (conversationId: string) => {
     const confirmed = window.confirm('Are you sure you want to delete this conversation? This action cannot be undone.')
@@ -655,7 +759,7 @@ export default function Conversations() {
       })
 
       // Optimistically update the title in local state
-      queryClient.setQueryData(['conversations', { includeUnprocessed: debugMode || undefined }], (old: any) => {
+      queryClient.setQueryData(conversationsQueryKey, (old: any) => {
         if (!old) return old
         return {
           ...old,
@@ -722,7 +826,7 @@ export default function Conversations() {
       const response = await conversationsApi.getById(conversation.conversation_id)
       if (response.status === 200 && response.data.conversation) {
         // Update the conversation in query cache with detailed_summary
-        queryClient.setQueryData(['conversations', { includeUnprocessed: debugMode || undefined }], (old: any) => {
+        queryClient.setQueryData(conversationsQueryKey, (old: any) => {
           if (!old) return old
           return {
             ...old,
@@ -771,7 +875,7 @@ export default function Conversations() {
       const response = await conversationsApi.getById(conversation.conversation_id)
       if (response.status === 200 && response.data.conversation) {
         // Update the conversation in query cache with full data
-        queryClient.setQueryData(['conversations', { includeUnprocessed: debugMode || undefined }], (old: any) => {
+        queryClient.setQueryData(conversationsQueryKey, (old: any) => {
           if (!old) return old
           return {
             ...old,
@@ -894,11 +998,23 @@ export default function Conversations() {
             </h1>
           </div>
           <div className="flex items-center space-x-4">
+            <button
+              onClick={() => { setStarredOnly(!starredOnly); setPage(0) }}
+              className={`flex items-center space-x-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                starredOnly
+                  ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300 border border-yellow-300 dark:border-yellow-700'
+                  : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+              }`}
+              title={starredOnly ? 'Show all conversations' : 'Show only starred'}
+            >
+              <Star className={`h-4 w-4 ${starredOnly ? 'fill-yellow-500 text-yellow-500' : ''}`} />
+              <span>Starred</span>
+            </button>
             <label className="flex items-center space-x-2 text-sm">
               <input
                 type="checkbox"
                 checked={debugMode}
-                onChange={(e) => setDebugMode(e.target.checked)}
+                onChange={(e) => { setDebugMode(e.target.checked); setPage(0) }}
                 className="rounded border-gray-300"
               />
               <span className="text-gray-700 dark:text-gray-300">Debug Mode</span>
@@ -941,6 +1057,19 @@ export default function Conversations() {
             <Brain className="h-4 w-4" />
             <span>Semantic</span>
           </button>
+          {/* Sort Dropdown */}
+          <div className="relative">
+            <select
+              value={sortIdx}
+              onChange={(e) => { setSortIdx(Number(e.target.value)); setPage(0) }}
+              className="appearance-none pl-8 pr-8 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent cursor-pointer"
+            >
+              {SORT_OPTIONS.map((opt, i) => (
+                <option key={i} value={i}>{opt.label}</option>
+              ))}
+            </select>
+            <ArrowUpDown className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+          </div>
         </div>
 
         {/* Search status */}
@@ -1027,7 +1156,7 @@ export default function Conversations() {
                     try {
                       const response = await conversationsApi.getById(conversation.conversation_id!)
                       if (response.status === 200 && response.data.conversation) {
-                        queryClient.setQueryData(['conversations', { includeUnprocessed: debugMode || undefined }], (old: any) => {
+                        queryClient.setQueryData(conversationsQueryKey, (old: any) => {
                           if (!old) return old
                           return {
                             ...old,
@@ -1133,11 +1262,15 @@ export default function Conversations() {
                       <User className="h-4 w-4" />
                       <span>{conversation.client_id}</span>
                     </div>
-                    {conversation.duration_seconds && conversation.duration_seconds > 0 && (
-                      <div className="text-sm text-gray-600 dark:text-gray-400">
-                        Duration: {Math.floor(conversation.duration_seconds / 60)}:{(conversation.duration_seconds % 60).toFixed(0).padStart(2, '0')}
-                      </div>
-                    )}
+                    {(() => {
+                      const dur = conversation.duration_seconds || conversation.audio_total_duration
+                      return dur && dur > 0 ? (
+                        <div className="flex items-center space-x-1 text-sm text-gray-600 dark:text-gray-400">
+                          <Clock className="h-3.5 w-3.5" />
+                          <span>{Math.floor(dur / 60)}:{Math.floor(dur % 60).toString().padStart(2, '0')}</span>
+                        </div>
+                      ) : null
+                    })()}
                     {(conversation.memory_count ?? 0) > 0 && (
                       <div className="flex items-center space-x-1 text-sm text-purple-600 dark:text-purple-400">
                         <Brain className="h-4 w-4" />
@@ -1156,7 +1289,18 @@ export default function Conversations() {
                   </div>
                 </div>
 
-                {/* Hamburger Menu */}
+                {/* Star + Hamburger Menu */}
+                <div className="flex items-center space-x-1">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      handleToggleStar(conversation.conversation_id)
+                    }}
+                    className="p-1 rounded-full hover:bg-yellow-100 dark:hover:bg-yellow-900/30 transition-colors"
+                    title={conversation.starred ? 'Unstar conversation' : 'Star conversation'}
+                  >
+                    <Star className={`h-5 w-5 ${conversation.starred ? 'fill-yellow-400 text-yellow-400' : 'text-gray-400 dark:text-gray-500'}`} />
+                  </button>
                 <div className="relative">
                   <button
                     onClick={(e) => {
@@ -1291,57 +1435,55 @@ export default function Conversations() {
                     </div>
                   )}
                 </div>
+                </div>
               </div>
 
-              {/* Audio Player with Waveform */}
+              {/* Audio Player with Waveform — click waveform to play */}
               <div className="mb-4">
                 <div className="space-y-2">
                   {(conversation.audio_chunks_count && conversation.audio_chunks_count > 0) && (
                     <>
-                      <div className="flex items-center space-x-2 text-sm text-gray-700 dark:text-gray-300">
-                        <span className="font-medium">
-                          🎵 Audio
+                      <div className="flex items-center justify-between text-sm text-gray-700 dark:text-gray-300">
+                        <span className="font-medium flex items-center gap-1.5">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleTogglePlayback(conversation.conversation_id!, conversation.audio_total_duration)
+                            }}
+                            className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                            title={activeAudioKey?.startsWith(conversation.conversation_id + '_') && !isAudioPaused ? 'Pause' : 'Play'}
+                          >
+                            {activeAudioKey?.startsWith(conversation.conversation_id + '_') && !isAudioPaused
+                              ? <Pause className="h-3.5 w-3.5" />
+                              : <Play className="h-3.5 w-3.5" />}
+                          </button>
+                          {conversation.audio_total_duration
+                            ? `${Math.floor(conversation.audio_total_duration / 60)}:${Math.floor(conversation.audio_total_duration % 60).toString().padStart(2, '0')}`
+                            : 'Audio'}
                         </span>
+                        {audioCurrentTime[conversation.conversation_id] !== undefined && (
+                          <span className="text-xs text-gray-500 dark:text-gray-400 tabular-nums">
+                            {Math.floor(audioCurrentTime[conversation.conversation_id] / 60)}:{Math.floor(audioCurrentTime[conversation.conversation_id] % 60).toString().padStart(2, '0')}
+                            {' / '}
+                            {conversation.audio_total_duration
+                              ? `${Math.floor(conversation.audio_total_duration / 60)}:${Math.floor(conversation.audio_total_duration % 60).toString().padStart(2, '0')}`
+                              : '--:--'}
+                          </span>
+                        )}
                       </div>
 
-                      {/* Waveform Visualization */}
+                      {/* Waveform Visualization — click to play chunk */}
                       {conversation.conversation_id && conversation.audio_total_duration && (
                         <WaveformDisplay
                           conversationId={conversation.conversation_id}
                           duration={conversation.audio_total_duration}
-                          currentTime={conversation.conversation_id ? audioCurrentTime[conversation.conversation_id] : undefined}
-                          onSeek={(time) => handleSeek(conversation.conversation_id!, time)}
+                          currentTime={audioCurrentTime[conversation.conversation_id]}
+                          onSeek={(time) => handleSeek(conversation.conversation_id!, time, conversation.audio_total_duration)}
                           height={80}
+                          chunkStart={activeChunk?.conversationId === conversation.conversation_id ? activeChunk.start : undefined}
+                          chunkEnd={activeChunk?.conversationId === conversation.conversation_id ? activeChunk.end : undefined}
                         />
                       )}
-
-                      {/* Audio Player */}
-                      <audio
-                        ref={(el) => {
-                          if (el && conversation.conversation_id) {
-                            audioRefs.current[conversation.conversation_id] = el;
-                          }
-                        }}
-                        controls
-                        className="w-full h-10"
-                        preload="metadata"
-                        style={{ minWidth: '300px' }}
-                        src={`${BACKEND_URL}/api/audio/get_audio/${conversation.conversation_id}?token=${localStorage.getItem(getStorageKey('token')) || ''}`}
-                        onTimeUpdate={(e) => {
-                          // Extract currentTime IMMEDIATELY before any async operations
-                          const currentTime = e.currentTarget?.currentTime;
-                          const conversationId = conversation.conversation_id;
-
-                          if (conversationId && currentTime !== undefined) {
-                            setAudioCurrentTime(prev => ({
-                              ...prev,
-                              [conversationId]: currentTime
-                            }));
-                          }
-                        }}
-                      >
-                        Your browser does not support the audio element.
-                      </audio>
                     </>
                   )}
                 </div>
@@ -1820,6 +1962,36 @@ export default function Conversations() {
         )
         })()}
       </div>
+
+      {/* Pagination */}
+      {!searchResults && totalPages > 1 && (
+        <div className="flex items-center justify-between mt-6 px-2">
+          <span className="text-sm text-gray-600 dark:text-gray-400">
+            {totalConversations} conversation{totalConversations !== 1 ? 's' : ''} total
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setPage(p => Math.max(0, p - 1))}
+              disabled={page === 0}
+              className="flex items-center gap-1 px-3 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              <ChevronLeft className="h-4 w-4" />
+              Previous
+            </button>
+            <span className="text-sm text-gray-600 dark:text-gray-400 px-2">
+              Page {page + 1} of {totalPages}
+            </span>
+            <button
+              onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))}
+              disabled={page >= totalPages - 1}
+              className="flex items-center gap-1 px-3 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              Next
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
