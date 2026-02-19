@@ -267,11 +267,17 @@ class RegistryStreamingTranscriptionProvider(StreamingTranscriptionProvider):
             raise RuntimeError("No default stt_stream model defined in config.yml")
         self.model = model
         self._name = model.model_provider or model.name
+        self._capabilities = set(model.capabilities) if model.capabilities else set()
         self._streams: dict[str, dict] = {}
 
     @property
     def name(self) -> str:
         return self._name
+
+    @property
+    def capabilities(self) -> set:
+        """Return provider capabilities from config.yml."""
+        return self._capabilities
 
     async def transcribe(self, audio_data: bytes, sample_rate: int, **kwargs) -> dict:
         """Not used for streaming providers - use start_stream/process_audio_chunk/end_stream instead."""
@@ -318,10 +324,11 @@ class RegistryStreamingTranscriptionProvider(StreamingTranscriptionProvider):
         # Debug: Log the URL
         logger.info(f"🔗 Connecting to Deepgram WebSocket: {url}")
 
-        # Connect to WebSocket with Authorization header (Deepgram requires this for server-side connections)
+        # Connect to WebSocket with Authorization header
         headers = {}
         if self.model.api_key:
-            headers["Authorization"] = f"Token {self.model.api_key}"
+            auth_prefix = ops.get("auth_prefix") or "Token"
+            headers["Authorization"] = f"{auth_prefix} {self.model.api_key}"
 
         ws = await websockets.connect(url, additional_headers=headers)
 
@@ -378,9 +385,11 @@ class RegistryStreamingTranscriptionProvider(StreamingTranscriptionProvider):
             # Determine if this is interim or final result
             is_final = False
             if final_type and data.get("type") == final_type:
-                # Check if Deepgram marks it as final
                 is_final = data.get("is_final", False)
             elif interim_type and data.get("type") == interim_type:
+                is_final = data.get("is_final", False)
+            else:
+                # Fallback: check is_final directly (for providers that don't use a type field)
                 is_final = data.get("is_final", False)
 
             # Extract result data
@@ -431,7 +440,10 @@ class RegistryStreamingTranscriptionProvider(StreamingTranscriptionProvider):
             for _ in range(500):  # hard cap
                 msg = await asyncio.wait_for(ws.recv(), timeout=1.5)
                 data = json.loads(msg)
-                if not final_type or data.get("type") == final_type:
+                if final_type and data.get("type") == final_type:
+                    final = data
+                    break
+                elif not final_type and (data.get("is_final") or data.get("is_last")):
                     final = data
                     break
         except Exception:

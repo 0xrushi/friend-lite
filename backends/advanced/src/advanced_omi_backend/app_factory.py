@@ -153,17 +153,23 @@ async def lifespan(app: FastAPI):
     get_client_manager()
     application_logger.info("ClientManager initialized")
 
-    # Initialize prompt registry with defaults and seed into LangFuse
+    # Initialize prompt registry with defaults; seed into LangFuse in background
     try:
         from advanced_omi_backend.prompt_defaults import register_all_defaults
         from advanced_omi_backend.prompt_registry import get_prompt_registry
 
         prompt_registry = get_prompt_registry()
         register_all_defaults(prompt_registry)
-        await prompt_registry.seed_prompts()
         application_logger.info(
             f"Prompt registry initialized with {len(prompt_registry._defaults)} defaults"
         )
+
+        # Seed prompts in background — Langfuse may not be ready at startup
+        async def _deferred_seed():
+            await asyncio.sleep(10)
+            await prompt_registry.seed_prompts()
+
+        asyncio.create_task(_deferred_seed())
     except Exception as e:
         application_logger.warning(f"Prompt registry initialization failed: {e}")
 

@@ -44,7 +44,8 @@ export default function Settings() {
     always_persist_enabled: false,
     use_provider_segments: false,
     per_segment_speaker_id: false,
-    transcription_job_timeout_seconds: 900
+    transcription_job_timeout_seconds: 900,
+    always_batch_retranscribe: false
   })
   const [miscLoading, setMiscLoading] = useState(false)
   const [miscMessage, setMiscMessage] = useState('')
@@ -469,6 +470,30 @@ export default function Settings() {
                   onChange={(e) => setMiscSettings(prev => ({
                     ...prev,
                     use_provider_segments: e.target.checked
+                  }))}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-600 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
+              </label>
+            </div>
+
+            {/* Always Batch Re-Transcribe Toggle */}
+            <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700 rounded-md">
+              <div className="flex-1">
+                <div className="font-medium text-gray-900 dark:text-gray-100">
+                  Always Batch Re-Transcribe
+                </div>
+                <div className="text-sm text-gray-600 dark:text-gray-400">
+                  After each streaming conversation, re-transcribe with the batch provider for higher quality. Streaming transcript is shown immediately as a preview; memories and summaries are only generated from the batch result.
+                </div>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer ml-4">
+                <input
+                  type="checkbox"
+                  checked={miscSettings.always_batch_retranscribe}
+                  onChange={(e) => setMiscSettings(prev => ({
+                    ...prev,
+                    always_batch_retranscribe: e.target.checked
                   }))}
                   className="sr-only peer"
                 />

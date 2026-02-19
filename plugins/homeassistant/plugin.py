@@ -352,7 +352,7 @@ class HomeAssistantPlugin(BasePlugin):
 
         action_config = self.button_actions.get(action_key)
         if not action_config:
-            logger.debug(f"No button_actions config for '{action_key}'")
+            logger.info(f"No button_actions config for '{action_key}', skipping")
             return None
 
         if not self.mcp_client:

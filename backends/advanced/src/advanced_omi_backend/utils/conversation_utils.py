@@ -90,7 +90,7 @@ def analyze_speech(transcript_data: dict) -> dict:
     # Method 1: Word-level analysis (preferred - has confidence scores and timing)
     if words:
         # Filter by confidence threshold
-        valid_words = [w for w in words if w.get("confidence", 0) >= settings["min_confidence"]]
+        valid_words = [w for w in words if (w.get("confidence") or 0) >= settings["min_confidence"]]
 
         if len(valid_words) < settings["min_words"]:
             # Not enough valid words in word-level data - fall through to text-only analysis

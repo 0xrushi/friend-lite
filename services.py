@@ -199,6 +199,7 @@ def run_compose_command(service_name, command, build=False):
                     'transformers': 'transformers-asr',
                     'nemo': 'nemo-asr',
                     'parakeet': 'parakeet-asr',
+                    'qwen3-asr': 'qwen3-asr-wrapper',
                 }
                 asr_service_to_build = provider_to_service.get(asr_provider)
 
@@ -207,9 +208,13 @@ def run_compose_command(service_name, command, build=False):
 
         build_cmd.append('build')
 
-        # If building ASR, only build the specific service
+        # If building ASR, only build the specific service(s)
         if asr_service_to_build:
-            build_cmd.append(asr_service_to_build)
+            if asr_provider == 'qwen3-asr':
+                # Qwen3-ASR also needs the streaming bridge built
+                build_cmd.extend([asr_service_to_build, 'qwen3-asr-bridge'])
+            else:
+                build_cmd.append(asr_service_to_build)
 
         # Run build with streaming output (no timeout)
         console.print(f"[cyan]🔨 Building {service_name} (this may take several minutes for CUDA/GPU builds)...[/cyan]")
@@ -304,6 +309,7 @@ def run_compose_command(service_name, command, build=False):
                 'transformers': 'transformers-asr',
                 'nemo': 'nemo-asr',
                 'parakeet': 'parakeet-asr',
+                'qwen3-asr': 'qwen3-asr-wrapper',
             }
             asr_service_name = provider_to_service.get(asr_provider)
 
@@ -312,7 +318,11 @@ def run_compose_command(service_name, command, build=False):
 
         if command == 'up':
             if asr_service_name:
-                cmd.extend(['up', '-d', asr_service_name])
+                services_to_start = [asr_service_name]
+                # Qwen3-ASR also needs the streaming bridge
+                if asr_provider == 'qwen3-asr':
+                    services_to_start.append('qwen3-asr-bridge')
+                cmd.extend(['up', '-d'] + services_to_start)
             else:
                 console.print("[yellow]⚠️  No ASR_PROVIDER configured, starting default service[/yellow]")
                 cmd.extend(['up', '-d', 'vibevoice-asr'])
@@ -320,7 +330,10 @@ def run_compose_command(service_name, command, build=False):
             cmd.extend(['down'])
         elif command == 'restart':
             if asr_service_name:
-                cmd.extend(['restart', asr_service_name])
+                services_to_restart = [asr_service_name]
+                if asr_provider == 'qwen3-asr':
+                    services_to_restart.append('qwen3-asr-bridge')
+                cmd.extend(['restart'] + services_to_restart)
             else:
                 cmd.extend(['restart'])
 

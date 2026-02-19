@@ -179,6 +179,7 @@ services:
     ports:
       - "443:443"
       - "80:80"  # HTTP redirect to HTTPS
+      - "3443:3443"  # Langfuse HTTPS
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

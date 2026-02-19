@@ -1553,7 +1553,28 @@ export default function Conversations() {
                             renderedSegments.push(
                               <div key={index} className="group/seg relative">
                                 {!isPreview && <button onClick={(e) => openInsertForm(index === 0 ? -1 : index - 1, e)} className={insertBtnClass('top')}>+</button>}
-                                <div className="text-sm italic text-gray-500 dark:text-gray-400 border-l-2 border-gray-300 dark:border-gray-600 pl-3 py-0.5 px-2 rounded-r">
+                                <div className={`text-sm italic border-l-2 pl-3 py-0.5 px-2 rounded-r flex items-center gap-2 ${
+                                  segType === 'event'
+                                    ? 'text-gray-500 dark:text-gray-400 bg-yellow-50 dark:bg-yellow-900/20 border-yellow-400'
+                                    : 'text-gray-500 dark:text-gray-400 bg-green-50 dark:bg-green-900/20 border-green-400'
+                                }`}>
+                                  {segType === 'event' && hasAudio && !isPreview && (
+                                    <button
+                                      onClick={() => handleSegmentPlayPause(conversation.conversation_id, index, segment)}
+                                      className={`flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center transition-colors ${
+                                        isPlaying
+                                          ? 'bg-yellow-600 text-white hover:bg-yellow-700'
+                                          : 'bg-yellow-200 dark:bg-yellow-800 text-yellow-600 dark:text-yellow-300 hover:bg-yellow-300 dark:hover:bg-yellow-700'
+                                      }`}
+                                      title={isPlaying ? 'Pause event' : 'Play event'}
+                                    >
+                                      {isPlaying ? (
+                                        <Pause className="w-2.5 h-2.5" />
+                                      ) : (
+                                        <Play className="w-2.5 h-2.5 ml-0.5" />
+                                      )}
+                                    </button>
+                                  )}
                                   <span>{segType === 'note' ? `[Note: ${segment.text}]` : segment.text}</span>
                                 </div>
                                 {!isPreview && <button onClick={(e) => openInsertForm(index, e)} className={insertBtnClass('bottom')}>+</button>}

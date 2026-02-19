@@ -257,6 +257,8 @@ class PluginRouter:
                     if not result.should_continue:
                         logger.info(f"   ⊗ Plugin '{plugin_id}' stopped further processing")
                         break
+                else:
+                    logger.info(f"   ⊘ Plugin '{plugin_id}' returned no result for '{event}'")
 
             except Exception as e:
                 # CRITICAL: Log exception details

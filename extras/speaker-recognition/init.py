@@ -158,11 +158,17 @@ class SpeakerRecognitionSetup:
             self.console.print("[blue][INFO][/blue] Detected macOS - GPU acceleration not available (Apple Silicon/Intel)")
             self.console.print("[green][SUCCESS][/green] Using CPU mode")
         else:
+            # Pre-detect NVIDIA GPU to set smart default
+            has_nvidia = shutil.which("nvidia-smi") is not None
+            default_choice = "2" if has_nvidia else "1"
+            if has_nvidia:
+                self.console.print("[blue][INFO][/blue] Detected NVIDIA GPU - defaulting to GPU acceleration")
+
             choices = {
                 "1": "CPU-only (works everywhere)",
                 "2": "GPU acceleration (requires NVIDIA+CUDA)"
             }
-            choice = self.prompt_choice("Choose compute mode:", choices, "1")
+            choice = self.prompt_choice("Choose compute mode:", choices, default_choice)
             compute_mode = "gpu" if choice == "2" else "cpu"
 
         # Set PYTORCH_CUDA_VERSION for Docker build (profile determined from this)

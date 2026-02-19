@@ -129,7 +129,7 @@ def select_services(transcription_provider=None):
 
     # Services that will be auto-added based on transcription provider choice
     auto_added = set()
-    if transcription_provider in ("parakeet", "vibevoice"):
+    if transcription_provider in ("parakeet", "vibevoice", "qwen3-asr"):
         auto_added.add('asr-services')
 
     # Optional extras
@@ -137,7 +137,7 @@ def select_services(transcription_provider=None):
     for service_name, service_config in SERVICES['extras'].items():
         # Skip services that will be auto-added based on earlier choices
         if service_name in auto_added:
-            provider_label = {"vibevoice": "VibeVoice", "parakeet": "Parakeet"}.get(transcription_provider, transcription_provider)
+            provider_label = {"vibevoice": "VibeVoice", "parakeet": "Parakeet", "qwen3-asr": "Qwen3-ASR"}.get(transcription_provider, transcription_provider)
             console.print(f"  ✅ {service_config['description']} ({provider_label}) [dim](auto-selected)[/dim]")
             continue
 
@@ -188,7 +188,8 @@ def cleanup_unselected_services(selected_services):
 def run_service_setup(service_name, selected_services, https_enabled=False, server_ip=None,
                      obsidian_enabled=False, neo4j_password=None, hf_token=None,
                      transcription_provider='deepgram', admin_email=None, admin_password=None,
-                     langfuse_public_key=None, langfuse_secret_key=None, langfuse_host=None):
+                     langfuse_public_key=None, langfuse_secret_key=None, langfuse_host=None,
+                     streaming_provider=None):
     """Execute individual service setup script"""
     if service_name == 'advanced':
         service = SERVICES['backend'][service_name]
@@ -203,6 +204,10 @@ def run_service_setup(service_name, selected_services, https_enabled=False, serv
         # Pass transcription provider choice from wizard
         if transcription_provider:
             cmd.extend(['--transcription-provider', transcription_provider])
+
+        # Pass streaming provider (different from batch) for re-transcription setup
+        if streaming_provider:
+            cmd.extend(['--streaming-provider', streaming_provider])
 
         # Add HTTPS configuration
         if https_enabled and server_ip:
@@ -261,6 +266,7 @@ def run_service_setup(service_name, selected_services, https_enabled=False, serv
             wizard_to_asr_provider = {
                 'vibevoice': 'vibevoice',
                 'parakeet': 'nemo',
+                'qwen3-asr': 'qwen3-asr',
             }
             asr_provider = wizard_to_asr_provider.get(transcription_provider)
             if asr_provider:
@@ -517,17 +523,24 @@ def setup_config_file():
     else:
         console.print("ℹ️  [blue]config/config.yml already exists, keeping existing configuration[/blue]")
 
+# Providers that support real-time streaming
+STREAMING_CAPABLE = {"deepgram", "smallest", "qwen3-asr"}
+
+
 def select_transcription_provider():
-    """Ask user which transcription provider they want"""
+    """Ask user which transcription provider they want (batch/primary)."""
     console.print("\n🎤 [bold cyan]Transcription Provider[/bold cyan]")
-    console.print("Choose your speech-to-text provider:")
+    console.print("Choose your speech-to-text provider (used for [bold]batch[/bold]/high-quality transcription):")
+    console.print("[dim]If it also supports streaming, it will be used for real-time too by default.[/dim]")
     console.print()
 
     choices = {
-        "1": "Deepgram (cloud-based, high quality, requires API key)",
-        "2": "Parakeet ASR (offline, runs locally, requires GPU)",
-        "3": "VibeVoice ASR (offline, built-in speaker diarization, requires GPU)",
-        "4": "None (skip transcription setup)"
+        "1": "Deepgram (cloud, streaming + batch)",
+        "2": "Parakeet ASR (offline, batch only, GPU)",
+        "3": "VibeVoice ASR (offline, batch only, built-in diarization, GPU)",
+        "4": "Qwen3-ASR (offline, streaming + batch, 52 languages, GPU)",
+        "5": "Smallest.ai Pulse (cloud, streaming + batch)",
+        "6": "None (skip transcription setup)"
     }
 
     for key, desc in choices.items():
@@ -545,36 +558,97 @@ def select_transcription_provider():
                 elif choice == "3":
                     return "vibevoice"
                 elif choice == "4":
+                    return "qwen3-asr"
+                elif choice == "5":
+                    return "smallest"
+                elif choice == "6":
                     return "none"
             console.print(f"[red]Invalid choice. Please select from {list(choices.keys())}[/red]")
         except EOFError:
             console.print("Using default: Deepgram")
             return "deepgram"
 
+
+def select_streaming_provider(batch_provider):
+    """Ask if user wants a different provider for real-time streaming.
+
+    If the batch provider supports streaming, offer to use the same (saves a step).
+    If it's batch-only, the user must pick a streaming provider or skip.
+
+    Returns:
+        Streaming provider name if different from batch, or None (same / skipped).
+    """
+    if batch_provider in ("none", None):
+        return None
+
+    if batch_provider in STREAMING_CAPABLE:
+        # Batch provider can already stream — just confirm
+        console.print(f"\n🔊 [bold cyan]Streaming[/bold cyan]")
+        console.print(f"{batch_provider} supports both batch and streaming.")
+        try:
+            use_different = Confirm.ask("Use a different provider for real-time streaming?", default=False)
+        except EOFError:
+            return None
+        if not use_different:
+            return None
+    else:
+        # Batch-only provider — need to pick a streaming provider
+        console.print(f"\n🔊 [bold cyan]Streaming[/bold cyan]")
+        console.print(f"{batch_provider} is batch-only. Pick a streaming provider for real-time transcription:")
+
+    # Show streaming-capable providers (excluding the batch provider)
+    streaming_choices = {}
+    provider_map = {}
+    idx = 1
+
+    for name, desc in [
+        ("deepgram", "Deepgram (cloud, streaming)"),
+        ("smallest", "Smallest.ai Pulse (cloud, streaming)"),
+        ("qwen3-asr", "Qwen3-ASR (offline, streaming)"),
+    ]:
+        if name != batch_provider:
+            streaming_choices[str(idx)] = desc
+            provider_map[str(idx)] = name
+            idx += 1
+
+    skip_key = str(idx)
+    streaming_choices[skip_key] = "Skip (no real-time streaming)"
+    provider_map[skip_key] = None
+
+    for key, desc in streaming_choices.items():
+        console.print(f"  {key}) {desc}")
+    console.print()
+
+    while True:
+        try:
+            choice = Prompt.ask("Enter choice", default="1")
+            if choice in streaming_choices:
+                result = provider_map[choice]
+                if result:
+                    console.print(f"[green]✅[/green] Streaming: {result}, Batch: {batch_provider}")
+                return result
+            console.print(f"[red]Invalid choice. Please select from {list(streaming_choices.keys())}[/red]")
+        except EOFError:
+            return None
+
+
 def setup_langfuse_choice():
-    """Ask user about LangFuse configuration: local, external, or disabled.
+    """Ask user about LangFuse configuration: local or external.
+
+    LangFuse is always enabled (required for prompt management and observability).
+    The only choice is whether to use the bundled local instance or an existing external one.
 
     Returns:
         Tuple of (mode, config) where:
-        - mode: 'local', 'external', or None (disabled)
-        - config: dict with keys {host, public_key, secret_key} for external, empty for local/None
+        - mode: 'local' or 'external'
+        - config: dict with keys {host, public_key, secret_key} for external, empty for local
     """
     console.print("\n📊 [bold cyan]LangFuse Configuration[/bold cyan]")
     console.print("LangFuse provides LLM observability, tracing, and prompt management")
     console.print()
 
     try:
-        enable = Confirm.ask("Enable LangFuse?", default=True)
-    except EOFError:
-        console.print("Using default: Yes")
-        enable = True
-
-    if not enable:
-        console.print("[blue][INFO][/blue] LangFuse disabled")
-        return None, {}
-
-    try:
-        has_existing = Confirm.ask("Do you have an existing LangFuse installation?", default=False)
+        has_existing = Confirm.ask("Use an existing external LangFuse instance instead of local?", default=False)
     except EOFError:
         console.print("Using default: No (will set up locally)")
         has_existing = False
@@ -587,8 +661,8 @@ def setup_langfuse_choice():
             return 'local', {}
         else:
             console.print(f"[yellow]⚠️  Local LangFuse not available: {msg}[/yellow]")
-            console.print("[yellow]   Skipping LangFuse setup[/yellow]")
-            return None, {}
+            console.print("[yellow]   Will proceed without LangFuse — add it later when available[/yellow]")
+            return 'local', {}
 
     # External LangFuse — collect connection details
     console.print()
@@ -658,12 +732,18 @@ def main():
     # Ask about transcription provider FIRST (determines which services are needed)
     transcription_provider = select_transcription_provider()
 
+    # Ask about streaming provider (if batch provider doesn't stream, or user wants a different one)
+    streaming_provider = select_streaming_provider(transcription_provider)
+
     # Service Selection (pass transcription_provider so we skip asking about ASR when already chosen)
     selected_services = select_services(transcription_provider)
 
-    # Auto-add asr-services if local ASR was chosen (Parakeet or VibeVoice)
-    if transcription_provider in ("parakeet", "vibevoice") and 'asr-services' not in selected_services:
-        console.print(f"[blue][INFO][/blue] Auto-adding ASR services for {transcription_provider.capitalize()} transcription")
+    # Auto-add asr-services if any local ASR was chosen (batch or streaming)
+    local_asr_providers = ("parakeet", "vibevoice", "qwen3-asr")
+    needs_asr = transcription_provider in local_asr_providers or (streaming_provider and streaming_provider in local_asr_providers)
+    if needs_asr and 'asr-services' not in selected_services:
+        reason = transcription_provider if transcription_provider in local_asr_providers else streaming_provider
+        console.print(f"[blue][INFO][/blue] Auto-adding ASR services for {reason} transcription")
         selected_services.append('asr-services')
 
     if not selected_services:
@@ -802,7 +882,7 @@ def main():
                             obsidian_enabled, neo4j_password, hf_token, transcription_provider,
                             admin_email=wizard_admin_email, admin_password=wizard_admin_password,
                             langfuse_public_key=langfuse_public_key, langfuse_secret_key=langfuse_secret_key,
-                            langfuse_host=langfuse_host):
+                            langfuse_host=langfuse_host, streaming_provider=streaming_provider):
             success_count += 1
 
             # After local langfuse setup, read generated API keys for backend
@@ -865,7 +945,10 @@ def main():
     if langfuse_mode == 'local' and 'langfuse' not in failed_services:
         console.print("")
         console.print("[bold cyan]Prompt Management:[/bold cyan] Once services are running, edit AI prompts at:")
-        console.print("   [link=http://localhost:3002/project/chronicle/prompts]http://localhost:3002/project/chronicle/prompts[/link]")
+        if https_enabled and server_ip:
+            console.print(f"   [link=https://{server_ip}:3443/project/chronicle/prompts]https://{server_ip}:3443/project/chronicle/prompts[/link]")
+        else:
+            console.print("   [link=http://localhost:3002/project/chronicle/prompts]http://localhost:3002/project/chronicle/prompts[/link]")
     elif langfuse_mode == 'external' and langfuse_host:
         console.print("")
         console.print(f"[bold cyan]Prompt Management:[/bold cyan] Edit AI prompts at your LangFuse instance:")

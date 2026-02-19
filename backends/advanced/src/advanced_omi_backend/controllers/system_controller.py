@@ -213,14 +213,29 @@ async def get_config_diagnostics():
             "message": str(e)
         }
     
-    # Check environment variables
+    # Check environment variables (only warn about keys relevant to configured providers)
     env_checks = [
-        ("DEEPGRAM_API_KEY", "Required for Deepgram transcription"),
-        ("OPENAI_API_KEY", "Required for OpenAI LLM and embeddings"),
         ("AUTH_SECRET_KEY", "Required for authentication"),
         ("ADMIN_EMAIL", "Required for admin user login"),
         ("ADMIN_PASSWORD", "Required for admin user login"),
     ]
+
+    if registry:
+        # Add LLM API key check based on active provider
+        llm_model = registry.get_default("llm")
+        if llm_model and llm_model.model_provider == "openai":
+            env_checks.append(("OPENAI_API_KEY", "Required for OpenAI LLM and embeddings"))
+        elif llm_model and llm_model.model_provider == "groq":
+            env_checks.append(("GROQ_API_KEY", "Required for Groq LLM"))
+
+        # Add transcription API key check based on active STT provider
+        stt_model = registry.get_default("stt")
+        if stt_model:
+            provider = stt_model.model_provider
+            if provider == "deepgram":
+                env_checks.append(("DEEPGRAM_API_KEY", "Required for Deepgram transcription"))
+            elif provider == "smallest":
+                env_checks.append(("SMALLEST_API_KEY", "Required for Smallest.ai Pulse transcription"))
     
     for env_var, description in env_checks:
         value = os.getenv(env_var)
@@ -364,7 +379,7 @@ async def save_misc_settings_controller(settings: dict):
     """Save miscellaneous settings."""
     try:
         # Validate settings
-        boolean_keys = {"always_persist_enabled", "use_provider_segments", "per_segment_speaker_id"}
+        boolean_keys = {"always_persist_enabled", "use_provider_segments", "per_segment_speaker_id", "always_batch_retranscribe"}
         integer_keys = {"transcription_job_timeout_seconds"}
         valid_keys = boolean_keys | integer_keys
 

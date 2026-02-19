@@ -87,6 +87,11 @@ class StreamingTranscriptionProvider(BaseTranscriptionProvider):
     def mode(self) -> str:
         return "streaming"
 
+    @property
+    def capabilities(self) -> set:
+        """Return provider capabilities (empty by default)."""
+        return set()
+
     @abc.abstractmethod
     async def start_stream(self, client_id: str, sample_rate: int = 16000, diarize: bool = False):
         """Start a transcription stream for a client.

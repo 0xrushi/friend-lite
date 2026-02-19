@@ -11,3 +11,11 @@ ha_token: ${HA_TOKEN}
 # Command configuration
 wake_word: ${HA_WAKE_WORD:-vivi}
 timeout: ${HA_TIMEOUT:-30}
+
+# Button action mappings
+button_actions:
+  double_press:
+    service: toggle
+    target_type: area
+    target: hall
+    entity_type: light

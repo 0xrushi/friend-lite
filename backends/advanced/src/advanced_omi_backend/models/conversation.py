@@ -49,6 +49,8 @@ class Conversation(Document):
         start: float = Field(description="Start time in seconds")
         end: float = Field(description="End time in seconds")
         confidence: Optional[float] = Field(None, description="Confidence score (0-1)")
+        speaker: Optional[int] = Field(None, description="Speaker ID from diarization")
+        speaker_confidence: Optional[float] = Field(None, description="Speaker diarization confidence")
 
     class SegmentType(str, Enum):
         """Type of transcript segment."""

@@ -22,6 +22,7 @@ from advanced_omi_backend.services.plugin_service import init_plugin_router
 from advanced_omi_backend.services.transcription.streaming_consumer import (
     StreamingTranscriptionConsumer,
 )
+from advanced_omi_backend.speaker_recognition_client import SpeakerRecognitionClient
 
 logging.basicConfig(
     level=logging.INFO,
@@ -73,13 +74,26 @@ async def main():
         logger.error(f"Failed to initialize plugin router: {e}", exc_info=True)
         plugin_router = None
 
+    # Initialize speaker recognition client
+    try:
+        speaker_client = SpeakerRecognitionClient()
+        if speaker_client.enabled:
+            logger.info(f"Speaker recognition client initialized: {speaker_client.service_url}")
+        else:
+            logger.info("Speaker recognition disabled — streaming speaker identification off")
+            speaker_client = None
+    except Exception as e:
+        logger.warning(f"Failed to initialize speaker recognition client: {e}")
+        speaker_client = None
+
     # Create streaming transcription consumer (uses registry-driven provider from config.yml)
     try:
         consumer = StreamingTranscriptionConsumer(
             redis_client=redis_client,
-            plugin_router=plugin_router
+            plugin_router=plugin_router,
+            speaker_client=speaker_client,
         )
-        logger.info("✅ Streaming transcription consumer created")
+        logger.info("Streaming transcription consumer created")
     except Exception as e:
         logger.error(f"Failed to create streaming transcription consumer: {e}", exc_info=True)
         logger.error("Ensure config.yml has defaults.stt_stream configured with valid provider")

@@ -83,7 +83,23 @@ def load_config(force_reload: bool = False) -> DictConfig:
             logger.error(f"Error loading config from {config_path}: {e}")
 
     # Merge configurations (user config overrides defaults)
+    # OmegaConf.merge replaces lists entirely, so we need custom merge
+    # for the 'models' list: merge by name so defaults models that aren't
+    # in user config are still available.
+    default_models = OmegaConf.to_container(defaults.get("models", []) or [], resolve=False) if defaults else []
+    user_models = OmegaConf.to_container(user_config.get("models", []) or [], resolve=False) if user_config else []
+
     merged = OmegaConf.merge(defaults, user_config)
+
+    # Name-based merge: user models override defaults, but default-only models are kept
+    if default_models and user_models:
+        user_model_names = {m.get("name") for m in user_models if isinstance(m, dict)}
+        extra_defaults = [m for m in default_models if isinstance(m, dict) and m.get("name") not in user_model_names]
+        if extra_defaults:
+            all_models = user_models + extra_defaults
+            merged["models"] = OmegaConf.create(all_models)
+            logger.info(f"Merged {len(extra_defaults)} default-only models into config: "
+                        f"{[m.get('name') for m in extra_defaults]}")
 
     # Cache result
     _config_cache = merged

@@ -1,0 +1,59 @@
+# syntax=docker/dockerfile:1
+#
+# Qwen3-ASR Full Dockerfile (with ForcedAligner for word timestamps)
+#
+# Includes the qwen-asr package which brings torch, transformers, etc.
+# Use this when you need word-level timestamps from the ForcedAligner.
+#
+# Set FORCED_ALIGNER_MODEL env var to enable (e.g., Qwen/Qwen3-ASR-1.7B).
+#
+# NOTE: This image is significantly larger than the lightweight wrapper
+# due to PyTorch and transformers dependencies.
+
+#########################  builder #################################
+FROM ghcr.io/astral-sh/uv:python3.12-trixie-slim AS builder
+
+WORKDIR /app
+
+# Install system dependencies for building
+# pkg-config + libavformat-dev etc. needed by PyAV (av), pulled in via qwen-asr → qwen-omni-utils
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential pkg-config \
+        libavformat-dev libavcodec-dev libavdevice-dev libavutil-dev \
+        libswscale-dev libswresample-dev libavfilter-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV UV_COMPILE_BYTECODE=1
+ENV UV_LINK_MODE=copy
+
+# Dependency manifest first for cache-friendly installs
+COPY pyproject.toml uv.lock ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-install-project --group qwen3-asr-full
+
+#########################  runtime #################################
+FROM python:3.12-slim-trixie AS runtime
+ENV PYTHONUNBUFFERED=1
+WORKDIR /app
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl libsndfile1 ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy installed packages from builder's venv to system Python
+COPY --from=builder /app/.venv/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+
+# Copy application code
+COPY common/ ./common/
+COPY providers/qwen3_asr/ ./providers/qwen3_asr/
+
+# Default environment variables
+ENV QWEN3_VLLM_URL="http://qwen3-asr:8000"
+ENV ASR_MODEL="Qwen/Qwen3-ASR-1.7B"
+# Set this to enable ForcedAligner word timestamps:
+# ENV FORCED_ALIGNER_MODEL="Qwen/Qwen3-ASR-1.7B"
+
+EXPOSE 8765
+
+CMD ["python", "-m", "providers.qwen3_asr.service", "--port", "8765"]

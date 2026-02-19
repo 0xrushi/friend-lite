@@ -212,8 +212,12 @@ class ChronicleSetup:
                 choice = "2"
             elif provider == "vibevoice":
                 choice = "3"
-            elif provider == "none":
+            elif provider == "qwen3-asr":
                 choice = "4"
+            elif provider == "smallest":
+                choice = "5"
+            elif provider == "none":
+                choice = "6"
             else:
                 choice = "1"  # Default to Deepgram
         else:
@@ -233,11 +237,17 @@ class ChronicleSetup:
                 parakeet_desc = "Offline (Parakeet ASR - GPU recommended, runs locally)"
                 vibevoice_desc = "Offline (VibeVoice - GPU recommended, built-in diarization)"
 
+            qwen3_desc = "Offline (Qwen3-ASR - GPU required, 52 languages, streaming + batch)"
+
+            smallest_desc = "Smallest.ai Pulse (cloud-based, fast, requires API key)"
+
             choices = {
                 "1": "Deepgram (recommended - high quality, cloud-based)",
                 "2": parakeet_desc,
                 "3": vibevoice_desc,
-                "4": "None (skip transcription setup)"
+                "4": qwen3_desc,
+                "5": smallest_desc,
+                "6": "None (skip transcription setup)"
             }
 
             choice = self.prompt_choice("Choose your transcription provider:", choices, "1")
@@ -297,7 +307,125 @@ class ChronicleSetup:
             self.console.print("[yellow][WARNING][/yellow] Remember to start VibeVoice service: cd ../../extras/asr-services && docker compose up vibevoice-asr")
 
         elif choice == "4":
+            self.console.print("[blue][INFO][/blue] Qwen3-ASR selected (52 languages, streaming + batch via vLLM)")
+            qwen3_url = self.prompt_value("Qwen3-ASR URL", "http://host.docker.internal:8767")
+
+            # Write URL to .env for ${QWEN3_ASR_URL} placeholder in config.yml
+            self.config["QWEN3_ASR_URL"] = qwen3_url.replace("http://", "").rstrip("/")
+
+            # Also set streaming URL (same host, port 8769)
+            stream_host = qwen3_url.replace("http://", "").split(":")[0]
+            self.config["QWEN3_ASR_STREAM_URL"] = f"{stream_host}:8769"
+
+            # Update config.yml to use Qwen3-ASR
+            self.config_manager.update_config_defaults({"stt": "stt-qwen3-asr"})
+
+            self.console.print("[green][SUCCESS][/green] Qwen3-ASR configured in config.yml and .env")
+            self.console.print("[blue][INFO][/blue] Set defaults.stt: stt-qwen3-asr")
+            self.console.print("[yellow][WARNING][/yellow] Remember to start Qwen3-ASR: cd ../../extras/asr-services && docker compose up qwen3-asr-wrapper qwen3-asr-bridge -d")
+
+        elif choice == "5":
+            self.console.print("[blue][INFO][/blue] Smallest.ai Pulse selected")
+            self.console.print("Get your API key from: https://smallest.ai/")
+
+            # Use the new masked prompt function
+            api_key = self.prompt_with_existing_masked(
+                prompt_text="Smallest.ai API key (leave empty to skip)",
+                env_key="SMALLEST_API_KEY",
+                placeholders=['your_smallest_api_key_here', 'your-smallest-key-here'],
+                is_password=True,
+                default=""
+            )
+
+            if api_key:
+                # Write API key to .env
+                self.config["SMALLEST_API_KEY"] = api_key
+
+                # Update config.yml to use Smallest.ai (batch + streaming)
+                self.config_manager.update_config_defaults({
+                    "stt": "stt-smallest",
+                    "stt_stream": "stt-smallest-stream"
+                })
+
+                self.console.print("[green][SUCCESS][/green] Smallest.ai configured in config.yml and .env")
+                self.console.print("[blue][INFO][/blue] Set defaults.stt: stt-smallest")
+                self.console.print("[blue][INFO][/blue] Set defaults.stt_stream: stt-smallest-stream")
+            else:
+                self.console.print("[yellow][WARNING][/yellow] No API key provided - transcription will not work")
+
+        elif choice == "6":
             self.console.print("[blue][INFO][/blue] Skipping transcription setup")
+
+    def setup_streaming_provider(self):
+        """Configure a separate streaming provider if --streaming-provider was passed.
+
+        When a different streaming provider is specified, sets defaults.stt_stream
+        and enables always_batch_retranscribe (batch provider was set by setup_transcription).
+        """
+        if not hasattr(self.args, 'streaming_provider') or not self.args.streaming_provider:
+            return
+
+        streaming_provider = self.args.streaming_provider
+        self.console.print(f"\n[green]✅[/green] Streaming provider: {streaming_provider} (configured via wizard)")
+
+        # Map streaming provider to stt_stream config value
+        provider_to_stt_stream = {
+            "deepgram": "stt-deepgram-stream",
+            "smallest": "stt-smallest-stream",
+            "qwen3-asr": "stt-qwen3-asr",
+        }
+
+        stream_stt = provider_to_stt_stream.get(streaming_provider)
+        if not stream_stt:
+            self.console.print(f"[yellow][WARNING][/yellow] Unknown streaming provider: {streaming_provider}")
+            return
+
+        # Set stt_stream (batch stt was already set by setup_transcription)
+        self.config_manager.update_config_defaults({"stt_stream": stream_stt})
+
+        # Enable always_batch_retranscribe
+        full_config = self.config_manager.get_full_config()
+        if 'backend' not in full_config:
+            full_config['backend'] = {}
+        if 'transcription' not in full_config['backend']:
+            full_config['backend']['transcription'] = {}
+        full_config['backend']['transcription']['always_batch_retranscribe'] = True
+        self.config_manager.save_full_config(full_config)
+
+        self.console.print(f"[blue][INFO][/blue] Set defaults.stt_stream: {stream_stt}")
+        self.console.print(f"[blue][INFO][/blue] Enabled always_batch_retranscribe")
+
+        # Prompt for streaming provider env vars if not already set
+        if streaming_provider == "deepgram":
+            existing_key = read_env_value('.env', 'DEEPGRAM_API_KEY')
+            if not existing_key or existing_key in ('your_deepgram_api_key_here', 'your-deepgram-key-here'):
+                api_key = self.prompt_with_existing_masked(
+                    prompt_text="Deepgram API key for streaming",
+                    env_key="DEEPGRAM_API_KEY",
+                    placeholders=['your_deepgram_api_key_here', 'your-deepgram-key-here'],
+                    is_password=True,
+                    default=""
+                )
+                if api_key:
+                    self.config["DEEPGRAM_API_KEY"] = api_key
+        elif streaming_provider == "smallest":
+            existing_key = read_env_value('.env', 'SMALLEST_API_KEY')
+            if not existing_key or existing_key in ('your_smallest_api_key_here', 'your-smallest-key-here'):
+                api_key = self.prompt_with_existing_masked(
+                    prompt_text="Smallest.ai API key for streaming",
+                    env_key="SMALLEST_API_KEY",
+                    placeholders=['your_smallest_api_key_here', 'your-smallest-key-here'],
+                    is_password=True,
+                    default=""
+                )
+                if api_key:
+                    self.config["SMALLEST_API_KEY"] = api_key
+        elif streaming_provider == "qwen3-asr":
+            existing_url = read_env_value('.env', 'QWEN3_ASR_STREAM_URL')
+            if not existing_url:
+                qwen3_url = self.prompt_value("Qwen3-ASR streaming URL", "http://host.docker.internal:8769")
+                stream_host = qwen3_url.replace("http://", "").rstrip("/")
+                self.config["QWEN3_ASR_STREAM_URL"] = stream_host
 
     def setup_llm(self):
         """Configure LLM provider - updates config.yml and .env"""
@@ -841,6 +969,7 @@ class ChronicleSetup:
             # Run setup steps
             self.setup_authentication()
             self.setup_transcription()
+            self.setup_streaming_provider()
             self.setup_llm()
             self.setup_memory()
             self.setup_optional_services()
@@ -889,7 +1018,7 @@ def main():
     parser.add_argument("--parakeet-asr-url",
                        help="Parakeet ASR service URL (default: prompt user)")
     parser.add_argument("--transcription-provider",
-                       choices=["deepgram", "parakeet", "vibevoice", "none"],
+                       choices=["deepgram", "parakeet", "vibevoice", "qwen3-asr", "smallest", "none"],
                        help="Transcription provider (default: prompt user)")
     parser.add_argument("--enable-https", action="store_true",
                        help="Enable HTTPS configuration (default: prompt user)")
@@ -909,6 +1038,9 @@ def main():
                        help="LangFuse project secret key (from langfuse init or external)")
     parser.add_argument("--langfuse-host",
                        help="LangFuse host URL (default: http://langfuse-web:3000 for local)")
+    parser.add_argument("--streaming-provider",
+                       choices=["deepgram", "smallest", "qwen3-asr"],
+                       help="Streaming provider when different from batch (enables batch re-transcription)")
 
     args = parser.parse_args()
     
