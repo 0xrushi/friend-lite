@@ -27,7 +27,10 @@ if str(backend_src) not in sys.path:
     sys.path.insert(0, str(backend_src))
 
 from advanced_omi_backend.clients import AudioStreamClient
-from advanced_omi_backend.clients.audio_stream_client import StreamManager, stream_audio_file as _stream_audio_file
+from advanced_omi_backend.clients.audio_stream_client import StreamManager
+from advanced_omi_backend.clients.audio_stream_client import (
+    stream_audio_file as _stream_audio_file,
+)
 
 # Module-level manager for non-blocking streams
 _manager = StreamManager()
@@ -37,6 +40,7 @@ _manager = StreamManager()
 # Blocking Mode (simple, streams entire file)
 # =============================================================================
 
+
 def stream_audio_file(
     base_url: str,
     token: str,
@@ -44,7 +48,6 @@ def stream_audio_file(
     device_name: str = "robot-test",
     recording_mode: str = "streaming",
     use_wyoming: bool = True,
-    always_persist: bool = False,
 ) -> int:
     """Stream a WAV file via WebSocket (blocking)."""
     return _stream_audio_file(
@@ -54,7 +57,6 @@ def stream_audio_file(
         device_name=device_name,
         recording_mode=recording_mode,
         use_wyoming=use_wyoming,
-        always_persist=always_persist,
     )
 
 
@@ -62,12 +64,12 @@ def stream_audio_file(
 # Non-blocking Mode (for testing during stream)
 # =============================================================================
 
+
 def start_audio_stream(
     base_url: str,
     token: str,
     device_name: str = "robot-test",
     recording_mode: str = "streaming",
-    always_persist: bool = False,
 ) -> str:
     """Start a new audio stream (non-blocking)."""
     return _manager.start_stream(
@@ -75,7 +77,6 @@ def start_audio_stream(
         token=token,
         device_name=device_name,
         recording_mode=recording_mode,
-        always_persist=always_persist,
     )
 
 
@@ -149,6 +150,16 @@ def close_audio_stream_without_stop(stream_id: str) -> int:
     return _manager.close_stream_without_stop(stream_id)
 
 
+def send_button_event(stream_id: str, button_state: str = "SINGLE_PRESS") -> None:
+    """Send a button event to an open stream.
+
+    Args:
+        stream_id: Stream session ID
+        button_state: Button state ("SINGLE_PRESS" or "DOUBLE_PRESS")
+    """
+    _manager.send_button_event(stream_id, button_state)
+
+
 def cleanup_all_streams():
     """Stop all active streams."""
     _manager.cleanup_all()
@@ -157,6 +168,7 @@ def cleanup_all_streams():
 # =============================================================================
 # Advanced Usage
 # =============================================================================
+
 
 def get_audio_stream_client(
     base_url: str,

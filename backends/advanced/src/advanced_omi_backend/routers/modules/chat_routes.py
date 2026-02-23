@@ -11,7 +11,8 @@ This module provides:
 import json
 import logging
 import time
-from typing import List, Optional
+import uuid
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
@@ -27,10 +28,58 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 
 
 # Pydantic models for API
-class ChatMessageRequest(BaseModel):
-    message: str = Field(..., min_length=1, max_length=4000, description="The user's message")
-    session_id: Optional[str] = Field(None, description="Session ID (creates new session if not provided)")
-    include_obsidian_memory: Optional[bool] = Field(False, description="Whether to include context from Obsidian vault")
+
+# --- OpenAI-compatible chat completion models ---
+
+class ChatCompletionMessage(BaseModel):
+    role: str = Field(..., description="The role of the message author (system, user, assistant)")
+    content: str = Field(..., description="The message content")
+
+
+class ChatCompletionRequest(BaseModel):
+    messages: List[ChatCompletionMessage] = Field(..., min_length=1, description="List of messages in the conversation")
+    model: Optional[str] = Field(None, description="Model to use (ignored, uses server-configured model)")
+    stream: Optional[bool] = Field(True, description="Whether to stream the response")
+    temperature: Optional[float] = Field(None, description="Sampling temperature (ignored, uses server config)")
+    session_id: Optional[str] = Field(None, description="Chronicle session ID (creates new if not provided)")
+    include_obsidian_memory: Optional[bool] = Field(False, description="Whether to include Obsidian vault context")
+
+
+class ChatCompletionChunkDelta(BaseModel):
+    role: Optional[str] = None
+    content: Optional[str] = None
+
+
+class ChatCompletionChunkChoice(BaseModel):
+    index: int = 0
+    delta: ChatCompletionChunkDelta
+    finish_reason: Optional[str] = None
+
+
+class ChatCompletionChunk(BaseModel):
+    id: str
+    object: str = "chat.completion.chunk"
+    created: int
+    model: str
+    choices: List[ChatCompletionChunkChoice]
+    chronicle_metadata: Optional[Dict[str, Any]] = None
+
+
+class ChatCompletionChoice(BaseModel):
+    index: int = 0
+    message: ChatCompletionMessage
+    finish_reason: str = "stop"
+
+
+class ChatCompletionResponse(BaseModel):
+    id: str
+    object: str = "chat.completion"
+    created: int
+    model: str
+    choices: List[ChatCompletionChoice]
+    usage: Optional[Dict[str, int]] = None
+    session_id: Optional[str] = None
+    chronicle_metadata: Optional[Dict[str, Any]] = None
 
 
 class ChatMessageResponse(BaseModel):
@@ -281,64 +330,62 @@ async def get_session_messages(
         )
 
 
-@router.post("/send")
-async def send_message_stream(
-    request: ChatMessageRequest,
+@router.post("/completions")
+async def chat_completions(
+    request: ChatCompletionRequest,
     current_user: User = Depends(current_active_user)
 ):
-    """Send a message and receive streaming response via Server-Sent Events."""
+    """OpenAI-compatible chat completions endpoint with streaming support."""
     try:
         chat_service = get_chat_service()
-        
+
         # Create new session if not provided
         if not request.session_id:
             session = await chat_service.create_session(str(current_user.id))
             session_id = session.session_id
         else:
             session_id = request.session_id
-            # Verify session belongs to user
             session = await chat_service.get_session(session_id, str(current_user.id))
             if not session:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="Chat session not found"
                 )
-        
-        # Create SSE streaming response
-        async def event_stream():
-            try:
-                async for event in chat_service.generate_response_stream(
-                    session_id=session_id,
-                    user_id=str(current_user.id),
-                    message_content=request.message,
-                    include_obsidian_memory=request.include_obsidian_memory
-                ):
-                    # Format as Server-Sent Event
-                    event_data = json.dumps(event, default=str)
-                    yield f"data: {event_data}\n\n"
-                
-                # Send final event to close connection
-                yield "data: [DONE]\n\n"
-                
-            except Exception as e:
-                logger.error(f"Error in streaming response: {e}")
-                error_event = {
-                    "type": "error",
-                    "data": {"error": str(e)},
-                    "timestamp": time.time()
-                }
-                yield f"data: {json.dumps(error_event)}\n\n"
-        
-        return StreamingResponse(
-            event_stream(),
-            media_type="text/plain",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "Content-Type": "text/event-stream",
-            }
-        )
-        
+
+        # Extract the latest user message
+        user_messages = [m for m in request.messages if m.role == "user"]
+        if not user_messages:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="At least one user message is required"
+            )
+        message_content = user_messages[-1].content
+
+        model_name = getattr(chat_service.llm_client, "model", None) or "chronicle"
+        completion_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
+        created = int(time.time())
+
+        if request.stream:
+            return StreamingResponse(
+                _stream_openai_format(
+                    chat_service, session_id, str(current_user.id),
+                    message_content, request.include_obsidian_memory,
+                    completion_id, created, model_name,
+                ),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no",
+                },
+            )
+        else:
+            return await _non_streaming_response(
+                chat_service, session_id, str(current_user.id),
+                message_content, request.include_obsidian_memory,
+                completion_id, created, model_name,
+            )
+
     except HTTPException:
         raise
     except Exception as e:
@@ -347,6 +394,125 @@ async def send_message_stream(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to process message"
         )
+
+
+async def _stream_openai_format(
+    chat_service, session_id: str, user_id: str,
+    message_content: str, include_obsidian_memory: bool,
+    completion_id: str, created: int, model_name: str,
+):
+    """Map internal streaming events to OpenAI SSE chunk format."""
+    previous_text = ""
+    try:
+        async for event in chat_service.generate_response_stream(
+            session_id=session_id,
+            user_id=user_id,
+            message_content=message_content,
+            include_obsidian_memory=include_obsidian_memory,
+        ):
+            event_type = event.get("type")
+
+            if event_type == "memory_context":
+                # First chunk: send role + chronicle metadata
+                chunk = ChatCompletionChunk(
+                    id=completion_id, created=created, model=model_name,
+                    choices=[ChatCompletionChunkChoice(
+                        delta=ChatCompletionChunkDelta(role="assistant"),
+                    )],
+                    chronicle_metadata={
+                        "session_id": session_id,
+                        **event["data"],
+                    },
+                )
+                yield f"data: {chunk.model_dump_json()}\n\n"
+
+            elif event_type == "token":
+                # Internal events carry accumulated text; compute delta
+                accumulated = event["data"]
+                delta_text = accumulated[len(previous_text):]
+                previous_text = accumulated
+                if delta_text:
+                    chunk = ChatCompletionChunk(
+                        id=completion_id, created=created, model=model_name,
+                        choices=[ChatCompletionChunkChoice(
+                            delta=ChatCompletionChunkDelta(content=delta_text),
+                        )],
+                    )
+                    yield f"data: {chunk.model_dump_json()}\n\n"
+
+            elif event_type == "complete":
+                chunk = ChatCompletionChunk(
+                    id=completion_id, created=created, model=model_name,
+                    choices=[ChatCompletionChunkChoice(
+                        delta=ChatCompletionChunkDelta(),
+                        finish_reason="stop",
+                    )],
+                    chronicle_metadata={
+                        "session_id": session_id,
+                        "message_id": event["data"].get("message_id"),
+                        "memories_used": event["data"].get("memories_used", []),
+                    },
+                )
+                yield f"data: {chunk.model_dump_json()}\n\n"
+
+            elif event_type == "error":
+                error_obj = {
+                    "error": {
+                        "message": event["data"].get("error", "Unknown error"),
+                        "type": "server_error",
+                    }
+                }
+                yield f"data: {json.dumps(error_obj)}\n\n"
+
+        yield "data: [DONE]\n\n"
+
+    except Exception as e:
+        logger.error(f"Error in streaming response: {e}")
+        error_obj = {"error": {"message": str(e), "type": "server_error"}}
+        yield f"data: {json.dumps(error_obj)}\n\n"
+
+
+async def _non_streaming_response(
+    chat_service, session_id: str, user_id: str,
+    message_content: str, include_obsidian_memory: bool,
+    completion_id: str, created: int, model_name: str,
+) -> ChatCompletionResponse:
+    """Collect all events and return a single ChatCompletionResponse."""
+    full_content = ""
+    metadata: Dict[str, Any] = {"session_id": session_id}
+
+    async for event in chat_service.generate_response_stream(
+        session_id=session_id,
+        user_id=user_id,
+        message_content=message_content,
+        include_obsidian_memory=include_obsidian_memory,
+    ):
+        event_type = event.get("type")
+
+        if event_type == "memory_context":
+            metadata.update(event["data"])
+        elif event_type == "token":
+            full_content = event["data"]  # accumulated text
+        elif event_type == "complete":
+            metadata["message_id"] = event["data"].get("message_id")
+            metadata["memories_used"] = event["data"].get("memories_used", [])
+        elif event_type == "error":
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=event["data"].get("error", "Unknown error"),
+            )
+
+    return ChatCompletionResponse(
+        id=completion_id,
+        created=created,
+        model=model_name,
+        choices=[ChatCompletionChoice(
+            message=ChatCompletionMessage(role="assistant", content=full_content.strip()),
+        )],
+        usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+        session_id=session_id,
+        chronicle_metadata=metadata,
+    )
 
 
 @router.get("/statistics", response_model=ChatStatisticsResponse)

@@ -32,10 +32,31 @@ async def close_current_conversation(
 @router.get("")
 async def get_conversations(
     include_deleted: bool = Query(False, description="Include soft-deleted conversations"),
+    include_unprocessed: bool = Query(False, description="Include orphan audio sessions (always_persist with failed/pending transcription)"),
+    starred_only: bool = Query(False, description="Only return starred/favorited conversations"),
+    limit: int = Query(200, ge=1, le=500, description="Max conversations to return"),
+    offset: int = Query(0, ge=0, description="Number of conversations to skip"),
+    sort_by: str = Query("created_at", description="Sort field: created_at, title, audio_total_duration"),
+    sort_order: str = Query("desc", description="Sort direction: asc or desc"),
     current_user: User = Depends(current_active_user)
 ):
     """Get conversations. Admins see all conversations, users see only their own."""
-    return await conversation_controller.get_conversations(current_user, include_deleted)
+    return await conversation_controller.get_conversations(
+        current_user, include_deleted, include_unprocessed, starred_only, limit, offset,
+        sort_by=sort_by, sort_order=sort_order,
+    )
+
+
+
+@router.get("/search")
+async def search_conversations(
+    q: str = Query(..., min_length=1, description="Text search query"),
+    limit: int = Query(50, ge=1, le=200, description="Max results to return"),
+    offset: int = Query(0, ge=0, description="Number of results to skip"),
+    current_user: User = Depends(current_active_user),
+):
+    """Full-text search across conversation titles, summaries, and transcripts."""
+    return await conversation_controller.search_conversations(q, current_user, limit, offset)
 
 
 @router.get("/{conversation_id}")
@@ -47,7 +68,27 @@ async def get_conversation_detail(
     return await conversation_controller.get_conversation(conversation_id, current_user)
 
 
+@router.get("/{conversation_id}/memories")
+async def get_conversation_memories(
+    conversation_id: str,
+    limit: int = Query(100, ge=1, le=500, description="Max memories to return"),
+    current_user: User = Depends(current_active_user),
+):
+    """Get memories extracted from a specific conversation."""
+    return await conversation_controller.get_conversation_memories(
+        conversation_id, current_user, limit
+    )
+
+
 # New reprocessing endpoints
+@router.post("/{conversation_id}/reprocess-orphan")
+async def reprocess_orphan(
+    conversation_id: str, current_user: User = Depends(current_active_user)
+):
+    """Reprocess an orphan audio session (always_persist conversation with failed/pending transcription)."""
+    return await conversation_controller.reprocess_orphan(conversation_id, current_user)
+
+
 @router.post("/{conversation_id}/reprocess-transcript")
 async def reprocess_transcript(
     conversation_id: str, current_user: User = Depends(current_active_user)
@@ -313,6 +354,15 @@ async def get_audio_segment(
             "X-Audio-Duration": str(end - start)
         }
     )
+
+
+@router.post("/{conversation_id}/star")
+async def toggle_star(
+    conversation_id: str,
+    current_user: User = Depends(current_active_user)
+):
+    """Toggle the starred/favorite status of a conversation."""
+    return await conversation_controller.toggle_star(conversation_id, current_user)
 
 
 @router.delete("/{conversation_id}")

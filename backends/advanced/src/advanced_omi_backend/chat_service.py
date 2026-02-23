@@ -143,9 +143,9 @@ class ChatService:
         self.memory_service = None
         self._initialized = False
 
-    def _get_system_prompt(self) -> str:
+    async def _get_system_prompt(self) -> str:
         """
-        Get system prompt from config with fallback to default.
+        Get system prompt from config with fallback to prompt registry default.
 
         Returns:
             str: System prompt for chat interactions
@@ -162,8 +162,19 @@ class ChatService:
         except Exception as e:
             logger.warning(f"Failed to load chat system prompt from config: {e}")
 
-        # Fallback to default
-        logger.info("⚠️ Using default chat system prompt (config not found)")
+        # Fallback to prompt registry
+        try:
+            from advanced_omi_backend.prompt_registry import get_prompt_registry
+
+            registry = get_prompt_registry()
+            prompt = await registry.get_prompt("chat.system")
+            logger.info("Using chat system prompt from prompt registry")
+            return prompt
+        except Exception as e:
+            logger.warning(f"Failed to load chat system prompt from registry: {e}")
+
+        # Final fallback
+        logger.info("Using hardcoded default chat system prompt")
         return """You are a helpful AI assistant with access to the user's personal memories and conversation history.
 
 Use the provided memories and conversation context to give personalized, contextual responses. If memories are relevant, reference them naturally in your response. Be conversational and helpful.
@@ -421,7 +432,7 @@ If no relevant memories are available, respond normally based on the conversatio
             }
 
             # Get system prompt from config
-            system_prompt = self._get_system_prompt()
+            system_prompt = await self._get_system_prompt()
 
             # Prepare full prompt
             full_prompt = f"{system_prompt}\n\n{context}"
@@ -429,10 +440,18 @@ If no relevant memories are available, respond normally based on the conversatio
             # Generate streaming response
             logger.info(f"Generating response for session {session_id} with {len(memory_ids)} memories")
             
+            # Resolve chat operation temperature from config
+            chat_temp = None
+            registry = get_models_registry()
+            if registry:
+                chat_op = registry.get_llm_operation("chat")
+                chat_temp = chat_op.temperature
+
             # Note: For now, we'll use the regular generate method
             # In the future, this should be replaced with actual streaming
             response_content = self.llm_client.generate(
-                prompt=full_prompt
+                prompt=full_prompt,
+                temperature=chat_temp,
             )
 
             # Simulate streaming by yielding chunks

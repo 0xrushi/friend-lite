@@ -87,6 +87,11 @@ class StreamingTranscriptionProvider(BaseTranscriptionProvider):
     def mode(self) -> str:
         return "streaming"
 
+    @property
+    def capabilities(self) -> set:
+        """Return provider capabilities (empty by default)."""
+        return set()
+
     @abc.abstractmethod
     async def start_stream(self, client_id: str, sample_rate: int = 16000, diarize: bool = False):
         """Start a transcription stream for a client.
@@ -122,12 +127,14 @@ class BatchTranscriptionProvider(BaseTranscriptionProvider):
         return "batch"
 
     @abc.abstractmethod
-    async def transcribe(self, audio_data: bytes, sample_rate: int, diarize: bool = False) -> dict:
+    async def transcribe(self, audio_data: bytes, sample_rate: int, diarize: bool = False, context_info: Optional[str] = None, **kwargs) -> dict:
         """Transcribe audio data.
 
         Args:
             audio_data: Raw audio bytes
             sample_rate: Audio sample rate
             diarize: Whether to enable speaker diarization (provider-dependent)
+            context_info: Optional ASR context (hot words, jargon) to boost recognition
+            **kwargs: Additional parameters (e.g. Langfuse trace IDs)
         """
         pass

@@ -107,17 +107,31 @@ export const authApi = {
 }
 
 export const conversationsApi = {
-  getAll: (includeDeleted?: boolean) => api.get('/api/conversations', {
-    params: includeDeleted !== undefined ? { include_deleted: includeDeleted } : {}
+  getAll: (includeDeleted?: boolean, includeUnprocessed?: boolean, limit?: number, offset?: number, starredOnly?: boolean, sortBy?: string, sortOrder?: string) => api.get('/api/conversations', {
+    params: {
+      ...(includeDeleted !== undefined && { include_deleted: includeDeleted }),
+      ...(includeUnprocessed !== undefined && { include_unprocessed: includeUnprocessed }),
+      ...(starredOnly !== undefined && { starred_only: starredOnly }),
+      ...(limit !== undefined && { limit }),
+      ...(offset !== undefined && { offset }),
+      ...(sortBy !== undefined && { sort_by: sortBy }),
+      ...(sortOrder !== undefined && { sort_order: sortOrder }),
+    }
   }),
   getById: (id: string) => api.get(`/api/conversations/${id}`),
+  search: (query: string, limit?: number, offset?: number) =>
+    api.get('/api/conversations/search', { params: { q: query, limit, offset } }),
+  star: (id: string) => api.post(`/api/conversations/${id}/star`),
   delete: (id: string) => api.delete(`/api/conversations/${id}`),
   restore: (id: string) => api.post(`/api/conversations/${id}/restore`),
   permanentDelete: (id: string) => api.delete(`/api/conversations/${id}`, {
     params: { permanent: true }
   }),
 
+  getMemories: (id: string) => api.get(`/api/conversations/${id}/memories`),
+
   // Reprocessing endpoints
+  reprocessOrphan: (conversationId: string) => api.post(`/api/conversations/${conversationId}/reprocess-orphan`),
   reprocessTranscript: (conversationId: string) => api.post(`/api/conversations/${conversationId}/reprocess-transcript`),
   reprocessMemory: (conversationId: string, transcriptVersionId: string = 'active') => api.post(`/api/conversations/${conversationId}/reprocess-memory`, null, {
     params: { transcript_version_id: transcriptVersionId }
@@ -199,9 +213,43 @@ export const annotationsApi = {
   applyDiarizationAnnotations: (conversation_id: string) =>
     api.post(`/api/annotations/diarization/${conversation_id}/apply`),
 
-  // Apply ALL pending annotations (diarization + transcript) - creates single new version
+  // Apply ALL pending annotations (diarization + transcript + insert) - creates single new version
   applyAllAnnotations: (conversation_id: string) =>
     api.post(`/api/annotations/${conversation_id}/apply`),
+
+  // Title annotations (instantly applied)
+  createTitleAnnotation: (data: {
+    conversation_id: string
+    original_text: string
+    corrected_text: string
+  }) => api.post('/api/annotations/title', data),
+
+  getTitleAnnotations: (conversation_id: string) =>
+    api.get(`/api/annotations/title/${conversation_id}`),
+
+  // Generic annotation management
+  deleteAnnotation: (annotationId: string) =>
+    api.delete(`/api/annotations/${annotationId}`),
+
+  updateAnnotation: (annotationId: string, data: {
+    corrected_text?: string
+    corrected_speaker?: string
+    insert_text?: string
+    insert_segment_type?: string
+    insert_speaker?: string
+  }) => api.patch(`/api/annotations/${annotationId}`, data),
+
+  // Insert annotations
+  createInsertAnnotation: (data: {
+    conversation_id: string
+    insert_after_index: number
+    insert_text: string
+    insert_segment_type: string
+    insert_speaker?: string
+  }) => api.post('/api/annotations/insert', data),
+
+  getInsertAnnotations: (conversation_id: string) =>
+    api.get(`/api/annotations/insert/${conversation_id}`),
 }
 
 export const finetuningApi = {
@@ -213,6 +261,21 @@ export const finetuningApi = {
 
   // Get fine-tuning status
   getStatus: () => api.get('/api/finetuning/status'),
+
+  // Orphaned annotation management
+  deleteOrphanedAnnotations: (annotationType?: string) =>
+    api.delete('/api/finetuning/orphaned-annotations', {
+      params: annotationType ? { annotation_type: annotationType } : {}
+    }),
+  reattachOrphanedAnnotations: () =>
+    api.post('/api/finetuning/orphaned-annotations/reattach'),
+
+  // Cron job management
+  getCronJobs: () => api.get('/api/finetuning/cron-jobs'),
+  updateCronJob: (jobId: string, data: { enabled?: boolean; schedule?: string }) =>
+    api.put(`/api/finetuning/cron-jobs/${jobId}`, data),
+  runCronJob: (jobId: string) =>
+    api.post(`/api/finetuning/cron-jobs/${jobId}/run`),
 }
 
 export const usersApi = {
@@ -235,32 +298,9 @@ export const systemApi = {
 
   // Miscellaneous Configuration Settings
   getMiscSettings: () => api.get('/api/misc-settings'),
-  saveMiscSettings: (settings: { always_persist_enabled?: boolean; use_provider_segments?: boolean }) =>
+  saveMiscSettings: (settings: { always_persist_enabled?: boolean; use_provider_segments?: boolean; per_segment_speaker_id?: boolean; transcription_job_timeout_seconds?: number }) =>
     api.post('/api/misc-settings', settings),
   
-  // Memory Configuration Management
-  getMemoryConfigRaw: () => api.get('/api/admin/memory/config/raw'),
-  updateMemoryConfigRaw: (configYaml: string) =>
-    api.post('/api/admin/memory/config/raw', configYaml, {
-      headers: { 'Content-Type': 'text/plain' }
-    }),
-  validateMemoryConfig: (configYaml: string) =>
-    api.post('/api/admin/memory/config/validate/raw', configYaml, {
-      headers: { 'Content-Type': 'text/plain' }
-    }),
-  reloadMemoryConfig: () => api.post('/api/admin/memory/config/reload'),
-
-  // Chat Configuration Management
-  getChatConfigRaw: () => api.get('/api/admin/chat/config'),
-  updateChatConfigRaw: (configYaml: string) =>
-    api.post('/api/admin/chat/config', configYaml, {
-      headers: { 'Content-Type': 'text/plain' }
-    }),
-  validateChatConfig: (configYaml: string) =>
-    api.post('/api/admin/chat/config/validate', configYaml, {
-      headers: { 'Content-Type': 'text/plain' }
-    }),
-
   // Plugin Configuration Management (YAML-based)
   getPluginsConfigRaw: () => api.get('/api/admin/plugins/config'),
   updatePluginsConfigRaw: (configYaml: string) =>
@@ -293,9 +333,46 @@ export const systemApi = {
     env_vars?: Record<string, string>
   }) => api.post(`/api/admin/plugins/test-connection/${pluginId}`, config),
 
+  // Plugin CRUD
+  createPlugin: (data: { plugin_name: string; description: string; events: string[]; plugin_code?: string }) =>
+    api.post('/api/admin/plugins/create', data),
+  deletePlugin: (pluginId: string, removeFiles: boolean = false) =>
+    api.delete(`/api/admin/plugins/${pluginId}`, { params: { remove_files: removeFiles } }),
+  writePluginCode: (pluginId: string, data: { code: string; config_yml?: string }) =>
+    api.put(`/api/admin/plugins/${pluginId}/code`, data),
+
+  // Plugin AI Assistant (SSE streaming)
+  pluginAssistantChat: (messages: Array<{ role: string; content: string }>) => {
+    return fetch(`${BACKEND_URL}/api/admin/plugins/assistant`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${localStorage.getItem(getStorageKey('token'))}`
+      },
+      body: JSON.stringify({ messages })
+    })
+  },
+
+  // Plugin Connectivity
+  getPluginsConnectivity: () => api.get('/api/admin/plugins/connectivity'),
+
   // Memory Provider Management
   getMemoryProvider: () => api.get('/api/admin/memory/provider'),
   setMemoryProvider: (provider: string) => api.post('/api/admin/memory/provider', { provider }),
+
+  // LLM Operations Settings
+  getLLMOperations: () => api.get('/api/admin/llm-operations'),
+  saveLLMOperations: (operations: Record<string, any>) =>
+    api.post('/api/admin/llm-operations', operations),
+  testLLMModel: (modelName: string | null) =>
+    api.post('/api/admin/llm-operations/test', { model_name: modelName }),
+
+  // System restart operations
+  restartWorkers: () => api.post('/api/admin/system/restart-workers'),
+  restartBackend: () => api.post('/api/admin/system/restart-backend'),
+
+  // Observability
+  getObservabilityConfig: () => api.get('/api/observability'),
 }
 
 export const queueApi = {
@@ -319,6 +396,16 @@ export const queueApi = {
     const endpoint = flushAll ? '/api/queue/flush-all' : '/api/queue/flush'
     return api.post(endpoint, body)
   },
+
+  // Clear jobs
+  clearJobs: () => api.delete('/api/queue/jobs'),
+
+
+  // Plugin events
+  getEvents: (limit: number = 50, eventType?: string) => api.get('/api/queue/events', {
+    params: { limit, ...(eventType && { event_type: eventType }) }
+  }),
+  clearEvents: () => api.delete('/api/queue/events'),
 
   // Legacy endpoints - kept for backward compatibility but not used in Queue page
   // getJobs: (params: URLSearchParams) => api.get(`/api/queue/jobs?${params}`),
@@ -390,17 +477,20 @@ export const chatApi = {
   // Health check
   getHealth: () => api.get('/api/chat/health'),
   
-  // Streaming chat (returns EventSource for Server-Sent Events)
+  // Streaming chat — OpenAI-compatible completions endpoint
   sendMessage: (message: string, sessionId?: string, includeObsidianMemory?: boolean) => {
-    const requestBody: any = { message }
+    const requestBody: Record<string, unknown> = {
+      messages: [{ role: 'user', content: message }],
+      stream: true,
+    }
     if (sessionId) {
       requestBody.session_id = sessionId
     }
     if (includeObsidianMemory) {
       requestBody.include_obsidian_memory = includeObsidianMemory
     }
-    
-    return fetch(`${BACKEND_URL}/api/chat/send`, {
+
+    return fetch(`${BACKEND_URL}/api/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -441,6 +531,9 @@ export const knowledgeGraphApi = {
 
   getEntityRelationships: (entityId: string) =>
     api.get(`/api/knowledge-graph/entities/${entityId}/relationships`),
+
+  updateEntity: (entityId: string, data: { name?: string; details?: string; icon?: string }) =>
+    api.patch(`/api/knowledge-graph/entities/${entityId}`, data),
 
   deleteEntity: (entityId: string) =>
     api.delete(`/api/knowledge-graph/entities/${entityId}`),

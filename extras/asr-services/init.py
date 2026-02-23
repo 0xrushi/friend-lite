@@ -73,6 +73,19 @@ PROVIDERS = {
         "service": "nemo-asr",
         "capabilities": ["timestamps", "word_timestamps", "chunked_processing"],
     },
+    "qwen3-asr": {
+        "name": "Qwen3-ASR",
+        "description": "Qwen3-ASR via vLLM (52 languages, streaming + batch)",
+        "models": {
+            "Qwen/Qwen3-ASR-0.6B": "Qwen3-ASR 0.6B (Fast, efficient)",
+            "Qwen/Qwen3-ASR-1.7B": "Qwen3-ASR 1.7B (Higher quality)",
+        },
+        "default_model": "Qwen/Qwen3-ASR-1.7B",
+        "service": "qwen3-asr-wrapper",
+        # No diarization (use speaker service for that).
+        # word_timestamps provided by ForcedAligner (batch only, enabled via Dockerfile.full).
+        "capabilities": ["word_timestamps", "multilingual", "language_detection", "streaming"],
+    },
 }
 
 
@@ -161,12 +174,17 @@ class ASRServicesSetup:
         table.add_row(
             "vibevoice",
             "Microsoft VibeVoice-ASR",
-            "Built-in speaker diarization"
+            "Built-in speaker diarization, batch only"
         )
         table.add_row(
-            "faster-whisper",
-            "Fast Whisper (CTranslate2)",
-            "General use, speed + quality"
+            "qwen3-asr",
+            "Qwen3-ASR via vLLM",
+            "52 languages, streaming + batch"
+        )
+        table.add_row(
+            "nemo",
+            "NVIDIA NeMo (Parakeet)",
+            "English, streaming + batch, word timestamps"
         )
         table.add_row(
             "transformers",
@@ -174,22 +192,23 @@ class ASRServicesSetup:
             "Hindi, custom models"
         )
         table.add_row(
-            "nemo",
-            "NVIDIA NeMo",
-            "Parakeet, long audio processing"
+            "faster-whisper",
+            "Fast Whisper (CTranslate2)",
+            "Lightweight, fast inference"
         )
         self.console.print(table)
         self.console.print()
 
         provider_choices = {
-            "1": "vibevoice - Microsoft VibeVoice-ASR (Built-in diarization)",
-            "2": "faster-whisper - Fast Whisper inference (Recommended for general use)",
-            "3": "transformers - HuggingFace models (Hindi, custom)",
-            "4": "nemo - NVIDIA NeMo (Parakeet)",
+            "1": "vibevoice - Microsoft VibeVoice-ASR (built-in diarization, batch only)",
+            "2": "qwen3-asr - Qwen3-ASR via vLLM (52 languages, streaming + batch)",
+            "3": "nemo - NVIDIA NeMo Parakeet (streaming + batch, word timestamps)",
+            "4": "transformers - HuggingFace models (Hindi, custom)",
+            "5": "faster-whisper - Fast Whisper (lightweight, fast inference)",
         }
 
-        choice = self.prompt_choice("Choose ASR provider:", provider_choices, "2")
-        choice_to_provider = {"1": "vibevoice", "2": "faster-whisper", "3": "transformers", "4": "nemo"}
+        choice = self.prompt_choice("Choose ASR provider:", provider_choices, "1")
+        choice_to_provider = {"1": "vibevoice", "2": "qwen3-asr", "3": "nemo", "4": "transformers", "5": "faster-whisper"}
         return choice_to_provider[choice]
 
     def select_model(self, provider: str) -> str:
@@ -304,6 +323,12 @@ class ASRServicesSetup:
             # NeMo's transcribe() handles long audio natively - no extra config needed
             pass
 
+        elif provider == "qwen3-asr":
+            self.config["QWEN3_GPU_MEM"] = "0.8"
+            # No CUDA build needed - uses pre-built vLLM image
+            self.console.print("[blue][INFO][/blue] Qwen3-ASR uses a pre-built vLLM Docker image (no local CUDA build)")
+            self.console.print("[blue][INFO][/blue] Streaming bridge will also be started on port 8769")
+
     def generate_env_file(self):
         """Generate .env file from configuration"""
         env_path = Path(".env")
@@ -326,12 +351,23 @@ class ASRServicesSetup:
         self.console.print("[green][SUCCESS][/green] .env file configured successfully")
 
     def update_config_yml(self, provider: str):
-        """Update config/config.yml with STT model defaults."""
+        """Update config/config.yml with STT model defaults.
+
+        Sets the defaults.stt (and defaults.stt_stream for streaming providers)
+        and ensures the corresponding model definitions exist in config.yml,
+        copying them from defaults.yml if missing.
+        """
         provider_to_stt_model = {
             "vibevoice": "stt-vibevoice",
             "faster-whisper": "stt-faster-whisper",
             "transformers": "stt-transformers",
             "nemo": "stt-nemo",
+            "qwen3-asr": "stt-qwen3-asr",
+        }
+
+        # Providers that also have a streaming model
+        provider_to_stream_model = {
+            "qwen3-asr": "stt-qwen3-asr-stream",
         }
 
         stt_model = provider_to_stt_model.get(provider)
@@ -339,22 +375,54 @@ class ASRServicesSetup:
             self.console.print(f"[yellow][WARNING][/yellow] Unknown provider '{provider}', skipping config.yml update")
             return
 
+        stream_model = provider_to_stream_model.get(provider)
+
         try:
             config_manager = ConfigManager(service_path="extras/asr-services")
-
-            # Validate the model exists in config.yml
             config = config_manager.get_full_config()
-            models = config.get("models", [])
+            models = config.get("models", []) or []
             model_names = [m.get("name") for m in models]
 
-            if stt_model not in model_names:
-                self.console.print(f"[yellow][WARNING][/yellow] Model '{stt_model}' not found in config.yml")
-                self.console.print("[blue][INFO][/blue] Please ensure config/config.yml includes the model definition")
-            else:
-                self.console.print(f"[blue][INFO][/blue] Found STT model '{stt_model}' in config.yml")
+            # Collect model names we need to ensure exist
+            needed_models = [stt_model]
+            if stream_model:
+                needed_models.append(stream_model)
 
-            config_manager.update_config_defaults({"stt": stt_model})
+            missing = [name for name in needed_models if name not in model_names]
+
+            if missing:
+                # Load defaults.yml to get model definitions
+                defaults_path = config_manager.config_dir / "defaults.yml"
+                if defaults_path.exists():
+                    import yaml
+                    with open(defaults_path) as f:
+                        defaults = yaml.safe_load(f) or {}
+                    defaults_models = defaults.get("models", []) or []
+                    defaults_by_name = {m["name"]: m for m in defaults_models if "name" in m}
+
+                    for name in missing:
+                        if name in defaults_by_name:
+                            models.append(defaults_by_name[name])
+                            self.console.print(f"[green][SUCCESS][/green] Added model '{name}' to config.yml from defaults")
+                        else:
+                            self.console.print(f"[yellow][WARNING][/yellow] Model '{name}' not found in defaults.yml either")
+
+                    config["models"] = models
+                    config_manager.save_full_config(config)
+                else:
+                    self.console.print(f"[yellow][WARNING][/yellow] defaults.yml not found, cannot add missing models")
+            else:
+                self.console.print(f"[blue][INFO][/blue] Model definitions already present in config.yml")
+
+            # Update defaults
+            defaults_update = {"stt": stt_model}
+            if stream_model:
+                defaults_update["stt_stream"] = stream_model
+            config_manager.update_config_defaults(defaults_update)
+
             self.console.print(f"[green][SUCCESS][/green] Updated defaults.stt to '{stt_model}' in config/config.yml")
+            if stream_model:
+                self.console.print(f"[green][SUCCESS][/green] Updated defaults.stt_stream to '{stream_model}' in config/config.yml")
 
         except Exception as e:
             self.console.print(f"[yellow][WARNING][/yellow] Could not update config.yml: {e}")
@@ -412,7 +480,7 @@ class ASRServicesSetup:
             provider = self.select_provider()
             model = self.select_model(provider)
 
-            # Configure CUDA version (only for providers that need it)
+            # Configure CUDA version (only for providers that need local CUDA builds)
             if provider in ["nemo", "transformers"]:
                 self.setup_cuda_version()
 
@@ -447,7 +515,7 @@ def main():
     parser = argparse.ArgumentParser(description="ASR Services Setup (Provider-Based)")
     parser.add_argument(
         "--provider",
-        choices=["vibevoice", "faster-whisper", "transformers", "nemo"],
+        choices=["vibevoice", "faster-whisper", "transformers", "nemo", "qwen3-asr"],
         help="ASR provider to use"
     )
     parser.add_argument(

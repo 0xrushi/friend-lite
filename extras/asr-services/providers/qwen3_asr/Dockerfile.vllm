@@ -1,0 +1,5 @@
+FROM vllm/vllm-openai:nightly
+
+RUN pip install --no-cache-dir "vllm[audio]"
+
+ENTRYPOINT ["vllm", "serve"]

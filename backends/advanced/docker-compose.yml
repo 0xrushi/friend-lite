@@ -40,6 +40,7 @@ services:
       - ./data/debug_dir:/app/debug_dir
       - ./data:/app/data
       - ../../config:/app/config  # Mount entire config directory (includes config.yml, defaults.yml, plugins.yml)
+      - ../../plugins:/app/plugins  # External plugins directory
     environment:
       - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY}
       - PARAKEET_ASR_URL=${PARAKEET_ASR_URL}
@@ -86,7 +87,7 @@ services:
       context: .
       dockerfile: Dockerfile
       target: prod  # Use prod stage without test dependencies
-    command: ["uv", "run", "python", "worker_orchestrator.py"]
+    command: ["python", "worker_orchestrator.py"]
     env_file:
       - .env
     volumes:
@@ -95,6 +96,7 @@ services:
       - ./data/audio_chunks:/app/audio_chunks
       - ./data:/app/data
       - ../../config:/app/config  # Mount entire config directory (includes config.yml, defaults.yml, plugins.yml)
+      - ../../plugins:/app/plugins  # External plugins directory
     environment:
       - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY}
       - PARAKEET_ASR_URL=${PARAKEET_ASR_URL}
@@ -133,7 +135,7 @@ services:
       context: .
       dockerfile: Dockerfile
       target: prod
-    command: ["uv", "run", "python", "-m", "advanced_omi_backend.cron"]
+    command: ["python", "-m", "advanced_omi_backend.cron"]
     container_name: chronicle-annotation-cron
     env_file:
       - .env
@@ -177,6 +179,7 @@ services:
     ports:
       - "443:443"
       - "80:80"  # HTTP redirect to HTTPS
+      - "3443:3443"  # Langfuse HTTPS
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
@@ -212,8 +215,8 @@ services:
       - "6033:6033" # gRPC
       - "6034:6034" # HTTP
     volumes:
-      - ./data/qdrant_data:/qdrant/storage 
-  
+      - ./data/qdrant_data:/qdrant/storage
+    restart: unless-stopped
 
   mongo:
     image: mongo:8.0.14
@@ -227,6 +230,7 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    restart: unless-stopped
 
   redis:
     image: redis:7-alpine
@@ -235,6 +239,7 @@ services:
     volumes:
       - ./data/redis_data:/data
     command: redis-server --appendonly yes
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -267,9 +272,6 @@ services:
       timeout: 10s
       retries: 5
       start_period: 30s
-    profiles:
-      - obsidian
-      - knowledge-graph
 
   # ollama:
   #   image: ollama/ollama:latest
