@@ -14,8 +14,7 @@
 # will automatically obtain Let's Encrypt certificates.
 
 localhost TAILSCALE_IP {
-    # Enable automatic HTTPS
-    tls internal
+    tls /certs/server.crt /certs/server.key
 
     # WebSocket endpoints - proxy to backend with upgrade support
     handle /ws* {

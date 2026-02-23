@@ -271,7 +271,7 @@ def run_compose_command(service_name, command, build=False, force_recreate=False
             return False
 
     # Step 2: Run the actual command (up/down/restart/status)
-    up_flags = ["up", "-d"]
+    up_flags = ["up", "-d", "--remove-orphans"]
     if force_recreate:
         up_flags.append("--force-recreate")
 
@@ -295,8 +295,9 @@ def run_compose_command(service_name, command, build=False, force_recreate=False
             cmd.extend(["--profile", profile])
 
             if command == "up":
-                https_enabled = env_values.get("REACT_UI_HTTPS", "false")
-                if https_enabled.lower() == "true":
+                caddyfile_path = service_path / "Caddyfile"
+                https_enabled = caddyfile_path.exists() and caddyfile_path.is_file()
+                if https_enabled:
                     cmd.extend(up_flags)
                 else:
                     cmd.extend(
@@ -305,7 +306,7 @@ def run_compose_command(service_name, command, build=False, force_recreate=False
                             (
                                 "speaker-service-gpu"
                                 if profile == "gpu"
-                                else "speaker-service-cpu"
+                                else "speaker-service"
                             ),
                             "web-ui",
                         ]
