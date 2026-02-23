@@ -13,6 +13,8 @@ interface WaveformDisplayProps {
   currentTime?: number;  // Current playback position in seconds
   onSeek?: (time: number) => void;  // Callback when user clicks to seek
   height?: number;  // Canvas height in pixels (default: 100)
+  chunkStart?: number;  // Currently loaded chunk start time (seconds)
+  chunkEnd?: number;    // Currently loaded chunk end time (seconds)
 }
 
 export const WaveformDisplay: React.FC<WaveformDisplayProps> = ({
@@ -20,7 +22,9 @@ export const WaveformDisplay: React.FC<WaveformDisplayProps> = ({
   duration,
   currentTime,
   onSeek,
-  height = 100
+  height = 100,
+  chunkStart,
+  chunkEnd,
 }) => {
   const [waveformData, setWaveformData] = useState<WaveformData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -68,11 +72,16 @@ export const WaveformDisplay: React.FC<WaveformDisplayProps> = ({
     // Draw waveform bars
     drawWaveform(ctx, waveformData.samples, rect.width, height);
 
+    // Draw chunk bracket indicators
+    if (chunkStart !== undefined && chunkEnd !== undefined && duration > 0) {
+      drawChunkBrackets(ctx, chunkStart, chunkEnd, duration, rect.width, height);
+    }
+
     // Draw playback position indicator
     if (currentTime !== undefined && duration > 0) {
       drawPlaybackIndicator(ctx, currentTime, duration, rect.width, height);
     }
-  }, [waveformData, currentTime, duration, height]);
+  }, [waveformData, currentTime, duration, height, chunkStart, chunkEnd]);
 
   const drawWaveform = (
     ctx: CanvasRenderingContext2D,
@@ -92,6 +101,43 @@ export const WaveformDisplay: React.FC<WaveformDisplayProps> = ({
       // Draw bar centered vertically
       ctx.fillRect(x, centerY - barHeight, barWidth - 1, barHeight * 2);
     });
+  };
+
+  const drawChunkBrackets = (
+    ctx: CanvasRenderingContext2D,
+    chunkStart: number,
+    chunkEnd: number,
+    duration: number,
+    width: number,
+    height: number
+  ) => {
+    const x1 = (chunkStart / duration) * width;
+    const x2 = (chunkEnd / duration) * width;
+    const tickLen = 4;
+
+    // Subtle yellow fill between brackets
+    ctx.fillStyle = 'rgba(234, 179, 8, 0.05)';
+    ctx.fillRect(x1, 0, x2 - x1, height);
+
+    // Bracket lines
+    ctx.strokeStyle = 'rgba(234, 179, 8, 0.4)';
+    ctx.lineWidth = 1.5;
+
+    // Left bracket [
+    ctx.beginPath();
+    ctx.moveTo(x1 + tickLen, 0);
+    ctx.lineTo(x1, 0);
+    ctx.lineTo(x1, height);
+    ctx.lineTo(x1 + tickLen, height);
+    ctx.stroke();
+
+    // Right bracket ]
+    ctx.beginPath();
+    ctx.moveTo(x2 - tickLen, 0);
+    ctx.lineTo(x2, 0);
+    ctx.lineTo(x2, height);
+    ctx.lineTo(x2 - tickLen, height);
+    ctx.stroke();
   };
 
   const drawPlaybackIndicator = (

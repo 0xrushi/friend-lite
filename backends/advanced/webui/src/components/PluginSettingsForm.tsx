@@ -11,8 +11,15 @@ interface PluginMetadata {
   enabled: boolean
   status: 'active' | 'disabled' | 'error'
   supports_testing: boolean
+  orchestration: {
+    enabled: boolean
+    events: string[]
+    condition: {
+      type: 'always' | 'wake_word'
+      wake_words?: string[]
+    }
+  }
   config_schema: {
-    orchestration: any
     settings: Record<string, any>
     env_vars: Record<string, any>
   }
@@ -47,6 +54,7 @@ export default function PluginSettingsForm({ className }: PluginSettingsFormProp
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const [testResult, setTestResult] = useState<any>(null)
+  const [connectivity, setConnectivity] = useState<Record<string, any>>({})
 
   const selectedPlugin = plugins.find((p) => p.plugin_id === selectedPluginId)
 
@@ -77,6 +85,11 @@ export default function PluginSettingsForm({ className }: PluginSettingsFormProp
 
       setMessage('Plugins loaded successfully')
       setTimeout(() => setMessage(''), 3000)
+
+      // Fetch live connectivity in background (non-blocking)
+      systemApi.getPluginsConnectivity()
+        .then((res) => setConnectivity(res.data.plugins || {}))
+        .catch(() => {}) // Silently ignore — dots stay gray
     } catch (err: any) {
       const status = err.response?.status
       if (status === 401) {
@@ -96,11 +109,12 @@ export default function PluginSettingsForm({ className }: PluginSettingsFormProp
     if (!plugin) return
 
     // Extract current configuration from plugin metadata
+    const orch = plugin.orchestration || { enabled: false, events: [], condition: { type: 'always' } }
     const config: PluginConfig = {
       orchestration: {
-        enabled: plugin.enabled || false,
-        events: [],
-        condition: { type: 'always' }
+        enabled: orch.enabled || false,
+        events: orch.events || [],
+        condition: orch.condition || { type: 'always' }
       },
       settings: {},
       env_vars: {}
@@ -137,8 +151,8 @@ export default function PluginSettingsForm({ className }: PluginSettingsFormProp
       await systemApi.updatePluginConfigStructured(pluginId, {
         orchestration: {
           enabled,
-          events: plugin.config_schema.orchestration?.events || [],
-          condition: plugin.config_schema.orchestration?.condition || { type: 'always' }
+          events: plugin.orchestration?.events || [],
+          condition: plugin.orchestration?.condition || { type: 'always' }
         }
       })
 
@@ -288,6 +302,7 @@ export default function PluginSettingsForm({ className }: PluginSettingsFormProp
               onSelectPlugin={handlePluginSelect}
               onToggleEnabled={handleToggleEnabled}
               loading={loading}
+              connectivity={connectivity}
             />
           </div>
 

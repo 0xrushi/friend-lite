@@ -213,3 +213,55 @@ Get conversation permission Test
     # Cleanup
     Delete User    api    ${test_user}[id]
 
+Star And Unstar Conversation
+    [Documentation]    Test starring and unstarring a conversation toggles the starred field
+    [Tags]    conversation
+
+    # Arrange
+    ${test_conversation}=    Find Test Conversation
+    ${conversation_id}=    Set Variable    ${test_conversation}[conversation_id]
+
+    # Act - Star the conversation
+    ${star_result}=    Star Conversation    ${conversation_id}
+    Should Be True    ${star_result}[starred]    First toggle should star the conversation
+    Should Not Be Equal    ${star_result}[starred_at]    ${None}    starred_at should be set
+
+    # Act - Unstar the conversation
+    ${unstar_result}=    Star Conversation    ${conversation_id}
+    Should Not Be True    ${unstar_result}[starred]    Second toggle should unstar the conversation
+    Should Be Equal    ${unstar_result}[starred_at]    ${None}    starred_at should be None after unstarring
+
+    # Verify via GET
+    ${conversation}=    Get Conversation By ID    ${conversation_id}
+    Should Not Be True    ${conversation}[starred]    Conversation should remain unstarred
+
+Filter Starred Conversations
+    [Documentation]    Test that starred_only filter returns only starred conversations
+    [Tags]    conversation
+
+    # Arrange - find a conversation and star it
+    ${test_conversation}=    Find Test Conversation
+    ${conversation_id}=    Set Variable    ${test_conversation}[conversation_id]
+
+    # Ensure it's starred
+    ${conversation}=    Get Conversation By ID    ${conversation_id}
+    IF    not ${conversation}[starred]
+        Star Conversation    ${conversation_id}
+    END
+
+    # Act - Get starred conversations
+    ${starred_conversations}=    Get Starred Conversations
+    ${starred_count}=    Get Length    ${starred_conversations}
+    Should Be True    ${starred_count} >= 1    At least one starred conversation should exist
+
+    # Verify all returned conversations are starred
+    FOR    ${conv}    IN    @{starred_conversations}
+        Should Be True    ${conv}[starred]    All returned conversations should be starred
+    END
+
+    # Cleanup - unstar the conversation
+    ${conv_check}=    Get Conversation By ID    ${conversation_id}
+    IF    ${conv_check}[starred]
+        Star Conversation    ${conversation_id}
+    END
+

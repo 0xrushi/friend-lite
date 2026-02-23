@@ -33,6 +33,32 @@ HEALTH_ENDPOINTS = {
 }
 
 
+def get_restart_counts(container_names: List[str]) -> Dict[str, int]:
+    """Get restart counts for containers via docker inspect"""
+    if not container_names:
+        return {}
+    try:
+        result = subprocess.run(
+            ['docker', 'inspect', '--format', '{{.Name}} {{.RestartCount}}'] + container_names,
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        counts = {}
+        for line in result.stdout.strip().split('\n'):
+            if line.strip():
+                parts = line.strip().rsplit(' ', 1)
+                if len(parts) == 2:
+                    name = parts[0].lstrip('/')
+                    try:
+                        counts[name] = int(parts[1])
+                    except ValueError:
+                        counts[name] = 0
+        return counts
+    except Exception:
+        return {}
+
+
 def get_container_status(service_name: str) -> Dict[str, Any]:
     """Get Docker container status for a service"""
     service = SERVICES[service_name]
@@ -80,6 +106,12 @@ def get_container_status(service_name: str) -> Dict[str, Any]:
 
         if not containers:
             return {'status': 'stopped', 'containers': []}
+
+        # Fetch restart counts via docker inspect
+        container_names = [c['name'] for c in containers]
+        restart_counts = get_restart_counts(container_names)
+        for container in containers:
+            container['restart_count'] = restart_counts.get(container['name'], 0)
 
         # Determine overall status
         all_running = all(c['state'] == 'running' for c in containers)
@@ -150,6 +182,28 @@ def get_service_health(service_name: str) -> Dict[str, Any]:
     }
 
 
+def get_backend_worker_health() -> Optional[Dict[str, Any]]:
+    """Get internal worker health from the backend /health endpoint.
+
+    Returns worker_count, failed queues, etc. from the Redis section of health data.
+    This catches internal worker crash loops that Docker restart counts miss.
+    """
+    try:
+        response = requests.get('http://localhost:8000/health', timeout=5)
+        if response.status_code == 200:
+            data = response.json()
+            redis_info = data.get('services', {}).get('redis', {})
+            return {
+                'worker_count': redis_info.get('worker_count', 0),
+                'active_workers': redis_info.get('active_workers', 0),
+                'idle_workers': redis_info.get('idle_workers', 0),
+                'queues': redis_info.get('queues', {}),
+            }
+    except Exception:
+        pass
+    return None
+
+
 def show_quick_status():
     """Show quick status overview"""
     console.print("\n🏥 [bold]Chronicle Health Status[/bold]\n")
@@ -158,6 +212,7 @@ def show_quick_status():
     table.add_column("Service", style="cyan", no_wrap=True)
     table.add_column("Config", justify="center")
     table.add_column("Containers", justify="center")
+    table.add_column("Restarts", justify="center")
     table.add_column("Health", justify="center")
     table.add_column("Description", style="dim")
 
@@ -184,6 +239,15 @@ def show_quick_status():
             # Unknown status - log it for debugging
             container_icon = "⚫"
 
+        # Restart count
+        total_restarts = sum(c.get('restart_count', 0) for c in status.get('containers', []))
+        if not status['configured'] or not status.get('containers'):
+            restart_text = "⚪"
+        elif total_restarts > 0:
+            restart_text = f"[bold red]⚠️  {total_restarts}[/bold red]"
+        else:
+            restart_text = "[green]0[/green]"
+
         # Health status
         if status['health'] is None:
             health_icon = "⚪"
@@ -196,15 +260,30 @@ def show_quick_status():
             service_name,
             config_icon,
             container_icon,
+            restart_text,
             health_icon,
             service_info['description']
         )
 
     console.print(table)
 
+    # Worker health note (from backend /health endpoint)
+    worker_health = get_backend_worker_health()
+    if worker_health is not None:
+        wc = worker_health['worker_count']
+        active = worker_health['active_workers']
+        total_failed = sum(q.get('failed_count', 0) for q in worker_health['queues'].values())
+        if wc == 0:
+            console.print("\n[bold red]  ❌ RQ Workers: 0 registered — workers may be crash-looping. Check: docker compose logs workers[/bold red]")
+        elif total_failed > 0:
+            console.print(f"\n  [yellow]⚠️  RQ Workers: {wc} registered ({active} active), {total_failed} failed job(s) in queues[/yellow]")
+        else:
+            console.print(f"\n  [green]✅ RQ Workers: {wc} registered ({active} active)[/green]")
+
     # Legend
     console.print("\n[dim]Legend:[/dim]")
     console.print("[dim]  Containers: 🟢 Running | 🟡 Partial | 🔴 Stopped | ⚪ Not Configured | ⚫ Error[/dim]")
+    console.print("[dim]  Restarts: 0 = stable | ⚠️  N = container crashed N times (restart loop)[/dim]")
     console.print("[dim]  Health: ✅ Healthy | ❌ Unhealthy | ⚪ No Endpoint[/dim]")
 
 
@@ -244,7 +323,9 @@ def show_detailed_status():
         for container in status.get('containers', []):
             state_icon = "🟢" if container['state'] == 'running' else "🔴"
             health_status = f" ({container['health']})" if container['health'] != 'none' else ""
-            console.print(f"      {state_icon} {container['name']}: {container['status']}{health_status}")
+            restart_count = container.get('restart_count', 0)
+            restart_info = f" [bold red]⚠️  {restart_count} restarts[/bold red]" if restart_count > 0 else ""
+            console.print(f"      {state_icon} {container['name']}: {container['status']}{health_status}{restart_info}")
 
         # HTTP Health check
         if status['health'] is not None:

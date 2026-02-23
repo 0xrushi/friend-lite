@@ -109,6 +109,27 @@ interface StreamingStatus {
   timestamp: number;
 }
 
+interface EventRecord {
+  timestamp: number;
+  event: string;
+  user_id: string;
+  plugins_subscribed: string[];
+  plugins_executed: Array<{ plugin_id: string; success: boolean; message: string }>;
+  metadata: Record<string, any>;
+}
+
+// Known event type colors — unknown types fall back to gray via getEventColor()
+const EVENT_TYPE_COLORS: Record<string, string> = {
+  'conversation.complete': 'bg-green-100 text-green-700',
+  'transcript.batch': 'bg-blue-100 text-blue-700',
+  'memory.processed': 'bg-purple-100 text-purple-700',
+  'button.single_press': 'bg-orange-100 text-orange-700',
+  'button.double_press': 'bg-orange-100 text-orange-700',
+  'plugin_action': 'bg-indigo-100 text-indigo-700',
+};
+const DEFAULT_EVENT_COLOR = 'bg-gray-100 text-gray-700';
+const getEventColor = (eventType: string) => EVENT_TYPE_COLORS[eventType] || DEFAULT_EVENT_COLOR;
+
 const Queue: React.FC = () => {
   const [jobs, setJobs] = useState<any[]>([]);
   const [stats, setStats] = useState<QueueStats | null>(null);
@@ -141,9 +162,33 @@ const Queue: React.FC = () => {
   const [expandedJobs, setExpandedJobs] = useState<Set<string>>(new Set());
   const [conversationJobs, setConversationJobs] = useState<{[conversationId: string]: any[]}>({});
   const [lastUpdate, setLastUpdate] = useState<number>(Date.now());
+  const [selectedEvent, setSelectedEvent] = useState<EventRecord | null>(null);
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState<boolean>(() => {
     // Load from localStorage, default to true
     const saved = localStorage.getItem('queue_auto_refresh');
+    return saved !== null ? saved === 'true' : true;
+  });
+
+  // System events
+  const [events, setEvents] = useState<EventRecord[]>([]);
+  const [eventFilters, setEventFilters] = useState<Record<string, 'include' | 'exclude'>>({});
+
+  const cycleEventFilter = (eventType: string) => {
+    setEventFilters(prev => {
+      const current = prev[eventType];
+      const next = { ...prev };
+      if (!current) {
+        next[eventType] = 'include';
+      } else if (current === 'include') {
+        next[eventType] = 'exclude';
+      } else {
+        delete next[eventType];
+      }
+      return next;
+    });
+  };
+  const [eventsExpanded, setEventsExpanded] = useState<boolean>(() => {
+    const saved = localStorage.getItem('queue_events_expanded');
     return saved !== null ? saved === 'true' : true;
   });
 
@@ -195,22 +240,6 @@ const Queue: React.FC = () => {
       // Combine all jobs
       const allFetchedJobs = [...queuedJobs, ...startedJobs, ...finishedJobs, ...failedJobs];
 
-      console.log(`📊 Fetched ${allFetchedJobs.length} total jobs via consolidated endpoint`);
-      console.log(`  - Queued: ${queuedJobs.length}`);
-      console.log(`  - Started: ${startedJobs.length}`);  // RQ standard
-      console.log(`  - Finished: ${finishedJobs.length}`);  // RQ standard
-      console.log(`  - Failed: ${failedJobs.length}`);
-
-      // Debug: Log open_conversation_job details
-      const openConvJobs = allFetchedJobs.filter(j => j?.job_type === 'open_conversation_job');
-      console.log(`🔍 Found ${openConvJobs.length} open_conversation_job(s):`);
-      openConvJobs.forEach(job => {
-        console.log(`  Job ID: ${job.job_id}`);
-        console.log(`  Status: ${job.status}`);
-        console.log(`  meta.audio_uuid: ${job.meta?.audio_uuid}`);
-        console.log(`  meta.conversation_id: ${job.meta?.conversation_id}`);
-      });
-
       // Group jobs by conversation_id (primary identifier for conversations)
       const jobsByConversation: {[conversationId: string]: any[]} = {};
 
@@ -226,15 +255,10 @@ const Queue: React.FC = () => {
           jobsByConversation[conversationId].push(job);
 
           // Debug logging for grouping
-          if (job.job_type === 'open_conversation_job') {
-            console.log(`✅ Grouped open_conversation_job ${job.job_id} under conversation ${conversationId}`);
-          }
         } else {
           // Only log warning for non-session-level jobs
           // Audio persistence jobs are expected to not have conversation_id
-          if (job.meta?.session_level !== true && job.job_type !== 'audio_streaming_persistence_job') {
-            console.log(`⚠️ Job ${job.job_id} (${job.job_type}) has no conversation_id - cannot group`);
-          }
+          // Job has no conversation_id - cannot group (expected for session-level and audio persistence jobs)
         }
       });
 
@@ -255,6 +279,7 @@ const Queue: React.FC = () => {
       setConversationJobs(jobsByConversation);
       setStats(dashboardData.stats);
       setStreamingStatus(dashboardData.streaming_status);
+      setEvents(dashboardData.events || []);
       setLastUpdate(Date.now());
 
       // Auto-expand active conversations (those with open_conversation_job in progress)
@@ -271,7 +296,6 @@ const Queue: React.FC = () => {
           if (conversationId && !expandedConversations.has(conversationId)) {
             newExpanded.add(conversationId);
             expandedCount++;
-            console.log(`🔓 Auto-expanding active conversation: ${conversationId}`);
           }
 
           // Also expand all job cards in active conversations
@@ -284,15 +308,11 @@ const Queue: React.FC = () => {
         }
       });
 
-      // Update expanded conversations if any new active conversations found
       if (expandedCount > 0) {
-        console.log(`📂 Auto-expanded ${expandedCount} active conversation(s)`);
         setExpandedConversations(newExpanded);
       }
 
-      // Update expanded jobs if any new jobs found
       if (expandedJobsCount > 0) {
-        console.log(`📂 Auto-expanded ${expandedJobsCount} job card(s) in active conversations`);
         setExpandedJobs(newExpandedJobs);
       }
     } catch (error: any) {
@@ -322,7 +342,7 @@ const Queue: React.FC = () => {
 
     const intervalId = setInterval(() => {
       fetchData();
-    }, 2000); // Refresh every 2 seconds
+    }, 5000); // Refresh every 5 seconds
 
     return () => {
       clearInterval(intervalId);
@@ -352,7 +372,9 @@ const Queue: React.FC = () => {
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        if (selectedJob) {
+        if (selectedEvent) {
+          setSelectedEvent(null);
+        } else if (selectedJob) {
           setSelectedJob(null);
         } else if (showFlushModal) {
           setShowFlushModal(false);
@@ -362,7 +384,7 @@ const Queue: React.FC = () => {
 
     document.addEventListener('keydown', handleEscape);
     return () => document.removeEventListener('keydown', handleEscape);
-  }, [selectedJob, showFlushModal]);
+  }, [selectedJob, showFlushModal, selectedEvent]);
 
   // Commented out - keeping for future use
   // const retryJob = async (jobId: string) => {
@@ -389,10 +411,8 @@ const Queue: React.FC = () => {
     if (!confirm('This will clean up all stuck workers and pending messages. Continue?')) return;
 
     try {
-      console.log('🧹 Starting cleanup of stuck workers...');
       const response = await queueApi.cleanupStuckWorkers();
       const data = response.data;
-      console.log('✅ Cleanup complete:', data);
 
       alert(`✅ Cleanup complete!\n\nTotal cleaned: ${data.total_cleaned} messages\n\n${
         Object.entries(data.providers).map(([provider, result]: [string, any]) =>
@@ -412,10 +432,8 @@ const Queue: React.FC = () => {
     if (!confirm('This will remove old and stuck "finalizing" sessions from the dashboard. Continue?')) return;
 
     try {
-      console.log('🧹 Starting cleanup of old sessions...');
       const response = await queueApi.cleanupOldSessions(3600); // 1 hour
       const data = response.data;
-      console.log('✅ Cleanup complete:', data);
 
       alert(`✅ Cleanup complete!\n\nRemoved ${data.cleaned_count} old session(s)`);
 
@@ -687,7 +705,7 @@ const Queue: React.FC = () => {
         <div className="flex items-center space-x-3">
           <Layers className="w-6 h-6 text-blue-600" />
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Queue Management</h1>
+            <h1 className="text-2xl font-bold text-gray-900">Queue & Events</h1>
             <p className="text-xs text-gray-500">
               Last updated: {new Date(lastUpdate).toLocaleTimeString()} • Auto-refresh every 2s
             </p>
@@ -879,13 +897,6 @@ const Queue: React.FC = () => {
                   });
                   const allJobs = Array.from(jobMap.values());
 
-                  // Debug logging for listen job filtering
-                  console.log(`🔍 Stream ${streamKey}:`);
-                  console.log(`  - clientId extracted: ${clientId}`);
-                  console.log(`  - Total jobs available: ${allJobs.length}`);
-                  const speechDetectionJobs = allJobs.filter((job: any) => job && job.job_type === 'stream_speech_detection_job');
-                  console.log(`  - Speech detection jobs: ${speechDetectionJobs.length}`, speechDetectionJobs.map((j: any) => ({ job_id: j.job_id, meta_client_id: j.meta?.client_id })));
-
                   // Get all listen jobs for this client (only active/queued/processing, not completed)
                   const allListenJobs = allJobs.filter((job: any) =>
                     job && job.job_type === 'stream_speech_detection_job' &&
@@ -901,8 +912,6 @@ const Queue: React.FC = () => {
                         new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
                       )[0]]
                     : [];
-
-                  console.log(`  - All listen jobs (active): ${allListenJobs.length}, showing latest: ${listenJobs.length}`);
 
                   return (
                     <div key={streamKey} className="p-4 bg-gray-50 rounded-lg border border-gray-200">
@@ -1392,6 +1401,19 @@ const Queue: React.FC = () => {
                                                 </>
                                               )}
 
+                                              {/* transcribe_full_audio_job batch progress */}
+                                              {job.job_type === 'transcribe_full_audio_job' && job.status === 'started' && job.meta?.batch_progress && (
+                                                <div className="mt-1">
+                                                  <div className="flex items-center justify-between text-xs mb-1">
+                                                    <span className="text-blue-700">{job.meta.batch_progress.message}</span>
+                                                    <span className="text-blue-600 font-medium">{job.meta.batch_progress.percent}%</span>
+                                                  </div>
+                                                  <div className="w-full bg-blue-200 rounded-full h-1.5">
+                                                    <div className="bg-blue-600 h-1.5 rounded-full transition-all duration-300" style={{ width: `${job.meta.batch_progress.percent}%` }} />
+                                                  </div>
+                                                </div>
+                                              )}
+
                                               {/* transcribe_full_audio_job metadata */}
                                               {job.job_type === 'transcribe_full_audio_job' && job.result && (
                                                 <>
@@ -1823,10 +1845,12 @@ const Queue: React.FC = () => {
                                                       left: `${startPercent}%`,
                                                       width: `${widthPercent}%`
                                                     }}
-                                                    title={`Started: ${new Date(startTime).toLocaleTimeString()}\nDuration: ${formatDuration(duration)}`}
+                                                    title={`Started: ${new Date(startTime).toLocaleTimeString()}\nDuration: ${formatDuration(duration)}${job.meta?.batch_progress ? `\n${job.meta.batch_progress.message}` : ''}`}
                                                   >
                                                     <span className="text-xs text-white font-medium px-2 truncate">
-                                                      {formatDuration(duration)}
+                                                      {job.status === 'started' && job.meta?.batch_progress
+                                                        ? `${job.meta.batch_progress.current}/${job.meta.batch_progress.total}`
+                                                        : formatDuration(duration)}
                                                     </span>
                                                   </div>
                                                 </div>
@@ -2021,6 +2045,177 @@ const Queue: React.FC = () => {
         </div>
       )}
 
+      {/* Events */}
+      <div className="bg-white rounded-lg border overflow-hidden">
+        <div
+          className="px-6 py-4 border-b border-gray-200 flex justify-between items-center cursor-pointer"
+          onClick={() => {
+            const next = !eventsExpanded;
+            setEventsExpanded(next);
+            localStorage.setItem('queue_events_expanded', String(next));
+          }}
+        >
+          <div className="flex items-center space-x-2">
+            <Zap className="w-5 h-5 text-purple-600" />
+            <h3 className="text-lg font-medium">Events</h3>
+            <span className="text-xs text-gray-500">
+              {(() => {
+                const includes = Object.entries(eventFilters).filter(([, v]) => v === 'include').map(([k]) => k);
+                const excludes = Object.entries(eventFilters).filter(([, v]) => v === 'exclude').map(([k]) => k);
+                const hasFilters = includes.length > 0 || excludes.length > 0;
+                if (!hasFilters) return `(${events.length})`;
+                const count = includes.length > 0
+                  ? events.filter(e => includes.includes(e.event) && !excludes.includes(e.event)).length
+                  : events.filter(e => !excludes.includes(e.event)).length;
+                return `(${count} / ${events.length})`;
+              })()}
+            </span>
+          </div>
+          <div className="flex items-center space-x-3">
+            {eventsExpanded && events.length > 0 && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  queueApi.clearEvents().then(() => {
+                    setEvents([]);
+                    setEventFilters({});
+                  });
+                }}
+                className="inline-flex items-center px-2 py-1 rounded text-xs text-red-500 hover:text-red-700 hover:bg-red-50 transition-colors"
+                title="Clear all events"
+              >
+                <Trash2 className="w-3.5 h-3.5 mr-1" />
+                Clear
+              </button>
+            )}
+            {eventsExpanded ? <ChevronDown className="w-4 h-4 text-gray-500" /> : <ChevronRight className="w-4 h-4 text-gray-500" />}
+          </div>
+        </div>
+
+        {eventsExpanded && [...new Set(events.map(e => e.event))].sort().length > 0 && (
+          <div className="px-6 py-2 border-b border-gray-100 flex flex-wrap items-center gap-2">
+            {[...new Set(events.map(e => e.event))].sort().map(eventType => {
+              const state = eventFilters[eventType];
+              return (
+                <button
+                  key={eventType}
+                  onClick={() => cycleEventFilter(eventType)}
+                  className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border cursor-pointer transition-colors ${
+                    state === 'include'
+                      ? 'bg-blue-100 text-blue-700 border-blue-400'
+                      : state === 'exclude'
+                      ? 'bg-red-100 text-red-700 border-red-400 line-through'
+                      : 'bg-gray-100 text-gray-500 border-gray-300'
+                  }`}
+                >
+                  {eventType}
+                </button>
+              );
+            })}
+            {Object.keys(eventFilters).length > 0 && (
+              <button
+                onClick={() => setEventFilters({})}
+                className="inline-flex items-center px-2 py-0.5 rounded text-xs text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+        )}
+
+        {eventsExpanded && (
+          <div className="overflow-x-auto">
+            {(() => {
+              const includes = Object.entries(eventFilters).filter(([, v]) => v === 'include').map(([k]) => k);
+              const excludes = Object.entries(eventFilters).filter(([, v]) => v === 'exclude').map(([k]) => k);
+              let filtered = events;
+              if (includes.length > 0) {
+                filtered = filtered.filter(e => includes.includes(e.event));
+              }
+              filtered = filtered.filter(e => !excludes.includes(e.event));
+
+              if (filtered.length === 0) {
+                return (
+                  <div className="px-6 py-8 text-center text-gray-500 text-sm">
+                    No events recorded yet. Events are logged when system actions like conversation.complete, memory.processed, or button presses occur.
+                  </div>
+                );
+              }
+
+              return (
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Time</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Event</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">User</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Plugins Triggered</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200">
+                    {filtered.map((evt, idx) => {
+                      const allSuccess = evt.plugins_executed.length > 0 && evt.plugins_executed.every(p => p.success);
+                      const anyFailure = evt.plugins_executed.some(p => !p.success);
+
+                      return (
+                        <tr key={idx} className="hover:bg-gray-50">
+                          <td className="px-4 py-2 text-xs text-gray-600 whitespace-nowrap">
+                            {new Date(evt.timestamp * 1000).toLocaleTimeString()}
+                          </td>
+                          <td className="px-4 py-2">
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${getEventColor(evt.event)}`}>
+                              {evt.event}
+                            </span>
+                          </td>
+                          <td className="px-4 py-2 text-xs text-gray-600 font-mono">
+                            {evt.user_id.length > 12 ? `${evt.user_id.slice(-8)}` : evt.user_id}
+                          </td>
+                          <td className="px-4 py-2 text-xs text-gray-700">
+                            {evt.plugins_executed.length > 0
+                              ? evt.plugins_executed.map(p => p.plugin_id).join(', ')
+                              : <span className="text-gray-400">none</span>
+                            }
+                          </td>
+                          <td className="px-4 py-2">
+                            <div className="flex items-center space-x-2">
+                              {evt.plugins_executed.length === 0 ? (
+                                <span className="text-xs text-gray-400">no plugins ran</span>
+                              ) : allSuccess ? (
+                                <span className="flex items-center space-x-1 text-xs text-green-600">
+                                  <CheckCircle className="w-3.5 h-3.5" />
+                                  <span>OK</span>
+                                </span>
+                              ) : anyFailure ? (
+                                <span className="flex items-center space-x-1 text-xs text-red-600">
+                                  <XCircle className="w-3.5 h-3.5" />
+                                  <span>Error</span>
+                                </span>
+                              ) : (
+                                <span className="text-xs text-gray-500">partial</span>
+                              )}
+                              {evt.plugins_executed.length > 0 && (
+                                <button
+                                  onClick={() => setSelectedEvent(evt)}
+                                  className="text-gray-400 hover:text-gray-600 p-0.5 rounded hover:bg-gray-100"
+                                  title="View details"
+                                >
+                                  <Eye className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              );
+            })()}
+          </div>
+        )}
+      </div>
+
       {/* Filters */}
       <div className="bg-white rounded-lg border p-4">
         <h3 className="text-lg font-medium mb-4">Filters</h3>
@@ -2092,8 +2287,22 @@ const Queue: React.FC = () => {
 
           {/* Jobs Table */}
       <div className="bg-white rounded-lg border overflow-hidden">
-        <div className="px-6 py-4 border-b border-gray-200">
+        <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
           <h3 className="text-lg font-medium">Jobs</h3>
+          {jobs.length > 0 && (
+            <button
+              onClick={() => {
+                queueApi.clearJobs().then(() => {
+                  fetchData();
+                });
+              }}
+              className="inline-flex items-center px-2 py-1 rounded text-xs text-red-500 hover:text-red-700 hover:bg-red-50 transition-colors"
+              title="Clear finished and failed jobs"
+            >
+              <Trash2 className="w-3.5 h-3.5 mr-1" />
+              Clear
+            </button>
+          )}
         </div>
 
         <div className="overflow-x-auto">
@@ -2110,7 +2319,14 @@ const Queue: React.FC = () => {
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {jobs.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).map((job) => (
+              {jobs
+                .filter((job) => {
+                  if (filters.status && job.status !== filters.status) return false;
+                  if (filters.job_type && job.job_type !== filters.job_type) return false;
+                  if (filters.priority && job.meta?.priority !== filters.priority) return false;
+                  return true;
+                })
+                .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).map((job) => (
                 <tr key={job.job_id} className="hover:bg-gray-50">
                   <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">
                     {new Date(job.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
@@ -2440,6 +2656,84 @@ const Queue: React.FC = () => {
                 )}
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Event Detail Modal */}
+      {selectedEvent && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+          <div className="relative top-20 mx-auto p-5 border w-11/12 md:w-2/3 lg:w-1/2 shadow-lg rounded-md bg-white">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-medium text-gray-900">Event Details</h3>
+              <button onClick={() => setSelectedEvent(null)} className="text-gray-400 hover:text-gray-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Time</label>
+                  <p className="text-sm text-gray-900">{new Date(selectedEvent.timestamp * 1000).toLocaleString()}</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Event</label>
+                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${getEventColor(selectedEvent.event)}`}>
+                    {selectedEvent.event}
+                  </span>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">User</label>
+                  <p className="text-sm text-gray-900 font-mono">{selectedEvent.user_id}</p>
+                </div>
+                {selectedEvent.metadata?.client_id && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Client</label>
+                    <p className="text-sm text-gray-900 font-mono">{selectedEvent.metadata.client_id}</p>
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Plugin Results</label>
+                <div className="space-y-2">
+                  {selectedEvent.plugins_executed.map((p, i) => (
+                    <div
+                      key={i}
+                      className={`p-3 rounded-lg border ${p.success ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}
+                    >
+                      <div className="flex items-center space-x-2 mb-1">
+                        {p.success
+                          ? <CheckCircle className="w-4 h-4 text-green-600" />
+                          : <XCircle className="w-4 h-4 text-red-600" />
+                        }
+                        <span className="text-sm font-medium">{p.plugin_id}</span>
+                        <span className={`text-xs px-1.5 py-0.5 rounded ${p.success ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                          {p.success ? 'OK' : 'Error'}
+                        </span>
+                      </div>
+                      {p.message && (
+                        <p className={`text-sm ml-6 ${p.success ? 'text-green-800' : 'text-red-800'}`}>
+                          {p.message}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {Object.keys(selectedEvent.metadata).length > 0 && (
+                <details>
+                  <summary className="text-sm font-medium text-gray-700 cursor-pointer hover:text-gray-900">
+                    Raw Metadata
+                  </summary>
+                  <pre className="text-xs text-gray-900 bg-gray-50 p-2 rounded overflow-auto max-h-40 mt-2 whitespace-pre-wrap break-words">
+                    {JSON.stringify(selectedEvent.metadata, null, 2)}
+                  </pre>
+                </details>
+              )}
+            </div>
           </div>
         </div>
       )}

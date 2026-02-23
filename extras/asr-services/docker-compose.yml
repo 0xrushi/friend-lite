@@ -99,6 +99,8 @@ services:
       - ./model_cache:/models
       - ./debug:/app/debug
       - ./results:/app/results
+      - ../../config:/app/config:ro
+      - ./lora_adapters:/models/lora_adapters
     deploy:
       resources:
         reservations:
@@ -114,6 +116,11 @@ services:
       - DEVICE=${DEVICE:-cuda}
       - TORCH_DTYPE=${TORCH_DTYPE:-bfloat16}
       - MAX_NEW_TOKENS=${MAX_NEW_TOKENS:-8192}
+      # Quantization: "4bit", "8bit", or "" (none). 4bit recommended for <=24GB VRAM.
+      - QUANTIZATION=${QUANTIZATION:-4bit}
+      # LoRA adapter: path to pre-trained adapter to auto-load on startup (optional)
+      - LORA_ADAPTER_PATH=${LORA_ADAPTER_PATH:-}
+      # Batching config: managed via config/defaults.yml (asr_services.vibevoice)
     dns:
       - 8.8.8.8
       - 8.8.4.4
@@ -147,6 +154,82 @@ services:
       - DEVICE=${DEVICE:-cuda}
       - TORCH_DTYPE=${TORCH_DTYPE:-float16}
       - LANGUAGE=${LANGUAGE:-}
+    restart: unless-stopped
+
+  # ============================================================================
+  # Qwen3-ASR vLLM Server (GPU model serving)
+  # ============================================================================
+  qwen3-asr:
+    build:
+      context: .
+      dockerfile: providers/qwen3_asr/Dockerfile.vllm
+    image: chronicle-asr-qwen3-vllm:latest
+    ports:
+      - "${ASR_VLLM_PORT:-8768}:8000"
+    volumes:
+      - ./model_cache:/models
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    environment:
+      - HF_HOME=/models
+    command: >
+      ${ASR_MODEL:-Qwen/Qwen3-ASR-1.7B}
+      --gpu-memory-utilization ${QWEN3_GPU_MEM:-0.8}
+      --host 0.0.0.0 --port 8000
+      --max-model-len ${QWEN3_MAX_MODEL_LEN:-8192}
+    restart: unless-stopped
+
+  # ============================================================================
+  # Qwen3-ASR Batch Wrapper (exposes /transcribe on standard ASR port)
+  # Uses Dockerfile.full with ForcedAligner for word-level timestamps.
+  # Without ForcedAligner, the backend has no words to create segments from.
+  # ============================================================================
+  qwen3-asr-wrapper:
+    build:
+      context: .
+      dockerfile: providers/qwen3_asr/Dockerfile.full
+    image: chronicle-asr-qwen3-wrapper:latest
+    ports:
+      - "${ASR_PORT:-8767}:8765"
+    volumes:
+      - ./model_cache:/models
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    environment:
+      - QWEN3_VLLM_URL=http://qwen3-asr:8000
+      - ASR_MODEL=${ASR_MODEL:-Qwen/Qwen3-ASR-1.7B}
+      - FORCED_ALIGNER_MODEL=${FORCED_ALIGNER_MODEL:-Qwen/Qwen3-ForcedAligner-0.6B}
+    depends_on:
+      - qwen3-asr
+    restart: unless-stopped
+
+  # ============================================================================
+  # Qwen3-ASR Streaming Bridge (WebSocket → vLLM SSE)
+  # ============================================================================
+  qwen3-asr-bridge:
+    build:
+      context: .
+      dockerfile: providers/qwen3_asr/Dockerfile
+    image: chronicle-asr-qwen3-bridge:latest
+    ports:
+      - "${ASR_STREAM_PORT:-8769}:8766"
+    environment:
+      - QWEN3_VLLM_URL=http://qwen3-asr:8000
+      - ASR_MODEL=${ASR_MODEL:-Qwen/Qwen3-ASR-1.7B}
+      - STREAM_INTERVAL_SECONDS=${STREAM_INTERVAL_SECONDS:-3}
+    command: ["python", "-m", "providers.qwen3_asr.streaming_bridge", "--port", "8766"]
+    depends_on:
+      - qwen3-asr
     restart: unless-stopped
 
   # ============================================================================

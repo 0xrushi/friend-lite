@@ -51,6 +51,8 @@ conflicts = [
     { group = "transformers" },
     { group = "nemo" },
     { group = "vibevoice" },
+    { group = "qwen3-asr" },
+    { group = "qwen3-asr-full" },
   ],
   [
     { extra = "cu121" },
@@ -60,7 +62,6 @@ conflicts = [
 ]
 
 [tool.uv.sources]
-useful-moonshine-onnx = { git = "https://github.com/usefulsensors/moonshine.git", subdirectory = "moonshine-onnx" }
 torch = [
     { index = "pytorch-cu121", extra = "cu121" },
     { index = "pytorch-cu126", extra = "cu126" },
@@ -115,6 +116,22 @@ vibevoice = [
     "torch>=2.3",
     "torchaudio>=2.3",
     "librosa>=0.10.0",
+    "bitsandbytes>=0.43.0",
+    "peft>=0.17.0",
+    "omegaconf>=2.3.0",
+]
+
+qwen3-asr = [
+    "httpx>=0.28.1",
+    "websockets>=13.0",
+    "soundfile>=0.12",
+]
+
+qwen3-asr-full = [
+    "httpx>=0.28.1",
+    "websockets>=13.0",
+    "soundfile>=0.12",
+    "qwen-asr>=0.0.6",
 ]
 
 # Legacy groups (kept for backward compatibility)
@@ -122,10 +139,6 @@ parakeet = [
     "nemo-toolkit[asr]>=2.2.0",
     "cuda-python>=12.3",
     "numpy>=1.26,<2.0",
-]
-
-moonshine = [
-  "useful-moonshine-onnx",
 ]
 
 # Development dependencies
@@ -146,4 +159,4 @@ requires = ["setuptools>=64", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["common", "providers", "providers.faster_whisper", "providers.transformers", "providers.nemo", "providers.vibevoice"]
+packages = ["common", "providers", "providers.faster_whisper", "providers.transformers", "providers.nemo", "providers.vibevoice", "providers.qwen3_asr"]

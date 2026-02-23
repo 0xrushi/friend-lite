@@ -19,6 +19,9 @@ class AnnotationType(str, Enum):
     MEMORY = "memory"
     TRANSCRIPT = "transcript"
     DIARIZATION = "diarization"  # Speaker identification corrections
+    ENTITY = "entity"  # Knowledge graph entity corrections (name/details edits)
+    TITLE = "title"  # Conversation title corrections
+    INSERT = "insert"  # Insert new segment between existing segments
 
 
 class AnnotationSource(str, Enum):
@@ -70,6 +73,18 @@ class Annotation(Document):
     corrected_speaker: Optional[str] = None  # Speaker label after correction
     segment_start_time: Optional[float] = None  # Time offset for reference
 
+    # For ENTITY annotations:
+    # Dual purpose: feeds both the jargon pipeline (entity name corrections = domain vocabulary
+    # the ASR should know) and the entity extraction pipeline (corrections improve future accuracy).
+    entity_id: Optional[str] = None  # Neo4j entity ID
+    entity_field: Optional[str] = None  # Which field was changed ("name" or "details")
+
+    # For INSERT annotations:
+    insert_after_index: Optional[int] = None  # -1 = before first segment
+    insert_text: Optional[str] = None  # e.g., "[laughter]" or "wife laughed"
+    insert_segment_type: Optional[str] = None  # "event", "note", or "speech"
+    insert_speaker: Optional[str] = None  # Speaker label for "speech" type inserts
+
     # Processed tracking (applies to ALL annotation types)
     processed: bool = Field(default=False)  # Whether annotation has been applied/sent to training
     processed_at: Optional[datetime] = None  # When annotation was processed
@@ -88,11 +103,12 @@ class Annotation(Document):
         # Create indexes on commonly queried fields
         # Note: Enum fields and Optional fields don't use Indexed() wrapper
         indexes = [
-            "annotation_type",  # Query by type (memory vs transcript vs diarization)
+            "annotation_type",  # Query by type (memory vs transcript vs diarization vs entity)
             "user_id",  # User-scoped queries
             "status",  # Filter by status (pending/accepted/rejected)
             "memory_id",  # Lookup annotations for specific memory
             "conversation_id",  # Lookup annotations for specific conversation
+            "entity_id",  # Lookup annotations for specific entity
             "processed",  # Query unprocessed annotations
         ]
 
@@ -107,6 +123,14 @@ class Annotation(Document):
     def is_diarization_annotation(self) -> bool:
         """Check if this is a diarization annotation."""
         return self.annotation_type == AnnotationType.DIARIZATION
+
+    def is_entity_annotation(self) -> bool:
+        """Check if this is an entity annotation."""
+        return self.annotation_type == AnnotationType.ENTITY
+
+    def is_title_annotation(self) -> bool:
+        """Check if this is a title annotation."""
+        return self.annotation_type == AnnotationType.TITLE
 
     def is_pending_suggestion(self) -> bool:
         """Check if this is a pending AI suggestion."""
@@ -151,6 +175,43 @@ class DiarizationAnnotationCreate(BaseModel):
     status: AnnotationStatus = AnnotationStatus.ACCEPTED
 
 
+class EntityAnnotationCreate(BaseModel):
+    """Create entity annotation request.
+
+    Dual purpose: feeds both the jargon pipeline (entity name corrections = domain vocabulary
+    the ASR should know) and the entity extraction pipeline (corrections improve future accuracy).
+    """
+    entity_id: str
+    entity_field: str  # "name" or "details"
+    original_text: str
+    corrected_text: str
+
+
+class TitleAnnotationCreate(AnnotationCreateBase):
+    """Create title annotation request."""
+    conversation_id: str
+    original_text: str
+    corrected_text: str
+
+
+class InsertAnnotationCreate(BaseModel):
+    """Create insert annotation request (new segment between existing segments)."""
+    conversation_id: str
+    insert_after_index: int  # -1 = before first segment
+    insert_text: str
+    insert_segment_type: str  # "event", "note", or "speech"
+    insert_speaker: Optional[str] = None  # Speaker label for "speech" type inserts
+
+
+class AnnotationUpdate(BaseModel):
+    """Update an existing unprocessed annotation."""
+    corrected_text: Optional[str] = None
+    corrected_speaker: Optional[str] = None
+    insert_text: Optional[str] = None
+    insert_segment_type: Optional[str] = None
+    insert_speaker: Optional[str] = None
+
+
 class AnnotationResponse(BaseModel):
     """Annotation response for API."""
     id: str
@@ -164,6 +225,12 @@ class AnnotationResponse(BaseModel):
     original_speaker: Optional[str] = None
     corrected_speaker: Optional[str] = None
     segment_start_time: Optional[float] = None
+    entity_id: Optional[str] = None
+    entity_field: Optional[str] = None
+    insert_after_index: Optional[int] = None
+    insert_text: Optional[str] = None
+    insert_segment_type: Optional[str] = None
+    insert_speaker: Optional[str] = None
     processed: bool = False
     processed_at: Optional[datetime] = None
     processed_by: Optional[str] = None

@@ -76,7 +76,7 @@ class MemoryServiceBase(ABC):
     @property
     @abstractmethod
     def provider_identifier(self) -> str:
-        """Return the provider identifier (e.g., 'chronicle', 'openmemory_mcp', 'mycelia')."""
+        """Return the provider identifier (e.g., 'chronicle', 'openmemory_mcp')."""
         ...
 
     @abstractmethod
@@ -205,6 +205,64 @@ class MemoryServiceBase(ABC):
         """
         return False
 
+    async def get_memories_by_source(
+        self, user_id: str, source_id: str, limit: int = 100
+    ) -> List[MemoryEntry]:
+        """Get all memories extracted from a specific source (conversation).
+
+        This is an optional method that providers can implement for fetching
+        memories linked to a particular conversation/source. Returns empty list
+        by default.
+
+        Args:
+            user_id: User identifier
+            source_id: Source/conversation identifier
+            limit: Maximum number of memories to return
+
+        Returns:
+            List of MemoryEntry objects for the specified source
+        """
+        return []
+
+    async def reprocess_memory(
+        self,
+        transcript: str,
+        client_id: str,
+        source_id: str,
+        user_id: str,
+        user_email: str,
+        transcript_diff: Optional[List[Dict[str, Any]]] = None,
+        previous_transcript: Optional[str] = None,
+    ) -> Tuple[bool, List[str]]:
+        """Reprocess memories after transcript or speaker changes.
+
+        This method is called when a conversation's transcript has been
+        reprocessed (e.g., speaker re-identification) and memories need
+        to be updated to reflect the changes.
+
+        The default implementation falls back to normal ``add_memory``
+        with ``allow_update=True``. Providers that support diff-aware
+        reprocessing should override this method.
+
+        Args:
+            transcript: Updated full transcript text (with corrected speakers)
+            client_id: Client identifier
+            source_id: Conversation/source identifier
+            user_id: User identifier
+            user_email: User email address
+            transcript_diff: List of dicts describing what changed between
+                the old and new transcript (speaker changes, text changes).
+                Each dict has keys like ``type``, ``old_speaker``,
+                ``new_speaker``, ``text``, ``start``, ``end``.
+            previous_transcript: The previous transcript text (before changes)
+
+        Returns:
+            Tuple of (success: bool, affected_memory_ids: List[str])
+        """
+        return await self.add_memory(
+            transcript, client_id, source_id, user_id, user_email, allow_update=True
+        )
+
     @abstractmethod
     async def delete_memory(
         self, memory_id: str, user_id: Optional[str] = None, user_email: Optional[str] = None
@@ -213,8 +271,8 @@ class MemoryServiceBase(ABC):
 
         Args:
             memory_id: Unique identifier of the memory to delete
-            user_id: Optional user ID for authentication (required for Mycelia provider)
-            user_email: Optional user email for authentication (required for Mycelia provider)
+            user_id: Optional user ID for authentication
+            user_email: Optional user email for authentication
 
         Returns:
             True if successfully deleted, False otherwise
@@ -282,12 +340,17 @@ class LLMProviderBase(ABC):
     """
 
     @abstractmethod
-    async def extract_memories(self, text: str, prompt: str) -> List[str]:
+    async def extract_memories(
+        self, text: str, prompt: str, user_id: Optional[str] = None,
+        langfuse_session_id: Optional[str] = None,
+    ) -> List[str]:
         """Extract meaningful fact memories from text using an LLM.
 
         Args:
             text: Input text to extract memories from
             prompt: System prompt to guide the extraction process
+            user_id: Optional user ID for per-user prompt override resolution
+            langfuse_session_id: Optional session ID for Langfuse trace grouping
 
         Returns:
             List of extracted fact memory strings
@@ -312,6 +375,7 @@ class LLMProviderBase(ABC):
         retrieved_old_memory: List[Dict[str, str]],
         new_facts: List[str],
         custom_prompt: Optional[str] = None,
+        langfuse_session_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Propose memory management actions based on existing and new information.
 
@@ -330,6 +394,38 @@ class LLMProviderBase(ABC):
             Dictionary containing proposed actions in structured format
         """
         pass
+
+    async def propose_reprocess_actions(
+        self,
+        existing_memories: List[Dict[str, str]],
+        diff_context: str,
+        new_transcript: str,
+        custom_prompt: Optional[str] = None,
+        langfuse_session_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Propose memory updates after transcript reprocessing (e.g., speaker changes).
+
+        Uses the LLM to review existing conversation memories in light of
+        specific transcript changes (speaker re-identification, text corrections)
+        and propose targeted ADD/UPDATE/DELETE/NONE actions.
+
+        Default implementation raises NotImplementedError. Providers that
+        support diff-aware reprocessing should override this method.
+
+        Args:
+            existing_memories: List of existing memories for the conversation
+                (each dict has ``id`` and ``text`` keys)
+            diff_context: Formatted string describing what changed in the
+                transcript (e.g., speaker relabelling details)
+            new_transcript: The updated full transcript text
+            custom_prompt: Optional custom system prompt
+
+        Returns:
+            Dictionary containing proposed actions in ``{"memory": [...]}`` format
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support propose_reprocess_actions"
+        )
 
     @abstractmethod
     async def test_connection(self) -> bool:
@@ -414,6 +510,24 @@ class VectorStoreBase(ABC):
             Total count of memories for the user, or None if counting is not supported by this store
         """
         return None
+
+    async def get_memories_by_source(
+        self, user_id: str, source_id: str, limit: int = 100
+    ) -> List["MemoryEntry"]:
+        """Get all memories for a specific source (conversation) for a user.
+
+        Default implementation returns empty list. Vector stores should
+        override to filter by metadata.source_id.
+
+        Args:
+            user_id: User identifier
+            source_id: Source/conversation identifier
+            limit: Maximum number of memories to return
+
+        Returns:
+            List of MemoryEntry objects for the specified source
+        """
+        return []
 
     @abstractmethod
     async def update_memory(

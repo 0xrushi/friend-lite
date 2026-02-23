@@ -8,7 +8,6 @@ This module provides:
 - Beanie initialization for workers
 """
 
-import asyncio
 import logging
 import os
 import uuid
@@ -21,8 +20,6 @@ from rq.job import Job, JobStatus
 from rq.registry import DeferredJobRegistry, ScheduledJobRegistry
 
 from advanced_omi_backend.config_loader import get_service_config
-from advanced_omi_backend.models.conversation import Conversation
-from advanced_omi_backend.models.job import JobPriority
 
 logger = logging.getLogger(__name__)
 
@@ -230,8 +227,8 @@ def get_jobs(
                         "completed_at": job.ended_at.isoformat() if job.ended_at else None,
                         "retry_count": job.retries_left if hasattr(job, 'retries_left') else 0,
                         "max_retries": 3,  # Default max retries
-                        "progress_percent": 0,  # RQ doesn't track progress by default
-                        "progress_message": "",
+                        "progress_percent": (job.meta or {}).get("batch_progress", {}).get("percent", 0),
+                        "progress_message": (job.meta or {}).get("batch_progress", {}).get("message", ""),
                     })
                 except Exception as e:
                     logger.error(f"Error fetching job {job_id}: {e}")
@@ -344,12 +341,17 @@ def start_streaming_jobs(
 
     Note:
         - user_email is fetched from the database when needed.
-        - always_persist setting is read from global config by the audio persistence job.
+        - always_persist setting is read from global config at enqueue time and passed to worker.
     """
+    from advanced_omi_backend.config import get_misc_settings
     from advanced_omi_backend.workers.audio_jobs import audio_streaming_persistence_job
     from advanced_omi_backend.workers.transcription_jobs import (
         stream_speech_detection_job,
     )
+
+    # Read always_persist from global config NOW (backend process has fresh config)
+    misc_settings = get_misc_settings()
+    always_persist = misc_settings.get('always_persist_enabled', False)
 
     # Enqueue speech detection job
     speech_job = transcription_queue.enqueue(
@@ -385,12 +387,12 @@ def start_streaming_jobs(
     # Enqueue audio persistence job on dedicated audio queue
     # NOTE: This job handles file rotation for multiple conversations automatically
     # Runs for entire session, not tied to individual conversations
-    # The job reads always_persist_enabled from global config internally
     audio_job = audio_queue.enqueue(
         audio_streaming_persistence_job,
         session_id,
         user_id,
         client_id,
+        always_persist,
         job_timeout=86400,  # 24 hours for all-day sessions
         ttl=None,  # No pre-run expiry (job can wait indefinitely in queue)
         result_ttl=JOB_RESULT_TTL,  # Cleanup AFTER completion
