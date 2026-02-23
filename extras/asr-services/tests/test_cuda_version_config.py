@@ -177,17 +177,21 @@ class TestGPUArchitectureCUDAMapping:
             arch_to_cuda.get(gpu_arch) == required_cuda
         ), f"GPU architecture {gpu_arch} requires CUDA version {required_cuda}"
 
+    # Architectures supported by each CUDA version (minimum cu version that supports them)
+    # Used as authoritative reference for architecture-to-CUDA mapping tests.
+    CUDA_ARCH_SUPPORT = {
+        "cu121": {"sm_75", "sm_80", "sm_86", "sm_89"},
+        "cu126": {"sm_75", "sm_80", "sm_86", "sm_89", "sm_90"},
+        "cu128": {"sm_75", "sm_80", "sm_86", "sm_89", "sm_90", "sm_120"},
+    }
+
     def test_older_gpus_work_with_cu121(self):
         """Test that older GPUs (sm_86, sm_80) work with cu121."""
         older_archs = ["sm_86", "sm_80", "sm_75"]  # RTX 3090, A100, RTX 2080
+        cu121_supported = self.CUDA_ARCH_SUPPORT["cu121"]
 
         for arch in older_archs:
-            # cu121 supports these architectures
-            assert arch in [
-                "sm_75",
-                "sm_80",
-                "sm_86",
-            ], f"{arch} should be supported by CUDA 12.1"
+            assert arch in cu121_supported, f"{arch} should be supported by CUDA 12.1"
 
 
 class TestPyProjectCUDAExtras:

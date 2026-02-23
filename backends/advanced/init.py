@@ -326,7 +326,7 @@ class ChronicleSetup:
         elif choice == "2":
             self.console.print("[blue][INFO][/blue] Offline Parakeet ASR selected")
             parakeet_url = self.prompt_value(
-                "Parakeet ASR URL", "http://host.docker.internal:8767"
+                "Parakeet ASR URL (without http:// prefix)", "host.docker.internal:8767"
             )
 
             # Write URL to .env for ${PARAKEET_ASR_URL} placeholder in config.yml
@@ -350,7 +350,8 @@ class ChronicleSetup:
                 "[blue][INFO][/blue] Offline VibeVoice ASR selected (built-in speaker diarization)"
             )
             vibevoice_url = self.prompt_value(
-                "VibeVoice ASR URL", "http://host.docker.internal:8767"
+                "VibeVoice ASR URL (without http:// prefix)",
+                "host.docker.internal:8767",
             )
 
             # Write URL to .env for ${VIBEVOICE_ASR_URL} placeholder in config.yml
@@ -654,6 +655,18 @@ class ChronicleSetup:
                     )
 
                     if embedding_model_name:
+                        embed_dim_str = self.prompt_value(
+                            "Embedding dimensions (e.g. 1536 for text-embedding-3-small, 3072 for text-embedding-3-large)",
+                            "1536",
+                        )
+                        try:
+                            embedding_dimensions = int(embed_dim_str)
+                        except ValueError:
+                            self.console.print(
+                                f"[yellow][WARNING][/yellow] Invalid dimensions '{embed_dim_str}', using default 1536"
+                            )
+                            raise ValueError(f"Invalid dimensions '{embed_dim_str}'")
+
                         embed_model = {
                             "name": "custom-embed",
                             "description": "Custom OpenAI-compatible embeddings",
@@ -663,7 +676,7 @@ class ChronicleSetup:
                             "model_name": embedding_model_name,
                             "model_url": base_url,
                             "api_key": "${oc.env:CUSTOM_LLM_API_KEY,''}",
-                            "embedding_dimensions": 1536,
+                            "embedding_dimensions": embedding_dimensions,
                             "model_output": "vector",
                         }
                         self.config_manager.add_or_update_model(embed_model)

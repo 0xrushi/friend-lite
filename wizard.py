@@ -258,7 +258,7 @@ def run_service_setup(
         if "speaker-recognition" in selected_services:
             cmd.extend(["--speaker-service-url", "http://speaker-service:8085"])
         if "asr-services" in selected_services:
-            cmd.extend(["--parakeet-asr-url", "http://host.docker.internal:8767"])
+            cmd.extend(["--parakeet-asr-url", "host.docker.internal:8767"])
 
         # Pass transcription provider choice from wizard
         if transcription_provider:
