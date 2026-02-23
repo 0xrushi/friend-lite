@@ -6,4 +6,5 @@ robotframework-databaselibrary
 python-dotenv
 websockets
 pymongo
- 
+omegaconf
+pyyaml
