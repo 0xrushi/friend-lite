@@ -18,6 +18,7 @@ import yaml
 
 from advanced_omi_backend.config_loader import get_plugins_yml_path
 from advanced_omi_backend.plugins import BasePlugin, PluginRouter
+from advanced_omi_backend.plugins.events import PluginEvent
 from advanced_omi_backend.plugins.services import PluginServices
 
 logger = logging.getLogger(__name__)
@@ -820,6 +821,62 @@ async def ensure_plugin_router() -> Optional[PluginRouter]:
                 plugin_router.mark_plugin_failed(plugin_id, str(e))
                 logger.error(f"Failed to initialize plugin '{plugin_id}': {e}")
     return plugin_router
+
+
+async def dispatch_plugin_event(
+    event: PluginEvent,
+    user_id: str,
+    data: dict,
+    metadata: dict = None,
+    description: str = "",
+    require_router: bool = False,
+) -> Optional[list]:
+    """Dispatch an event to the plugin system with standard logging.
+
+    Handles the common pattern of: ensure router -> dispatch event -> log results.
+
+    Args:
+        event: Plugin event to dispatch
+        user_id: User ID for the event
+        data: Event-specific data dict
+        metadata: Optional metadata dict
+        description: Log context (e.g., "conversation=abc123, memories=5")
+        require_router: If True and no router, raise RuntimeError instead of returning None
+
+    Returns:
+        List of plugin results, or None if no router available
+
+    Raises:
+        RuntimeError: If require_router=True and no plugin router is available
+    """
+    plugin_router = await ensure_plugin_router()
+
+    if not plugin_router:
+        if require_router:
+            raise RuntimeError(
+                f"Plugin router could not be initialized in worker process. "
+                f"{event.value} event will NOT be dispatched!"
+            )
+        return None
+
+    logger.info(f"🔌 DISPATCH: {event.value} event ({description})")
+
+    plugin_results = await plugin_router.dispatch_event(
+        event=event,
+        user_id=user_id,
+        data=data,
+        metadata=metadata or {},
+    )
+
+    result_count = len(plugin_results) if plugin_results else 0
+    logger.info(f"🔌 RESULT: {event.value} dispatched to {result_count} plugins")
+
+    if plugin_results:
+        for result in plugin_results:
+            if result.message:
+                logger.info(f"  Plugin result: {result.message}")
+
+    return plugin_results
 
 
 async def cleanup_plugin_router() -> None:

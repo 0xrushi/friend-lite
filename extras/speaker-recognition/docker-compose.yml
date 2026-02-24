@@ -111,28 +111,31 @@ services:
       timeout: 10s
       retries: 3
 
-  # Nginx reverse proxy for unified HTTPS endpoint
-  nginx:
-    image: nginx:alpine
+  # Caddy reverse proxy for unified HTTPS endpoint
+  caddy:
+    image: caddy:2-alpine
     profiles: ["cpu", "gpu", "strixhalo"]
     ports:
       - "8444:443"
       - "8081:80"
     volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./ssl:/etc/nginx/ssl:ro
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../../certs:/certs:ro
+      - caddy_speaker_data:/data
+      - caddy_speaker_config:/config
     depends_on:
       web-ui:
         condition: service_healthy
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "-k", "https://localhost/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
 
 # Shared network for cross-project communication
 networks:
   default:
     name: chronicle-network
     external: true
+
+volumes:
+  caddy_speaker_data:
+    driver: local
+  caddy_speaker_config:
+    driver: local

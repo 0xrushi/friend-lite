@@ -9,7 +9,6 @@ import os
 import platform
 import secrets
 import shutil
-import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -326,7 +325,7 @@ class ChronicleSetup:
         elif choice == "2":
             self.console.print("[blue][INFO][/blue] Offline Parakeet ASR selected")
             parakeet_url = self.prompt_value(
-                "Parakeet ASR URL", "http://host.docker.internal:8767"
+                "Parakeet ASR URL (without http:// prefix)", "host.docker.internal:8767"
             )
 
             # Write URL to .env for ${PARAKEET_ASR_URL} placeholder in config.yml
@@ -350,7 +349,8 @@ class ChronicleSetup:
                 "[blue][INFO][/blue] Offline VibeVoice ASR selected (built-in speaker diarization)"
             )
             vibevoice_url = self.prompt_value(
-                "VibeVoice ASR URL", "http://host.docker.internal:8767"
+                "VibeVoice ASR URL (without http:// prefix)",
+                "host.docker.internal:8767",
             )
 
             # Write URL to .env for ${VIBEVOICE_ASR_URL} placeholder in config.yml
@@ -537,7 +537,8 @@ class ChronicleSetup:
         choices = {
             "1": "OpenAI (GPT-4, GPT-3.5 - requires API key)",
             "2": "Ollama (local models - runs locally)",
-            "3": "Skip (no memory extraction)",
+            "3": "OpenAI-Compatible (custom endpoint - Groq, Together AI, LM Studio, etc.)",
+            "4": "Skip (no memory extraction)",
         }
 
         choice = self.prompt_choice("Which LLM provider will you use?", choices, "1")
@@ -593,6 +594,121 @@ class ChronicleSetup:
             )
 
         elif choice == "3":
+            self.console.print(
+                "[blue][INFO][/blue] OpenAI-Compatible custom endpoint selected"
+            )
+            self.console.print(
+                "This works with any provider that exposes an OpenAI-compatible API"
+            )
+            self.console.print("(e.g., Groq, Together AI, LM Studio, vLLM, etc.)")
+            self.console.print()
+
+            # Prompt for base URL (required)
+            base_url = self.prompt_value(
+                "API Base URL (e.g., https://api.groq.com/openai/v1)", ""
+            )
+            if not base_url:
+                self.console.print(
+                    "[yellow][WARNING][/yellow] No base URL provided - skipping custom LLM setup"
+                )
+            else:
+                # Prompt for API key
+                api_key = self.prompt_with_existing_masked(
+                    prompt_text="API Key (leave empty if not required)",
+                    env_key="CUSTOM_LLM_API_KEY",
+                    placeholders=["your_custom_llm_api_key_here"],
+                    is_password=True,
+                    default="",
+                )
+                if api_key:
+                    self.config["CUSTOM_LLM_API_KEY"] = api_key
+
+                # Prompt for model name (required)
+                model_name = self.prompt_value(
+                    "LLM Model name (e.g., llama-3.1-70b-versatile)", ""
+                )
+                if not model_name:
+                    self.console.print(
+                        "[yellow][WARNING][/yellow] No model name provided - skipping custom LLM setup"
+                    )
+                else:
+                    # Create LLM model entry
+                    llm_model = {
+                        "name": "custom-llm",
+                        "description": "Custom OpenAI-compatible LLM",
+                        "model_type": "llm",
+                        "model_provider": "openai",
+                        "api_family": "openai",
+                        "model_name": model_name,
+                        "model_url": base_url,
+                        "api_key": "${oc.env:CUSTOM_LLM_API_KEY,''}",
+                        "model_params": {"temperature": 0.2, "max_tokens": 2000},
+                        "model_output": "json",
+                    }
+                    self.config_manager.add_or_update_model(llm_model)
+
+                    # Prompt for optional embedding model
+                    embedding_model_name = self.prompt_value(
+                        "Embedding model name (leave empty to use Ollama local-embed)",
+                        "",
+                    )
+
+                    if embedding_model_name:
+                        embed_dim_str = self.prompt_value(
+                            "Embedding dimensions (e.g. 1536 for text-embedding-3-small, 3072 for text-embedding-3-large)",
+                            "1536",
+                        )
+                        try:
+                            embedding_dimensions = int(embed_dim_str)
+                        except ValueError:
+                            self.console.print(
+                                f"[yellow][WARNING][/yellow] Invalid dimensions '{embed_dim_str}', using default 1536"
+                            )
+                            raise ValueError(f"Invalid dimensions '{embed_dim_str}'")
+
+                        embed_model = {
+                            "name": "custom-embed",
+                            "description": "Custom OpenAI-compatible embeddings",
+                            "model_type": "embedding",
+                            "model_provider": "openai",
+                            "api_family": "openai",
+                            "model_name": embedding_model_name,
+                            "model_url": base_url,
+                            "api_key": "${oc.env:CUSTOM_LLM_API_KEY,''}",
+                            "embedding_dimensions": embedding_dimensions,
+                            "model_output": "vector",
+                        }
+                        self.config_manager.add_or_update_model(embed_model)
+                        self.config_manager.update_config_defaults(
+                            {"llm": "custom-llm", "embedding": "custom-embed"}
+                        )
+                        self.console.print(
+                            "[green][SUCCESS][/green] Custom LLM and embedding configured in config.yml"
+                        )
+                        self.console.print(
+                            "[blue][INFO][/blue] Set defaults.llm: custom-llm"
+                        )
+                        self.console.print(
+                            "[blue][INFO][/blue] Set defaults.embedding: custom-embed"
+                        )
+                    else:
+                        self.config_manager.update_config_defaults(
+                            {"llm": "custom-llm", "embedding": "local-embed"}
+                        )
+                        self.console.print(
+                            "[green][SUCCESS][/green] Custom LLM configured in config.yml"
+                        )
+                        self.console.print(
+                            "[blue][INFO][/blue] Set defaults.llm: custom-llm"
+                        )
+                        self.console.print(
+                            "[blue][INFO][/blue] Set defaults.embedding: local-embed (Ollama)"
+                        )
+                        self.console.print(
+                            "[yellow][WARNING][/yellow] Make sure Ollama is running for embeddings"
+                        )
+
+        elif choice == "4":
             self.console.print(
                 "[blue][INFO][/blue] Skipping LLM setup - memory extraction disabled"
             )
@@ -991,34 +1107,16 @@ class ChronicleSetup:
 
         if enable_https:
 
-            # Generate SSL certificates
-            self.console.print("[blue][INFO][/blue] Generating SSL certificates...")
-            # Use path relative to this script's directory
-            script_dir = Path(__file__).parent
-            ssl_script = script_dir / "ssl" / "generate-ssl.sh"
-            if ssl_script.exists():
-                try:
-                    # Run from the backend directory so paths work correctly
-                    subprocess.run(
-                        [str(ssl_script), server_ip],
-                        check=True,
-                        cwd=str(script_dir),
-                        timeout=180,
-                    )
-                    self.console.print(
-                        "[green][SUCCESS][/green] SSL certificates generated"
-                    )
-                except subprocess.TimeoutExpired:
-                    self.console.print(
-                        "[yellow][WARNING][/yellow] SSL certificate generation timed out after 3 minutes"
-                    )
-                except subprocess.CalledProcessError:
-                    self.console.print(
-                        "[yellow][WARNING][/yellow] SSL certificate generation failed"
-                    )
-            else:
+            # Check for centralized certs (generated by wizard.py)
+            certs_dir = Path(__file__).parent / ".." / ".." / "certs"
+            cert_file = certs_dir / "server.crt"
+            if not cert_file.exists():
                 self.console.print(
-                    f"[yellow][WARNING][/warning] SSL script not found at {ssl_script}"
+                    "[yellow][WARNING][/yellow] No certificates found in certs/ directory"
+                )
+                self.console.print(
+                    "[yellow][WARNING][/yellow] Run ./wizard.sh to generate certificates, "
+                    "or: cd certs && ./generate-ssl.sh <address>"
                 )
 
             # Generate Caddyfile from template

@@ -297,7 +297,11 @@ async def get_finetuning_status(
             ).to_list()
 
         # Batch-check which conversation_ids still exist
-        conv_annotation_types = {AnnotationType.DIARIZATION, AnnotationType.TRANSCRIPT}
+        conv_annotation_types = {
+            AnnotationType.DIARIZATION,
+            AnnotationType.TRANSCRIPT,
+            AnnotationType.SPEECH_SUGGESTION_CORRECTION,
+        }
         all_conv_ids: set[str] = set()
         for ann_type in conv_annotation_types:
             for a in all_annotations_by_type.get(ann_type, []):

@@ -15,6 +15,7 @@ from advanced_omi_backend.models.job import async_job
 from advanced_omi_backend.services.audio_stream import TranscriptionResultsAggregator
 from advanced_omi_backend.speaker_recognition_client import SpeakerRecognitionClient
 from advanced_omi_backend.users import get_user_by_id
+from advanced_omi_backend.utils.job_utils import update_job_meta
 
 logger = logging.getLogger(__name__)
 
@@ -116,23 +117,14 @@ async def check_enrolled_speakers_job(
         logger.info(f"⏭️ No enrolled speakers found ({processing_time:.2f}s)")
 
     # Update job metadata for timeline tracking
-    from rq import get_current_job
-
-    current_job = get_current_job()
-    if current_job:
-        if not current_job.meta:
-            current_job.meta = {}
-        current_job.meta.update(
-            {
-                "session_id": session_id,
-                "client_id": client_id,
-                "enrolled_present": enrolled_present,
-                "identified_speakers": identified_speakers,
-                "speaker_count": len(identified_speakers),
-                "processing_time": processing_time,
-            }
-        )
-        current_job.save_meta()
+    update_job_meta(
+        session_id=session_id,
+        client_id=client_id,
+        enrolled_present=enrolled_present,
+        identified_speakers=identified_speakers,
+        speaker_count=len(identified_speakers),
+        processing_time=processing_time,
+    )
 
     return {
         "success": True,
@@ -637,20 +629,11 @@ async def recognise_speakers_job(
         logger.error(f"❌ Speaker recognition timeout: {e}")
 
         # Add timeout metadata to job
-        from rq import get_current_job
-
-        current_job = get_current_job()
-        if current_job:
-            current_job.meta.update(
-                {
-                    "error_type": "timeout",
-                    "audio_duration": (
-                        conversation.audio_total_duration if conversation else None
-                    ),
-                    "timeout_occurred_at": time.time(),
-                }
-            )
-            current_job.save_meta()
+        update_job_meta(
+            error_type="timeout",
+            audio_duration=conversation.audio_total_duration if conversation else None,
+            timeout_occurred_at=time.time(),
+        )
 
         return {
             "success": False,

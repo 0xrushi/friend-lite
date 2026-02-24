@@ -17,15 +17,19 @@ logger = logging.getLogger(__name__)
 audio_logger = logging.getLogger("audio_processing")
 
 
+def _resolve_target_user(user: User, user_id: Optional[str] = None) -> str:
+    """Return the effective user ID: admins may override with user_id param."""
+    if user.is_superuser and user_id:
+        return user_id
+    return user.user_id
+
+
 async def get_memories(user: User, limit: int, user_id: Optional[str] = None):
     """Get memories. Users see only their own memories, admins can see all or filter by user."""
     try:
         memory_service = get_memory_service()
 
-        # Determine which user's memories to fetch
-        target_user_id = user.user_id
-        if user.is_superuser and user_id:
-            target_user_id = user_id
+        target_user_id = _resolve_target_user(user, user_id)
 
         # Execute memory retrieval directly (now async)
         memories = await memory_service.get_all_memories(target_user_id, limit)
@@ -57,10 +61,7 @@ async def get_memories_with_transcripts(
     try:
         memory_service = get_memory_service()
 
-        # Determine which user's memories to fetch
-        target_user_id = user.user_id
-        if user.is_superuser and user_id:
-            target_user_id = user_id
+        target_user_id = _resolve_target_user(user, user_id)
 
         # Execute memory retrieval directly (now async)
         memories_with_transcripts = await memory_service.get_memories_with_transcripts(
@@ -94,10 +95,7 @@ async def search_memories(
     try:
         memory_service = get_memory_service()
 
-        # Determine which user's memories to search
-        target_user_id = user.user_id
-        if user.is_superuser and user_id:
-            target_user_id = user_id
+        target_user_id = _resolve_target_user(user, user_id)
 
         # Execute search directly (now async)
         search_results = await memory_service.search_memories(
@@ -260,10 +258,7 @@ async def get_memory_by_id(memory_id: str, user: User, user_id: Optional[str] = 
     try:
         memory_service = get_memory_service()
 
-        # Determine which user's memory to fetch
-        target_user_id = user.user_id
-        if user.is_superuser and user_id:
-            target_user_id = user_id
+        target_user_id = _resolve_target_user(user, user_id)
 
         # Get the specific memory
         memory = await memory_service.get_memory(memory_id, target_user_id)

@@ -10,6 +10,28 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 
+def update_job_meta(**kwargs) -> None:
+    """Update the current RQ job's metadata with the given key-value pairs.
+
+    Handles the common boilerplate of: get_current_job() -> null check ->
+    meta init -> update -> save_meta.
+
+    Args:
+        **kwargs: Key-value pairs to merge into job.meta
+
+    Example:
+        update_job_meta(conversation_id="abc", processing_time=1.5)
+    """
+    from rq import get_current_job
+
+    current_job = get_current_job()
+    if current_job:
+        if not current_job.meta:
+            current_job.meta = {}
+        current_job.meta.update(kwargs)
+        current_job.save_meta()
+
+
 async def check_job_alive(
     redis_client, current_job, session_id: Optional[str] = None
 ) -> bool:

@@ -373,6 +373,96 @@ def detect_tailscale_info() -> Tuple[Optional[str], Optional[str]]:
     return dns_name, ip
 
 
+def generate_tailscale_certs(certs_dir: str) -> bool:
+    """
+    Generate trusted TLS certificates via Tailscale.
+
+    Uses `sudo tailscale cert` to obtain certs signed by the Tailscale CA,
+    which are automatically trusted on devices in the same tailnet.
+
+    Args:
+        certs_dir: Directory to write server.crt and server.key into.
+
+    Returns:
+        True if certificates were generated successfully, False otherwise.
+    """
+    dns_name, _ = detect_tailscale_info()
+    if not dns_name:
+        return False
+
+    certs_path = Path(certs_dir)
+    certs_path.mkdir(parents=True, exist_ok=True)
+
+    cert_file = certs_path / "server.crt"
+    key_file = certs_path / "server.key"
+
+    try:
+        result = subprocess.run(
+            [
+                "sudo",
+                "tailscale",
+                "cert",
+                "--cert-file",
+                str(cert_file),
+                "--key-file",
+                str(key_file),
+                dns_name,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if result.returncode != 0:
+            return False
+
+        # Fix ownership so Docker can read the files
+        import os
+
+        uid = os.getuid()
+        gid = os.getgid()
+        subprocess.run(
+            ["sudo", "chown", f"{uid}:{gid}", str(cert_file), str(key_file)],
+            capture_output=True,
+            timeout=10,
+        )
+        return True
+    except (subprocess.SubprocessError, FileNotFoundError, OSError):
+        return False
+
+
+def generate_self_signed_certs(server_address: str, certs_dir: str) -> bool:
+    """
+    Generate self-signed TLS certificates using the repo's generate-ssl.sh script.
+
+    Args:
+        server_address: IP address or domain name for the certificate SAN.
+        certs_dir: Directory to write server.crt and server.key into.
+
+    Returns:
+        True if certificates were generated successfully, False otherwise.
+    """
+    certs_path = Path(certs_dir)
+    certs_path.mkdir(parents=True, exist_ok=True)
+
+    # The generate-ssl.sh script is at certs/generate-ssl.sh relative to repo root
+    # and outputs into the current working directory
+    script = certs_path / "generate-ssl.sh"
+    if not script.exists():
+        return False
+
+    try:
+        result = subprocess.run(
+            [str(script), server_address],
+            cwd=str(certs_path),
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        return result.returncode == 0
+    except (subprocess.SubprocessError, FileNotFoundError, OSError):
+        return False
+
+
 def detect_cuda_version(default: str = "cu126") -> str:
     """
     Detect system CUDA version from nvidia-smi output.

@@ -23,6 +23,7 @@ class AnnotationType(str, Enum):
     ENTITY = "entity"  # Knowledge graph entity corrections (name/details edits)
     TITLE = "title"  # Conversation title corrections
     INSERT = "insert"  # Insert new segment between existing segments
+    SPEECH_SUGGESTION_CORRECTION = "speech_suggestion_correction"  # User-refined model suggestion (training signal triple)
 
 
 class AnnotationSource(str, Enum):
@@ -82,6 +83,11 @@ class Annotation(Document):
     entity_id: Optional[str] = None  # Neo4j entity ID
     entity_field: Optional[str] = None  # Which field was changed ("name" or "details")
 
+    # For SPEECH_SUGGESTION_CORRECTION annotations:
+    model_suggested_text: Optional[str] = (
+        None  # What AI originally suggested before user edited
+    )
+
     # For INSERT annotations:
     insert_after_index: Optional[int] = None  # -1 = before first segment
     insert_text: Optional[str] = None  # e.g., "[laughter]" or "wife laughed"
@@ -134,6 +140,10 @@ class Annotation(Document):
     def is_title_annotation(self) -> bool:
         """Check if this is a title annotation."""
         return self.annotation_type == AnnotationType.TITLE
+
+    def is_speech_suggestion_correction(self) -> bool:
+        """Check if this is a user-refined model suggestion."""
+        return self.annotation_type == AnnotationType.SPEECH_SUGGESTION_CORRECTION
 
     def is_pending_suggestion(self) -> bool:
         """Check if this is a pending AI suggestion."""
@@ -218,6 +228,7 @@ class AnnotationUpdate(BaseModel):
 
     corrected_text: Optional[str] = None
     corrected_speaker: Optional[str] = None
+    model_suggested_text: Optional[str] = None
     insert_text: Optional[str] = None
     insert_segment_type: Optional[str] = None
     insert_speaker: Optional[str] = None
@@ -239,6 +250,7 @@ class AnnotationResponse(BaseModel):
     segment_start_time: Optional[float] = None
     entity_id: Optional[str] = None
     entity_field: Optional[str] = None
+    model_suggested_text: Optional[str] = None
     insert_after_index: Optional[int] = None
     insert_text: Optional[str] = None
     insert_segment_type: Optional[str] = None

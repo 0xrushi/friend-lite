@@ -12,6 +12,7 @@ import yaml
 from dotenv import dotenv_values
 from rich.console import Console
 from rich.table import Table
+
 from setup_utils import read_env_value
 
 console = Console()
@@ -34,6 +35,12 @@ def load_config_yml():
 
 
 SERVICES = {
+    "langfuse": {
+        "path": "extras/langfuse",
+        "compose_file": "docker-compose.yml",
+        "description": "LangFuse Observability & Prompt Management",
+        "ports": ["3002"],
+    },
     "backend": {
         "path": "backends/advanced",
         "compose_file": "docker-compose.yml",
@@ -57,12 +64,6 @@ SERVICES = {
         "compose_file": "docker-compose.yml",
         "description": "OpenMemory MCP Server",
         "ports": ["8765"],
-    },
-    "langfuse": {
-        "path": "extras/langfuse",
-        "compose_file": "docker-compose.yml",
-        "description": "LangFuse Observability & Prompt Management",
-        "ports": ["3002"],
     },
 }
 
@@ -305,7 +306,7 @@ def run_compose_command(service_name, command, build=False, force_recreate=False
             return False
 
     # Step 2: Run the actual command (up/down/restart/status)
-    up_flags = ["up", "-d"]
+    up_flags = ["up", "-d", "--remove-orphans"]
     if force_recreate:
         up_flags.append("--force-recreate")
 
@@ -334,16 +335,17 @@ def run_compose_command(service_name, command, build=False, force_recreate=False
             cmd.extend(["--profile", profile])
 
             if command == "up":
-                https_enabled = env_values.get("REACT_UI_HTTPS", "false")
-                if https_enabled.lower() == "true":
+                caddyfile_path = service_path / "Caddyfile"
+                https_enabled = caddyfile_path.exists() and caddyfile_path.is_file()
+                if https_enabled:
                     cmd.extend(up_flags)
                 else:
-                    if profile == "gpu":
-                        service_to_start = "speaker-service-gpu"
-                    elif profile == "strixhalo":
-                        service_to_start = "speaker-service-strixhalo"
-                    else:
-                        service_to_start = "speaker-service-cpu"
+                    service_name_map = {
+                        "gpu": "speaker-service-gpu",
+                        "strixhalo": "speaker-service-strixhalo",
+                        "cpu": "speaker-service",
+                    }
+                    service_to_start = service_name_map.get(profile, "speaker-service")
                     cmd.extend(up_flags + [service_to_start, "web-ui"])
             elif command == "down":
                 cmd.extend(["down"])

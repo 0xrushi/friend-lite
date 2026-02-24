@@ -16,6 +16,8 @@ from rich.prompt import Confirm, Prompt
 # Import shared setup utilities
 from setup_utils import (
     detect_tailscale_info,
+    generate_self_signed_certs,
+    generate_tailscale_certs,
     is_placeholder,
     mask_value,
     prompt_password,
@@ -260,7 +262,7 @@ def run_service_setup(
         if "speaker-recognition" in selected_services:
             cmd.extend(["--speaker-service-url", "http://speaker-service:8085"])
         if "asr-services" in selected_services:
-            cmd.extend(["--parakeet-asr-url", "http://host.docker.internal:8767"])
+            cmd.extend(["--parakeet-asr-url", "host.docker.internal:8767"])
 
         # Pass transcription provider choice from wizard
         if transcription_provider:
@@ -951,11 +953,11 @@ def main():
 
         try:
             https_enabled = Confirm.ask(
-                "Enable HTTPS for selected services?", default=False
+                "Enable HTTPS for selected services?", default=True
             )
         except EOFError:
-            console.print("Using default: No")
-            https_enabled = False
+            console.print("Using default: Yes")
+            https_enabled = True
 
         if https_enabled:
             # Try to auto-detect Tailscale address
@@ -999,6 +1001,22 @@ def main():
             )
 
             console.print(f"[green]✅[/green] HTTPS configured for: {server_ip}")
+
+            # Generate certificates centrally in certs/
+            console.print("\n[blue][INFO][/blue] Generating TLS certificates...")
+            if ts_dns and generate_tailscale_certs("certs"):
+                console.print(
+                    f"[green]✅[/green] Tailscale trusted certs generated in certs/ for {ts_dns}"
+                )
+            elif generate_self_signed_certs(server_ip, "certs"):
+                console.print(
+                    f"[green]✅[/green] Self-signed certs generated in certs/ for {server_ip}"
+                )
+            else:
+                console.print(
+                    "[yellow]⚠️  Certificate generation failed. "
+                    "Generate manually: cd certs && ./generate-ssl.sh <address>[/yellow]"
+                )
 
     # Neo4j Configuration (always required - used by Knowledge Graph)
     neo4j_password = None

@@ -3,6 +3,7 @@ import { Music, MessageSquare, MessageCircle, Brain, Users, Upload, Settings, Lo
 import { useAuth } from '../../contexts/AuthContext'
 import { useTheme } from '../../contexts/ThemeContext'
 import GlobalRecordingIndicator from './GlobalRecordingIndicator'
+import UserLoopModal from '../UserLoopModal'
 
 export default function Layout() {
   const location = useLocation()
@@ -112,6 +113,9 @@ export default function Layout() {
           </div>
         </div>
       </footer>
+
+      {/* User Loop: AI suggestion review modal (auto-opens when suggestions exist) */}
+      <UserLoopModal />
     </div>
   )
 }

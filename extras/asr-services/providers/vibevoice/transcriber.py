@@ -66,7 +66,9 @@ def load_vibevoice_config() -> dict:
     user_config = OmegaConf.load(config_path) if config_path.exists() else {}
     merged = OmegaConf.merge(defaults, user_config)
 
-    asr_config = merged.get("asr_services", {}).get("vibevoice", {})
+    asr_config = OmegaConf.select(
+        merged, "asr_services.vibevoice", default=OmegaConf.create({})
+    )
     resolved = OmegaConf.to_container(asr_config, resolve=True)
     logger.info(f"Loaded vibevoice config: {resolved}")
     return resolved

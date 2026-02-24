@@ -334,6 +334,25 @@ class ConfigManager:
 
         self._save_config_yml(config)
 
+    def add_or_update_model(self, model_def: Dict[str, Any]):
+        """
+        Add or update a model in the models list by name.
+
+        Args:
+            model_def: Model definition dict with at least a 'name' key.
+        """
+        config = self._load_config_yml()
+        if "models" not in config:
+            config["models"] = []
+        # Update existing or append
+        for i, m in enumerate(config["models"]):
+            if m.get("name") == model_def["name"]:
+                config["models"][i] = model_def
+                break
+        else:
+            config["models"].append(model_def)
+        self._save_config_yml(config)
+
     def get_full_config(self) -> Dict[str, Any]:
         """
         Get complete config.yml as dictionary.

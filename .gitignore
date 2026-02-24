@@ -67,12 +67,18 @@ extras/speaker-omni-experimental/cache/*
 # AI Stuff
 .claude
 
-# SSL
+# SSL / TLS certificates (centralized)
+certs/*.crt
+certs/*.key
+certs/*.pem
+
+# Legacy per-service SSL (kept for cleanup)
 extras/speaker-recognition/ssl/*
 backends/advanced/ssl/*
 
-# nginx
+# Generated reverse proxy configs
 extras/speaker-recognition/nginx.conf
+extras/speaker-recognition/Caddyfile
 
 # Cache
 extras/speaker-recognition/cache/*
