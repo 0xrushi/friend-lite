@@ -34,6 +34,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # uv cannot resolve rocm[libraries] from source dist, so we use pip index directly
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --index-url https://rocm.nightlies.amd.com/v2/gfx1151/ \
+    --extra-index-url https://pypi.org/simple \
     --pre "torch>=2.10" "torchaudio>=2.10"
 
 #########################  runtime #################################
