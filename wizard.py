@@ -250,6 +250,7 @@ def run_service_setup(
     langfuse_secret_key=None,
     langfuse_host=None,
     streaming_provider=None,
+    hardware_profile=None,
 ):
     """Execute individual service setup script"""
     if service_name == "advanced":
@@ -302,6 +303,14 @@ def run_service_setup(
             # Define the speaker env path
             speaker_env_path = "extras/speaker-recognition/.env"
 
+            # Pass explicit hardware profile selection when provided by wizard
+            if hardware_profile == "strixhalo":
+                cmd.extend(["--pytorch-cuda-version", "strixhalo"])
+                cmd.extend(["--compute-mode", "gpu"])
+                console.print(
+                    "[blue][INFO][/blue] Using AMD Strix Halo profile for speaker recognition"
+                )
+
             # HF Token should have been provided via setup_hf_token_if_needed()
             if hf_token:
                 cmd.extend(["--hf-token", hf_token])
@@ -323,7 +332,7 @@ def run_service_setup(
 
             # Pass compute mode from existing .env if available
             compute_mode = read_env_value(speaker_env_path, "COMPUTE_MODE")
-            if compute_mode in ["cpu", "gpu"]:
+            if hardware_profile != "strixhalo" and compute_mode in ["cpu", "gpu"]:
                 cmd.extend(["--compute-mode", compute_mode])
                 console.print(
                     f"[blue][INFO][/blue] Found existing COMPUTE_MODE ({compute_mode}), reusing"
@@ -332,11 +341,18 @@ def run_service_setup(
         # For asr-services, pass provider from wizard's transcription choice and reuse CUDA version
         if service_name == "asr-services":
             # Map wizard transcription provider to asr-services provider name
-            wizard_to_asr_provider = {
-                "vibevoice": "vibevoice",
-                "parakeet": "nemo",
-                "qwen3-asr": "qwen3-asr",
-            }
+            if hardware_profile == "strixhalo":
+                wizard_to_asr_provider = {
+                    "vibevoice": "vibevoice-strixhalo",
+                    "parakeet": "nemo-strixhalo",
+                    "qwen3-asr": "qwen3-asr",
+                }
+            else:
+                wizard_to_asr_provider = {
+                    "vibevoice": "vibevoice",
+                    "parakeet": "nemo",
+                    "qwen3-asr": "qwen3-asr",
+                }
             asr_provider = wizard_to_asr_provider.get(transcription_provider)
             if asr_provider:
                 cmd.extend(["--provider", asr_provider])
@@ -346,7 +362,17 @@ def run_service_setup(
 
             speaker_env_path = "extras/speaker-recognition/.env"
             cuda_version = read_env_value(speaker_env_path, "PYTORCH_CUDA_VERSION")
-            if cuda_version and cuda_version in ["cu121", "cu126", "cu128"]:
+            if hardware_profile == "strixhalo":
+                cmd.extend(["--pytorch-cuda-version", "strixhalo"])
+                console.print(
+                    "[blue][INFO][/blue] Using AMD Strix Halo profile for ASR services"
+                )
+            elif cuda_version and cuda_version in [
+                "cu121",
+                "cu126",
+                "cu128",
+                "strixhalo",
+            ]:
                 cmd.extend(["--pytorch-cuda-version", cuda_version])
                 console.print(
                     f"[blue][INFO][/blue] Found existing PYTORCH_CUDA_VERSION ({cuda_version}) from speaker-recognition, reusing"
@@ -870,6 +896,53 @@ def setup_langfuse_choice():
     }
 
 
+def select_hardware_profile(
+    selected_services, transcription_provider, streaming_provider
+):
+    """Select hardware profile for GPU-backed optional services.
+
+    Returns:
+        "strixhalo" for AMD Strix Halo profile, otherwise None.
+    """
+    strix_capable_providers = {"parakeet", "vibevoice"}
+    needs_hardware_choice = (
+        "speaker-recognition" in selected_services
+        or transcription_provider in strix_capable_providers
+        or streaming_provider in strix_capable_providers
+    )
+
+    if not needs_hardware_choice:
+        return None
+
+    console.print("\n🧠 [bold cyan]Hardware Profile[/bold cyan]")
+    console.print(
+        "Choose target hardware for GPU services (speaker recognition and offline ASR):"
+    )
+    choices = {
+        "1": "Standard (CPU/NVIDIA CUDA)",
+        "2": "AMD Strix Halo (ROCm, gfx1151 / Ryzen AI Max)",
+    }
+    for key, desc in choices.items():
+        console.print(f"  {key}) {desc}")
+    console.print()
+
+    while True:
+        try:
+            choice = Prompt.ask("Enter choice", default="1")
+            if choice == "1":
+                return None
+            if choice == "2":
+                console.print(
+                    "[green]✅[/green] Using AMD Strix Halo profile where supported"
+                )
+                return "strixhalo"
+            console.print(
+                f"[red]Invalid choice. Please select from {list(choices.keys())}[/red]"
+            )
+        except EOFError:
+            return None
+
+
 def main():
     """Main orchestration logic"""
     console.print("🎉 [bold green]Welcome to Chronicle![/bold green]\n")
@@ -925,6 +998,10 @@ def main():
         selected_services.append("langfuse")
 
     # HF Token Configuration (if services require it)
+    hardware_profile = select_hardware_profile(
+        selected_services, transcription_provider, streaming_provider
+    )
+
     hf_token = setup_hf_token_if_needed(selected_services)
 
     # HTTPS Configuration (for services that need it)
@@ -1101,6 +1178,7 @@ def main():
             langfuse_secret_key=langfuse_secret_key,
             langfuse_host=langfuse_host,
             streaming_provider=streaming_provider,
+            hardware_profile=hardware_profile,
         ):
             success_count += 1
 

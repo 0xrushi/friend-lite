@@ -666,7 +666,7 @@ def main():
     parser.add_argument("--model", help="Model identifier (HuggingFace repo or path)")
     parser.add_argument(
         "--pytorch-cuda-version",
-        choices=["cu121", "cu126", "cu128"],
+        choices=["cu121", "cu126", "cu128", "strixhalo"],
         help="PyTorch CUDA version",
     )
 
