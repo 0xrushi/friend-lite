@@ -30,7 +30,7 @@ async def audio_streaming_persistence_job(
     client_id: str,
     always_persist: bool = False,
     *,
-    redis_client=None
+    redis_client=None,
 ) -> Dict[str, Any]:
     """
     Long-running RQ job that stores audio chunks in MongoDB with Opus compression.
@@ -57,7 +57,9 @@ async def audio_streaming_persistence_job(
           cross-process config cache issues.
     """
 
-    logger.info(f"🎵 Starting MongoDB audio persistence for session {session_id} (always_persist={always_persist})")
+    logger.info(
+        f"🎵 Starting MongoDB audio persistence for session {session_id} (always_persist={always_persist})"
+    )
 
     # Setup audio persistence consumer group (separate from transcription consumer)
     audio_stream_name = f"audio:stream:{client_id}"
@@ -66,12 +68,11 @@ async def audio_streaming_persistence_job(
 
     try:
         await redis_client.xgroup_create(
-            audio_stream_name,
-            audio_group_name,
-            "0",
-            mkstream=True
+            audio_stream_name, audio_group_name, "0", mkstream=True
         )
-        logger.info(f"📦 Created audio persistence consumer group for {audio_stream_name}")
+        logger.info(
+            f"📦 Created audio persistence consumer group for {audio_stream_name}"
+        )
     except Exception as e:
         if "BUSYGROUP" not in str(e):
             logger.warning(f"Failed to create audio consumer group: {e}")
@@ -90,6 +91,7 @@ async def audio_streaming_persistence_job(
         if existing_conversation_id:
             existing_id_str = existing_conversation_id.decode()
             from advanced_omi_backend.models.conversation import Conversation
+
             existing_conv = await Conversation.find_one(
                 Conversation.conversation_id == existing_id_str
             )
@@ -118,15 +120,13 @@ async def audio_streaming_persistence_job(
                 transcript_versions=[],
                 memory_versions=[],
                 processing_status="pending_transcription",
-                always_persist=True
+                always_persist=True,
             )
             await conversation.insert()
 
             # Set conversation:current Redis key
             await redis_client.set(
-                conversation_key,
-                conversation.conversation_id,
-                ex=3600  # 1 hour expiry
+                conversation_key, conversation.conversation_id, ex=3600  # 1 hour expiry
             )
 
             logger.info(
@@ -185,6 +185,7 @@ async def audio_streaming_persistence_job(
     from rq import get_current_job
 
     from advanced_omi_backend.utils.job_utils import check_job_alive
+
     current_job = get_current_job()
 
     async def flush_pcm_buffer() -> bool:
@@ -207,7 +208,7 @@ async def audio_streaming_persistence_job(
                 pcm_data=bytes(pcm_buffer),
                 sample_rate=SAMPLE_RATE,
                 channels=CHANNELS,
-                bitrate=24  # 24kbps for speech
+                bitrate=24,  # 24kbps for speech
             )
 
             # Calculate chunk metadata
@@ -247,7 +248,9 @@ async def audio_streaming_persistence_job(
                 # Calculate running totals
                 chunk_count = chunk_index + 1
                 total_duration = end_time
-                compression_ratio = compressed_size / original_size if original_size > 0 else 0.0
+                compression_ratio = (
+                    compressed_size / original_size if original_size > 0 else 0.0
+                )
 
                 # Update conversation fields
                 conversation.audio_chunks_count = chunk_count
@@ -271,7 +274,9 @@ async def audio_streaming_persistence_job(
             return True
 
         except Exception as e:
-            logger.error(f"❌ Failed to save audio chunk {chunk_index}: {e}", exc_info=True)
+            logger.error(
+                f"❌ Failed to save audio chunk {chunk_index}: {e}", exc_info=True
+            )
             return False
 
     while True:
@@ -303,7 +308,7 @@ async def audio_streaming_persistence_job(
                     audio_consumer_name,
                     {audio_stream_name: ">"},
                     count=50,
-                    block=500
+                    block=500,
                 )
 
                 if final_messages:
@@ -322,9 +327,13 @@ async def audio_streaming_persistence_job(
                                         chunk_index += 1
                                         chunk_start_time += CHUNK_DURATION_SECONDS
 
-                            await redis_client.xack(audio_stream_name, audio_group_name, message_id)
+                            await redis_client.xack(
+                                audio_stream_name, audio_group_name, message_id
+                            )
 
-                    logger.info(f"📦 Final read processed {len(final_messages[0][1])} messages")
+                    logger.info(
+                        f"📦 Final read processed {len(final_messages[0][1])} messages"
+                    )
 
             except Exception as e:
                 logger.debug(f"Final audio read error (non-fatal): {e}")
@@ -377,7 +386,11 @@ async def audio_streaming_persistence_job(
             if current_conversation_id and len(pcm_buffer) > 0:
                 # Flush final partial chunk
                 await flush_pcm_buffer()
-                duration = (time.time() - conversation_start_time) if conversation_start_time else 0
+                duration = (
+                    (time.time() - conversation_start_time)
+                    if conversation_start_time
+                    else 0
+                )
                 logger.info(
                     f"✅ Conversation {current_conversation_id[:12]} ended: "
                     f"{chunk_index + 1} chunks, {duration:.1f}s"
@@ -399,7 +412,7 @@ async def audio_streaming_persistence_job(
                 audio_consumer_name,
                 {audio_stream_name: ">"},
                 count=20,  # Read up to 20 chunks at a time
-                block=100  # 100ms timeout
+                block=100,  # 100ms timeout
             )
 
             if audio_messages:
@@ -429,13 +442,17 @@ async def audio_streaming_persistence_job(
                                     chunk_start_time += CHUNK_DURATION_SECONDS
 
                         # ACK the message
-                        await redis_client.xack(audio_stream_name, audio_group_name, message_id)
+                        await redis_client.xack(
+                            audio_stream_name, audio_group_name, message_id
+                        )
 
             else:
                 # No new messages
                 if end_signal_received:
                     consecutive_empty_reads += 1
-                    logger.info(f"📭 No new messages ({consecutive_empty_reads}/{max_empty_reads})")
+                    logger.info(
+                        f"📭 No new messages ({consecutive_empty_reads}/{max_empty_reads})"
+                    )
 
                     if consecutive_empty_reads >= max_empty_reads:
                         logger.info(f"✅ Stream empty after END signal - stopping")
@@ -455,7 +472,9 @@ async def audio_streaming_persistence_job(
     # Calculate total duration
     if total_pcm_bytes > 0:
         duration = total_pcm_bytes / BYTES_PER_SECOND
-        compression_ratio = total_compressed_bytes / total_pcm_bytes if total_pcm_bytes > 0 else 0.0
+        compression_ratio = (
+            total_compressed_bytes / total_pcm_bytes if total_pcm_bytes > 0 else 0.0
+        )
     else:
         logger.warning(f"⚠️ No audio chunks written for session {session_id}")
         duration = 0.0
@@ -486,7 +505,7 @@ async def audio_streaming_persistence_job(
         "total_compressed_bytes": total_compressed_bytes,
         "compression_ratio": compression_ratio,
         "duration_seconds": duration,
-        "runtime_seconds": runtime_seconds
+        "runtime_seconds": runtime_seconds,
     }
 
 

@@ -34,6 +34,7 @@ from typing import Optional
 
 class TranscriptionProvider(Enum):
     """Available transcription providers for audio stream routing."""
+
     DEEPGRAM = "deepgram"
     PARAKEET = "parakeet"
 
@@ -93,7 +94,9 @@ class StreamingTranscriptionProvider(BaseTranscriptionProvider):
         return set()
 
     @abc.abstractmethod
-    async def start_stream(self, client_id: str, sample_rate: int = 16000, diarize: bool = False):
+    async def start_stream(
+        self, client_id: str, sample_rate: int = 16000, diarize: bool = False
+    ):
         """Start a transcription stream for a client.
 
         Args:
@@ -104,7 +107,9 @@ class StreamingTranscriptionProvider(BaseTranscriptionProvider):
         pass
 
     @abc.abstractmethod
-    async def process_audio_chunk(self, client_id: str, audio_chunk: bytes) -> Optional[dict]:
+    async def process_audio_chunk(
+        self, client_id: str, audio_chunk: bytes
+    ) -> Optional[dict]:
         """
         Process audio chunk and return partial/final transcription.
 
@@ -127,7 +132,14 @@ class BatchTranscriptionProvider(BaseTranscriptionProvider):
         return "batch"
 
     @abc.abstractmethod
-    async def transcribe(self, audio_data: bytes, sample_rate: int, diarize: bool = False, context_info: Optional[str] = None, **kwargs) -> dict:
+    async def transcribe(
+        self,
+        audio_data: bytes,
+        sample_rate: int,
+        diarize: bool = False,
+        context_info: Optional[str] = None,
+        **kwargs
+    ) -> dict:
         """Transcribe audio data.
 
         Args:

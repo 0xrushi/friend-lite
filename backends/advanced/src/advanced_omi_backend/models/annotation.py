@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 
 class AnnotationType(str, Enum):
     """Type of content being annotated."""
+
     MEMORY = "memory"
     TRANSCRIPT = "transcript"
     DIARIZATION = "diarization"  # Speaker identification corrections
@@ -26,12 +27,14 @@ class AnnotationType(str, Enum):
 
 class AnnotationSource(str, Enum):
     """Origin of the annotation."""
+
     USER = "user"  # User-created edit
     MODEL_SUGGESTION = "model_suggestion"  # AI-generated suggestion
 
 
 class AnnotationStatus(str, Enum):
     """Lifecycle status of annotation."""
+
     PENDING = "pending"  # Waiting for user review (suggestions)
     ACCEPTED = "accepted"  # Applied to content
     REJECTED = "rejected"  # User dismissed suggestion
@@ -86,17 +89,17 @@ class Annotation(Document):
     insert_speaker: Optional[str] = None  # Speaker label for "speech" type inserts
 
     # Processed tracking (applies to ALL annotation types)
-    processed: bool = Field(default=False)  # Whether annotation has been applied/sent to training
+    processed: bool = Field(
+        default=False
+    )  # Whether annotation has been applied/sent to training
     processed_at: Optional[datetime] = None  # When annotation was processed
-    processed_by: Optional[str] = None  # What processed it (manual, cron, apply, training, etc.)
+    processed_by: Optional[str] = (
+        None  # What processed it (manual, cron, apply, training, etc.)
+    )
 
     # Timestamps (Python 3.12+ compatible)
-    created_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc)
-    )
-    updated_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc)
-    )
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     class Settings:
         name = "annotations"
@@ -145,6 +148,7 @@ class Annotation(Document):
 
 class AnnotationCreateBase(BaseModel):
     """Base model for annotation creation."""
+
     original_text: str = ""  # Optional for diarization
     corrected_text: str = ""  # Optional for diarization
     status: AnnotationStatus = AnnotationStatus.ACCEPTED
@@ -152,6 +156,7 @@ class AnnotationCreateBase(BaseModel):
 
 class MemoryAnnotationCreate(AnnotationCreateBase):
     """Create memory annotation request."""
+
     memory_id: str
     original_text: str  # Required for memory annotations
     corrected_text: str  # Required for memory annotations
@@ -159,6 +164,7 @@ class MemoryAnnotationCreate(AnnotationCreateBase):
 
 class TranscriptAnnotationCreate(AnnotationCreateBase):
     """Create transcript annotation request."""
+
     conversation_id: str
     segment_index: int
     original_text: str  # Required for transcript annotations
@@ -167,6 +173,7 @@ class TranscriptAnnotationCreate(AnnotationCreateBase):
 
 class DiarizationAnnotationCreate(BaseModel):
     """Create diarization annotation request."""
+
     conversation_id: str
     segment_index: int
     original_speaker: str
@@ -181,6 +188,7 @@ class EntityAnnotationCreate(BaseModel):
     Dual purpose: feeds both the jargon pipeline (entity name corrections = domain vocabulary
     the ASR should know) and the entity extraction pipeline (corrections improve future accuracy).
     """
+
     entity_id: str
     entity_field: str  # "name" or "details"
     original_text: str
@@ -189,6 +197,7 @@ class EntityAnnotationCreate(BaseModel):
 
 class TitleAnnotationCreate(AnnotationCreateBase):
     """Create title annotation request."""
+
     conversation_id: str
     original_text: str
     corrected_text: str
@@ -196,6 +205,7 @@ class TitleAnnotationCreate(AnnotationCreateBase):
 
 class InsertAnnotationCreate(BaseModel):
     """Create insert annotation request (new segment between existing segments)."""
+
     conversation_id: str
     insert_after_index: int  # -1 = before first segment
     insert_text: str
@@ -205,6 +215,7 @@ class InsertAnnotationCreate(BaseModel):
 
 class AnnotationUpdate(BaseModel):
     """Update an existing unprocessed annotation."""
+
     corrected_text: Optional[str] = None
     corrected_speaker: Optional[str] = None
     insert_text: Optional[str] = None
@@ -214,6 +225,7 @@ class AnnotationUpdate(BaseModel):
 
 class AnnotationResponse(BaseModel):
     """Annotation response for API."""
+
     id: str
     annotation_type: AnnotationType
     user_id: str

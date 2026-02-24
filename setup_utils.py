@@ -63,10 +63,10 @@ def is_placeholder(value: str, *placeholder_variants: str) -> bool:
         return True
 
     # Normalize by replacing hyphens with underscores
-    normalized_value = value.replace('-', '_').lower()
+    normalized_value = value.replace("-", "_").lower()
 
     for placeholder in placeholder_variants:
-        normalized_placeholder = placeholder.replace('-', '_').lower()
+        normalized_placeholder = placeholder.replace("-", "_").lower()
         if normalized_value == normalized_placeholder:
             return True
 
@@ -126,9 +126,7 @@ def prompt_value(prompt_text: str, default: str = "") -> str:
 
 
 def prompt_password(
-    prompt_text: str,
-    min_length: int = 8,
-    allow_generated: bool = False
+    prompt_text: str, min_length: int = 8, allow_generated: bool = False
 ) -> str:
     """
     Prompt user for a password (hidden input).
@@ -171,7 +169,7 @@ def prompt_with_existing_masked(
     is_password: bool = False,
     default: str = "",
     env_file_path: Optional[str] = None,
-    env_key: Optional[str] = None
+    env_key: Optional[str] = None,
 ) -> str:
     """
     Prompt for a value, showing masked existing value if present.
@@ -228,15 +226,21 @@ def prompt_with_existing_masked(
         existing_value = read_env_value(env_file_path, env_key)
 
     # Check if we have a valid existing value (not a placeholder)
-    has_valid_existing = existing_value and not is_placeholder(existing_value, *placeholders)
+    has_valid_existing = existing_value and not is_placeholder(
+        existing_value, *placeholders
+    )
 
     if has_valid_existing:
         # Show masked value with option to reuse
         if is_password:
             masked = mask_value(existing_value)
-            display_prompt = f"{prompt_text} ({masked}) [press Enter to reuse, or enter new]"
+            display_prompt = (
+                f"{prompt_text} ({masked}) [press Enter to reuse, or enter new]"
+            )
         else:
-            display_prompt = f"{prompt_text} ({existing_value}) [press Enter to reuse, or enter new]"
+            display_prompt = (
+                f"{prompt_text} ({existing_value}) [press Enter to reuse, or enter new]"
+            )
 
         if is_password:
             user_input = prompt_password(display_prompt, min_length=0)
@@ -255,11 +259,12 @@ def prompt_with_existing_masked(
 
 # Convenience functions for common patterns
 
+
 def prompt_api_key(
     service_name: str,
     env_file_path: str = ".env",
     env_key: Optional[str] = None,
-    placeholders: Optional[List[str]] = None
+    placeholders: Optional[List[str]] = None,
 ) -> str:
     """
     Convenience function for prompting API keys.
@@ -278,9 +283,9 @@ def prompt_api_key(
     """
     env_key = env_key or f"{service_name.upper().replace(' ', '_')}_API_KEY"
     placeholders = placeholders or [
-        'your-api-key-here',
-        'your_api_key_here',
-        f'your-{service_name.lower()}-key-here'
+        "your-api-key-here",
+        "your_api_key_here",
+        f"your-{service_name.lower()}-key-here",
     ]
 
     return prompt_with_existing_masked(
@@ -288,7 +293,7 @@ def prompt_api_key(
         env_file_path=env_file_path,
         env_key=env_key,
         placeholders=placeholders,
-        is_password=True
+        is_password=True,
     )
 
 
@@ -296,7 +301,7 @@ def prompt_token(
     service_name: str,
     env_file_path: str = ".env",
     env_key: Optional[str] = None,
-    placeholders: Optional[List[str]] = None
+    placeholders: Optional[List[str]] = None,
 ) -> str:
     """
     Convenience function for prompting authentication tokens.
@@ -315,9 +320,9 @@ def prompt_token(
     """
     env_key = env_key or f"{service_name.upper().replace(' ', '_')}_TOKEN"
     placeholders = placeholders or [
-        'your-token-here',
-        'your_token_here',
-        f'your-{service_name.lower()}-token-here'
+        "your-token-here",
+        "your_token_here",
+        f"your-{service_name.lower()}-token-here",
     ]
 
     return prompt_with_existing_masked(
@@ -325,7 +330,7 @@ def prompt_token(
         env_file_path=env_file_path,
         env_key=env_key,
         placeholders=placeholders,
-        is_password=True
+        is_password=True,
     )
 
 
@@ -344,10 +349,7 @@ def detect_tailscale_info() -> Tuple[Optional[str], Optional[str]]:
     # Get MagicDNS name from tailscale status --json
     try:
         result = subprocess.run(
-            ["tailscale", "status", "--json"],
-            capture_output=True,
-            text=True,
-            timeout=5
+            ["tailscale", "status", "--json"], capture_output=True, text=True, timeout=5
         )
         if result.returncode == 0:
             status = json.loads(result.stdout)
@@ -361,10 +363,7 @@ def detect_tailscale_info() -> Tuple[Optional[str], Optional[str]]:
     # Get IPv4 address as fallback
     try:
         result = subprocess.run(
-            ["tailscale", "ip", "-4"],
-            capture_output=True,
-            text=True,
-            timeout=5
+            ["tailscale", "ip", "-4"], capture_output=True, text=True, timeout=5
         )
         if result.returncode == 0:
             ip = result.stdout.strip()
@@ -388,13 +387,10 @@ def detect_cuda_version(default: str = "cu126") -> str:
     """
     try:
         result = subprocess.run(
-            ["nvidia-smi"],
-            capture_output=True,
-            text=True,
-            timeout=5
+            ["nvidia-smi"], capture_output=True, text=True, timeout=5
         )
         if result.returncode == 0:
-            match = re.search(r'CUDA Version:\s*(\d+)\.(\d+)', result.stdout)
+            match = re.search(r"CUDA Version:\s*(\d+)\.(\d+)", result.stdout)
             if match:
                 major, minor = int(match.group(1)), int(match.group(2))
                 if (major, minor) >= (12, 8):

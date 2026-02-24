@@ -114,7 +114,9 @@ class ObsidianService:
 
         embed_config = get_model_config(config_data, "embedding")
         if not embed_config:
-            raise ValueError("Configuration for 'defaults.embedding' not found in config.yml")
+            raise ValueError(
+                "Configuration for 'defaults.embedding' not found in config.yml"
+            )
 
         # Neo4j Connection - Prefer environment variables passed by Docker Compose
         neo4j_host = os.getenv("NEO4J_HOST")
@@ -142,18 +144,24 @@ class ObsidianService:
 
         self.neo4j_uri = f"bolt://{neo4j_host}:7687"
         self.neo4j_user = os.getenv("NEO4J_USER") or env_data.get("NEO4J_USER", "neo4j")
-        self.neo4j_password = os.getenv("NEO4J_PASSWORD") or env_data.get("NEO4J_PASSWORD", "")
+        self.neo4j_password = os.getenv("NEO4J_PASSWORD") or env_data.get(
+            "NEO4J_PASSWORD", ""
+        )
 
         # Models / API - Loaded strictly from config.yml
         self.embedding_model = str(resolve_value(embed_config["model_name"]))
-        self.embedding_dimensions = int(resolve_value(embed_config["embedding_dimensions"]))
+        self.embedding_dimensions = int(
+            resolve_value(embed_config["embedding_dimensions"])
+        )
         self.openai_base_url = str(resolve_value(llm_config["model_url"]))
         self.openai_api_key = str(resolve_value(llm_config["api_key"]))
 
         # Chunking - uses shared spaCy/text fallback utility
         self.chunk_word_limit = 120
 
-        self.neo4j_client = Neo4jClient(self.neo4j_uri, self.neo4j_user, self.neo4j_password)
+        self.neo4j_client = Neo4jClient(
+            self.neo4j_uri, self.neo4j_user, self.neo4j_password
+        )
         self.read_interface = Neo4jReadInterface(self.neo4j_client)
         self.write_interface = Neo4jWriteInterface(self.neo4j_client)
 
@@ -191,7 +199,9 @@ class ObsidianService:
         """Normalize whitespace for embedding inputs."""
         return re.sub(r"\s+", " ", text).strip()
 
-    def parse_obsidian_note(self, root: str, filename: str, vault_path: str) -> NoteData:
+    def parse_obsidian_note(
+        self, root: str, filename: str, vault_path: str
+    ) -> NoteData:
         """Parse an Obsidian markdown file and extract metadata.
 
         Args:
@@ -284,7 +294,9 @@ class ObsidianService:
                 model=self.embedding_model,
             )
         except Exception as e:
-            logger.exception(f"Embedding generation failed for {note_data['path']}: {e}")
+            logger.exception(
+                f"Embedding generation failed for {note_data['path']}: {e}"
+            )
             return []
 
         chunk_payloads: List[ChunkPayload] = []
@@ -296,7 +308,9 @@ class ObsidianService:
 
         return chunk_payloads
 
-    def ingest_note_and_chunks(self, note_data: NoteData, chunks: List[ChunkPayload]) -> None:
+    def ingest_note_and_chunks(
+        self, note_data: NoteData, chunks: List[ChunkPayload]
+    ) -> None:
         """Store note and chunks in Neo4j with relationships to folders, tags, and links.
 
         Args:
@@ -416,15 +430,15 @@ class ObsidianService:
         cypher_query = """
         CALL db.index.vector.queryNodes('chunk_embeddings', $limit, $vector)
         YIELD node AS chunk, score
-        
+
         // Find the parent Note
         MATCH (note:Note)-[:HAS_CHUNK]->(chunk)
-        
+
         // Get graph context: What tags and linked files are around this note?
         OPTIONAL MATCH (note)-[:HAS_TAG]->(t:Tag)
         OPTIONAL MATCH (note)-[:LINKS_TO]->(linked:Note)
-        
-        RETURN 
+
+        RETURN
             note.name AS source,
             chunk.text AS content,
             collect(DISTINCT t.name) AS tags,

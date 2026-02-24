@@ -56,7 +56,7 @@ export default function Layout() {
                   <span>{user?.name || user?.email}</span>
                 </div>
               </div>
-              
+
               <button
                 onClick={logout}
                 className="flex items-center space-x-2 px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-gray-600 dark:text-gray-300"

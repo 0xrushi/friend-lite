@@ -40,21 +40,21 @@ export const BackendStatus: React.FC<BackendStatusProps> = ({
     try {
       // Convert WebSocket URL to HTTP URL for health check
       let baseUrl = backendUrl.trim();
-      
+
       // Handle different URL formats
       if (baseUrl.startsWith('ws://')) {
         baseUrl = baseUrl.replace('ws://', 'http://');
       } else if (baseUrl.startsWith('wss://')) {
         baseUrl = baseUrl.replace('wss://', 'https://');
       }
-      
+
       // Remove any WebSocket path if present
       baseUrl = baseUrl.split('/ws')[0];
-      
+
       // Try health endpoint first
       const healthUrl = `${baseUrl}/health`;
       console.log('[BackendStatus] Checking health at:', healthUrl);
-      
+
       const response = await fetch(healthUrl, {
         method: 'GET',
         headers: {
@@ -63,7 +63,7 @@ export const BackendStatus: React.FC<BackendStatusProps> = ({
           ...(jwtToken ? { 'Authorization': `Bearer ${jwtToken}` } : {}),
         },
       });
-      
+
       console.log('[BackendStatus] Health check response status:', response.status);
 
       if (response.ok) {
@@ -73,7 +73,7 @@ export const BackendStatus: React.FC<BackendStatusProps> = ({
           message: `Connected (${healthData.status || 'OK'})`,
           lastChecked: new Date(),
         });
-        
+
         if (showAlert) {
           Alert.alert('Connection Success', 'Successfully connected to backend!');
         }
@@ -83,7 +83,7 @@ export const BackendStatus: React.FC<BackendStatusProps> = ({
           message: 'Authentication required',
           lastChecked: new Date(),
         });
-        
+
         if (showAlert) {
           Alert.alert('Authentication Required', 'Please login to access the backend.');
         }
@@ -92,7 +92,7 @@ export const BackendStatus: React.FC<BackendStatusProps> = ({
       }
     } catch (error) {
       console.error('[BackendStatus] Health check error:', error);
-      
+
       let errorMessage = 'Connection failed';
       if (error instanceof Error) {
         if (error.message.includes('Network request failed')) {
@@ -103,13 +103,13 @@ export const BackendStatus: React.FC<BackendStatusProps> = ({
           errorMessage = error.message;
         }
       }
-      
+
       setHealthStatus({
         status: 'unhealthy',
         message: errorMessage,
         lastChecked: new Date(),
       });
-      
+
       if (showAlert) {
         Alert.alert(
           'Connection Failed',
@@ -125,7 +125,7 @@ export const BackendStatus: React.FC<BackendStatusProps> = ({
       const timer = setTimeout(() => {
         checkBackendHealth(false);
       }, 500); // Debounce
-      
+
       return () => clearTimeout(timer);
     }
   }, [backendUrl, jwtToken]);
@@ -163,7 +163,7 @@ export const BackendStatus: React.FC<BackendStatusProps> = ({
   return (
     <View style={styles.section}>
       <Text style={styles.sectionTitle}>Backend Connection</Text>
-      
+
       <Text style={styles.inputLabel}>Backend URL:</Text>
       <TextInput
         style={styles.textInput}

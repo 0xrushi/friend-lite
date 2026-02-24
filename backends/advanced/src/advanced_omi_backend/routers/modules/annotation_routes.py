@@ -85,11 +85,15 @@ async def create_memory_annotation(
                     content=annotation_data.corrected_text,
                     user_id=current_user.user_id,
                 )
-                logger.info(f"Updated memory {annotation_data.memory_id} with corrected text")
+                logger.info(
+                    f"Updated memory {annotation_data.memory_id} with corrected text"
+                )
             except Exception as e:
                 logger.error(f"Error updating memory: {e}")
                 # Annotation is saved, but memory update failed - log but don't fail the request
-                logger.warning(f"Memory annotation {annotation.id} saved but memory update failed")
+                logger.warning(
+                    f"Memory annotation {annotation.id} saved but memory update failed"
+                )
 
         return AnnotationResponse.model_validate(annotation)
 
@@ -237,7 +241,10 @@ async def update_annotation_status(
         annotation.updated_at = datetime.now(timezone.utc)
 
         # If accepting a pending suggestion, apply the correction
-        if status == AnnotationStatus.ACCEPTED and old_status == AnnotationStatus.PENDING:
+        if (
+            status == AnnotationStatus.ACCEPTED
+            and old_status == AnnotationStatus.PENDING
+        ):
             if annotation.is_memory_annotation():
                 # Update memory
                 try:
@@ -260,7 +267,9 @@ async def update_annotation_status(
                     )
                     if conversation:
                         transcript = conversation.active_transcript
-                        if transcript and annotation.segment_index < len(transcript.segments):
+                        if transcript and annotation.segment_index < len(
+                            transcript.segments
+                        ):
                             transcript.segments[annotation.segment_index].text = (
                                 annotation.corrected_text
                             )
@@ -286,7 +295,9 @@ async def update_annotation_status(
                             user_id=annotation.user_id,
                             **update_kwargs,
                         )
-                        logger.info(f"Applied entity suggestion to entity {annotation.entity_id}")
+                        logger.info(
+                            f"Applied entity suggestion to entity {annotation.entity_id}"
+                        )
                 except Exception as e:
                     logger.error(f"Error applying entity suggestion: {e}")
                     # Don't fail the status update if entity update fails
@@ -310,7 +321,11 @@ async def update_annotation_status(
         await annotation.save()
         logger.info(f"Updated annotation {annotation_id} status to {status}")
 
-        return {"status": "updated", "annotation_id": annotation_id, "new_status": status}
+        return {
+            "status": "updated",
+            "annotation_id": annotation_id,
+            "new_status": status,
+        }
 
     except HTTPException:
         raise
@@ -345,7 +360,9 @@ async def delete_annotation(
             raise HTTPException(status_code=404, detail="Annotation not found")
 
         if annotation.processed:
-            raise HTTPException(status_code=400, detail="Cannot delete a processed annotation")
+            raise HTTPException(
+                status_code=400, detail="Cannot delete a processed annotation"
+            )
 
         await annotation.delete()
         logger.info(f"Deleted annotation {annotation_id}")
@@ -384,7 +401,9 @@ async def update_annotation(
             raise HTTPException(status_code=404, detail="Annotation not found")
 
         if annotation.processed:
-            raise HTTPException(status_code=400, detail="Cannot update a processed annotation")
+            raise HTTPException(
+                status_code=400, detail="Cannot update a processed annotation"
+            )
 
         if update_data.corrected_text is not None:
             annotation.corrected_text = update_data.corrected_text
@@ -441,7 +460,10 @@ async def create_insert_annotation(
             raise HTTPException(status_code=400, detail="No active transcript found")
 
         segment_count = len(active_transcript.segments)
-        if annotation_data.insert_after_index < -1 or annotation_data.insert_after_index >= segment_count:
+        if (
+            annotation_data.insert_after_index < -1
+            or annotation_data.insert_after_index >= segment_count
+        ):
             raise HTTPException(
                 status_code=400,
                 detail=f"insert_after_index must be between -1 and {segment_count - 1}",
@@ -572,7 +594,9 @@ async def create_entity_annotation(
                 user_id=current_user.user_id,
                 **update_kwargs,
             )
-            logger.info(f"Applied entity correction to Neo4j for entity {annotation_data.entity_id}")
+            logger.info(
+                f"Applied entity correction to Neo4j for entity {annotation_data.entity_id}"
+            )
         except Exception as e:
             logger.error(f"Error applying entity correction to Neo4j: {e}")
             # Annotation is saved but Neo4j update failed — log but don't fail the request
@@ -657,7 +681,9 @@ async def create_title_annotation(
         try:
             conversation.title = annotation_data.corrected_text
             await conversation.save()
-            logger.info(f"Updated title for conversation {annotation_data.conversation_id}")
+            logger.info(
+                f"Updated title for conversation {annotation_data.conversation_id}"
+            )
         except Exception as e:
             logger.error(f"Error updating conversation title: {e}")
             # Annotation is saved but title update failed — log but don't fail the request
@@ -695,7 +721,6 @@ async def get_title_annotations(
             status_code=500,
             detail=f"Failed to fetch title annotations: {str(e)}",
         )
-
 
 
 # === Diarization Annotation Routes ===
@@ -817,7 +842,10 @@ async def apply_diarization_annotations(
 
         if not annotations:
             return JSONResponse(
-                content={"message": "No pending annotations to apply", "applied_count": 0}
+                content={
+                    "message": "No pending annotations to apply",
+                    "applied_count": 0,
+                }
             )
 
         # Get active transcript version
@@ -839,7 +867,9 @@ async def apply_diarization_annotations(
                 key=lambda a: a.updated_at,
                 reverse=True,
             )
-            annotation_for_segment = annotations_for_segment[0] if annotations_for_segment else None
+            annotation_for_segment = (
+                annotations_for_segment[0] if annotations_for_segment else None
+            )
 
             if annotation_for_segment:
                 # Apply correction

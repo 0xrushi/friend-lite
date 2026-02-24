@@ -4,10 +4,13 @@ Hourly Recap Plugin for Chronicle.
 On OMI device double-click, queries the last hour's conversations,
 generates a consolidated LLM recap, and emails it to the user.
 """
+
 import html
 import logging
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
+
+from email_summarizer.email_service import SMTPEmailService
 
 from advanced_omi_backend.database import get_database
 from advanced_omi_backend.llm_client import async_generate
@@ -15,7 +18,6 @@ from advanced_omi_backend.models.conversation import Conversation
 from advanced_omi_backend.plugins.base import BasePlugin, PluginContext, PluginResult
 from advanced_omi_backend.plugins.events import PluginEvent
 from advanced_omi_backend.utils.logging_utils import mask_dict
-from email_summarizer.email_service import SMTPEmailService
 
 logger = logging.getLogger(__name__)
 
@@ -124,8 +126,16 @@ class HourlyRecapPlugin(BasePlugin):
             success = await self.email_service.test_connection()
             latency_ms = int((time.time() - start) * 1000)
             if success:
-                return {"ok": True, "message": "SMTP connected", "latency_ms": latency_ms}
-            return {"ok": False, "message": "SMTP connection failed", "latency_ms": latency_ms}
+                return {
+                    "ok": True,
+                    "message": "SMTP connected",
+                    "latency_ms": latency_ms,
+                }
+            return {
+                "ok": False,
+                "message": "SMTP connection failed",
+                "latency_ms": latency_ms,
+            }
         except Exception as e:
             return {"ok": False, "message": str(e)}
 
@@ -306,9 +316,7 @@ class HourlyRecapPlugin(BasePlugin):
         now = datetime.utcnow().strftime("%b %d, %Y at %I:%M %p")
         return f"{self.subject_prefix} - {now}"
 
-    def _format_html(
-        self, recap: str, conversations: List[Conversation]
-    ) -> str:
+    def _format_html(self, recap: str, conversations: List[Conversation]) -> str:
         """Format HTML email body."""
         now_str = datetime.utcnow().strftime("%B %d, %Y at %I:%M %p")
         recap_escaped = html.escape(recap, quote=True).replace("\n", "<br>")
@@ -317,9 +325,7 @@ class HourlyRecapPlugin(BasePlugin):
         conv_items = ""
         for conv in conversations:
             title = html.escape(conv.title or "Untitled", quote=True)
-            created = (
-                conv.created_at.strftime("%I:%M %p") if conv.created_at else "N/A"
-            )
+            created = conv.created_at.strftime("%I:%M %p") if conv.created_at else "N/A"
             duration = (
                 f"{int(conv.audio_total_duration // 60)}m {int(conv.audio_total_duration % 60)}s"
                 if conv.audio_total_duration
@@ -418,18 +424,14 @@ class HourlyRecapPlugin(BasePlugin):
 </html>
 """
 
-    def _format_text(
-        self, recap: str, conversations: List[Conversation]
-    ) -> str:
+    def _format_text(self, recap: str, conversations: List[Conversation]) -> str:
         """Format plain text email body."""
         now_str = datetime.utcnow().strftime("%B %d, %Y at %I:%M %p")
 
         conv_lines = []
         for i, conv in enumerate(conversations, 1):
             title = conv.title or "Untitled"
-            created = (
-                conv.created_at.strftime("%I:%M %p") if conv.created_at else "N/A"
-            )
+            created = conv.created_at.strftime("%I:%M %p") if conv.created_at else "N/A"
             duration = (
                 f"{int(conv.audio_total_duration // 60)}m {int(conv.audio_total_duration % 60)}s"
                 if conv.audio_total_duration
@@ -471,7 +473,12 @@ https://github.com/chronicle-ai/chronicle
         import time
 
         try:
-            required_fields = ["smtp_host", "smtp_username", "smtp_password", "from_email"]
+            required_fields = [
+                "smtp_host",
+                "smtp_username",
+                "smtp_password",
+                "from_email",
+            ]
             missing_fields = [f for f in required_fields if not config.get(f)]
 
             if missing_fields:

@@ -6,20 +6,19 @@
 - Forwards audio to backend
 """
 
-import os
 import argparse
 import asyncio
 import logging
+import os
 import pathlib
-from typing import Optional
 import random
+from typing import Optional
 
-import numpy as np
 import httpx
-from wyoming.audio import AudioChunk
-
+import numpy as np
 from easy_audio_interfaces import RollingFileSink
-from easy_audio_interfaces.network.network_interfaces import TCPServer, SocketClient
+from easy_audio_interfaces.network.network_interfaces import SocketClient, TCPServer
+from wyoming.audio import AudioChunk
 from wyoming.client import AsyncClient
 
 DEFAULT_PORT = 8989
@@ -28,7 +27,7 @@ CHANNELS = 1
 SAMP_WIDTH = 2  # bytes (16-bit)
 RECONNECT_DELAY = 5  # seconds
 
-# Authentication configuration 
+# Authentication configuration
 # The below two are deliberately different so that someone who wants to skip auth with simple-backend can do so
 BACKEND_URL = "http://host.docker.internal:8000"  # Backend API URL
 BACKEND_WS_URL = "ws://host.docker.internal:8000"  # Backend WebSocket URL
@@ -40,16 +39,18 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-async def exponential_backoff_sleep(attempt: int, base_delay: float = 1.0, max_delay: float = 30.0) -> None:
+async def exponential_backoff_sleep(
+    attempt: int, base_delay: float = 1.0, max_delay: float = 30.0
+) -> None:
     """
     Sleep with exponential backoff and jitter.
-    
+
     Args:
         attempt: Current attempt number (0-based)
         base_delay: Base delay in seconds
         max_delay: Maximum delay in seconds
     """
-    delay = min(base_delay * (2 ** attempt), max_delay)
+    delay = min(base_delay * (2**attempt), max_delay)
     # Add jitter to prevent thundering herd
     jitter = random.uniform(0.1, 0.3) * delay
     total_delay = delay + jitter
@@ -57,32 +58,34 @@ async def exponential_backoff_sleep(attempt: int, base_delay: float = 1.0, max_d
     await asyncio.sleep(total_delay)
 
 
-async def get_jwt_token(username: str, password: str, backend_url: str) -> Optional[str]:
+async def get_jwt_token(
+    username: str, password: str, backend_url: str
+) -> Optional[str]:
     """
     Get JWT token from backend using username and password.
-    
+
     Args:
         username: User email/username
         password: User password
         backend_url: Backend API URL
-        
+
     Returns:
         JWT token string or None if authentication failed
     """
     try:
         logger.info(f"🔐 Authenticating with backend as: {username}")
-        
+
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.post(
                 f"{backend_url}/auth/jwt/login",
-                data={'username': username, 'password': password},
-                headers={'Content-Type': 'application/x-www-form-urlencoded'}
+                data={"username": username, "password": password},
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
             )
-        
+
         if response.status_code == 200:
             auth_data = response.json()
-            token = auth_data.get('access_token')
-            
+            token = auth_data.get("access_token")
+
             if token:
                 logger.info("✅ JWT authentication successful")
                 return token
@@ -93,12 +96,12 @@ async def get_jwt_token(username: str, password: str, backend_url: str) -> Optio
             error_msg = "Invalid credentials"
             try:
                 error_data = response.json()
-                error_msg = error_data.get('detail', error_msg)
+                error_msg = error_data.get("detail", error_msg)
             except:
                 pass
             logger.error(f"❌ Authentication failed: {error_msg}")
             return None
-            
+
     except httpx.TimeoutException:
         logger.error("❌ Authentication request timed out")
         return None
@@ -110,15 +113,17 @@ async def get_jwt_token(username: str, password: str, backend_url: str) -> Optio
         return None
 
 
-def create_authenticated_websocket_uri(base_ws_url: str, client_id: str, jwt_token: str) -> str:
+def create_authenticated_websocket_uri(
+    base_ws_url: str, client_id: str, jwt_token: str
+) -> str:
     """
     Create WebSocket URI with JWT authentication.
-    
+
     Args:
         base_ws_url: Base WebSocket URL (e.g., "ws://localhost:8000")
         client_id: Client ID for the connection (not used in URL anymore)
         jwt_token: JWT token for authentication
-        
+
     Returns:
         Authenticated WebSocket URI
     """
@@ -126,33 +131,34 @@ def create_authenticated_websocket_uri(base_ws_url: str, client_id: str, jwt_tok
 
 
 async def get_authenticated_socket_client(
-    backend_url: str, 
-    backend_ws_url: str, 
-    username: str, 
-    password: str
+    backend_url: str, backend_ws_url: str, username: str, password: str
 ) -> Optional[SocketClient]:
     """
     Create an authenticated WebSocket client for the backend.
-    
+
     Args:
         backend_url: Backend API URL for authentication
         backend_ws_url: Backend WebSocket URL
         username: Authentication username (email or user_id)
         password: Authentication password
-        
+
     Returns:
         Authenticated SocketClient or None if authentication failed
     """
     # Get JWT token
     jwt_token = await get_jwt_token(username, password, backend_url)
     if not jwt_token:
-        logger.error("Failed to get JWT token, cannot create authenticated WebSocket client")
+        logger.error(
+            "Failed to get JWT token, cannot create authenticated WebSocket client"
+        )
         return None
-    
+
     # Create authenticated WebSocket URI (client_id will be generated by backend)
     ws_uri = create_authenticated_websocket_uri(backend_ws_url, "", jwt_token)
-    logger.info(f"🔗 Creating WebSocket connection to: {backend_ws_url}/ws?codec=pcm&token={jwt_token[:20]}...&device_name={DEVICE_NAME}")
-    
+    logger.info(
+        f"🔗 Creating WebSocket connection to: {backend_ws_url}/ws?codec=pcm&token={jwt_token[:20]}...&device_name={DEVICE_NAME}"
+    )
+
     # Create socket client
     return SocketClient(uri=ws_uri)
 
@@ -241,7 +247,9 @@ async def ensure_socket_connection(socket_client: SocketClient) -> bool:
     max_retries = 3
     for attempt in range(max_retries):
         try:
-            logger.info(f"Attempting to connect to authenticated WebSocket (attempt {attempt + 1}/{max_retries})...")
+            logger.info(
+                f"Attempting to connect to authenticated WebSocket (attempt {attempt + 1}/{max_retries})..."
+            )
             await socket_client.open()
             logger.info("✅ Authenticated WebSocket connection established")
             return True
@@ -260,18 +268,18 @@ async def create_and_connect_socket_client() -> Optional[SocketClient]:
     if not AUTH_USERNAME:
         logger.error("❌ AUTH_USERNAME is required for authentication")
         return None
-    
+
     socket_client = await get_authenticated_socket_client(
         backend_url=BACKEND_URL,
         backend_ws_url=BACKEND_WS_URL,
         username=str(AUTH_USERNAME),
-        password=str(AUTH_PASSWORD)
+        password=str(AUTH_PASSWORD),
     )
-    
+
     if not socket_client:
         logger.error("❌ Failed to create authenticated socket client")
         return None
-    
+
     # Try to connect
     if await ensure_socket_connection(socket_client):
         return socket_client
@@ -280,10 +288,12 @@ async def create_and_connect_socket_client() -> Optional[SocketClient]:
         return None
 
 
-async def send_with_retry(socket_client: SocketClient, chunk: AudioChunk) -> tuple[bool, bool]:
+async def send_with_retry(
+    socket_client: SocketClient, chunk: AudioChunk
+) -> tuple[bool, bool]:
     """
     Send chunk with retry logic.
-    
+
     Returns:
         Tuple of (success, needs_reconnect)
         - success: True if chunk was sent successfully
@@ -296,34 +306,36 @@ async def send_with_retry(socket_client: SocketClient, chunk: AudioChunk) -> tup
             return True, False  # Success, no reconnect needed
         except Exception as e:
             error_str = str(e).lower()
-            
+
             # Check for authentication-related errors
-            if any(auth_err in error_str for auth_err in ['401', 'unauthorized', 'forbidden', 'authentication']):
+            if any(
+                auth_err in error_str
+                for auth_err in ["401", "unauthorized", "forbidden", "authentication"]
+            ):
                 logger.warning(f"❌ Authentication error detected: {e}")
                 return False, True  # Failed, needs new auth token
-            
+
             logger.warning(f"⚠️ Failed to send chunk (attempt {attempt + 1}): {e}")
             if attempt < max_retries - 1:
                 if await ensure_socket_connection(socket_client):
                     continue  # Try again with reconnected client
                 else:
-                    logger.warning("🔄 Connection failed, will need fresh authentication")
+                    logger.warning(
+                        "🔄 Connection failed, will need fresh authentication"
+                    )
                     return False, True  # Connection failed, try new auth
             else:
                 logger.error("❌ Failed to send chunk after all retries")
                 return False, True  # Failed after retries, try new auth
-    
+
     return False, True
 
 
-
-
-
 async def process_esp32_audio(
-    esp32_server: ESP32TCPServer, 
+    esp32_server: ESP32TCPServer,
     socket_client: Optional[SocketClient] = None,
     asr_client: Optional[AsyncClient] = None,
-    file_sink: Optional[RollingFileSink] = None
+    file_sink: Optional[RollingFileSink] = None,
 ):
     """Process audio chunks from ESP32 server, save to file sink and send to authenticated backend."""
     if (not socket_client) and (not asr_client):
@@ -331,24 +343,29 @@ async def process_esp32_audio(
 
     try:
         import time
+
         start_time = time.time()
         logger.info("🎵 Starting to process ESP32 audio with authentication...")
         chunk_count = 0
         failed_sends = 0
         auth_failures = 0
         successful_sends = 0
-        
+
         async for chunk in esp32_server:
             chunk_count += 1
-            
+
             # Health logging every 1000 chunks (~30 seconds at 16kHz)
             if chunk_count % 1000 == 0:
                 elapsed = time.time() - start_time
                 uptime_mins = elapsed / 60
-                success_rate = (successful_sends / chunk_count * 100) if chunk_count > 0 else 0
-                logger.info(f"💓 Health: {uptime_mins:.1f}min uptime, {chunk_count} chunks, "
-                          f"{success_rate:.1f}% success, {auth_failures} auth failures")
-            
+                success_rate = (
+                    (successful_sends / chunk_count * 100) if chunk_count > 0 else 0
+                )
+                logger.info(
+                    f"💓 Health: {uptime_mins:.1f}min uptime, {chunk_count} chunks, "
+                    f"{success_rate:.1f}% success, {auth_failures} auth failures"
+                )
+
             if chunk_count % 100 == 1:  # Log every 100th chunk to reduce spam
                 logger.debug(
                     f"📦 Processed {chunk_count} chunks from ESP32, current chunk size: {len(chunk.audio)} bytes"
@@ -364,43 +381,55 @@ async def process_esp32_audio(
             # Send to authenticated backend
             if socket_client:
                 success, needs_reconnect = await send_with_retry(socket_client, chunk)
-                
+
                 if success:
                     successful_sends += 1
                     failed_sends = 0
                     auth_failures = 0
                 elif needs_reconnect:
                     auth_failures += 1
-                    logger.warning(f"🔄 Need to re-authenticate (failure #{auth_failures})")
-                    
+                    logger.warning(
+                        f"🔄 Need to re-authenticate (failure #{auth_failures})"
+                    )
+
                     # Create new authenticated client
                     new_socket_client = await create_and_connect_socket_client()
                     if new_socket_client:
                         socket_client = new_socket_client
                         logger.info("✅ Successfully re-authenticated and reconnected")
                         auth_failures = 0
-                        
+
                         # Retry sending this chunk with new client
                         retry_success, _ = await send_with_retry(socket_client, chunk)
                         if retry_success:
                             successful_sends += 1
-                            logger.debug("✅ Chunk sent successfully after re-authentication")
+                            logger.debug(
+                                "✅ Chunk sent successfully after re-authentication"
+                            )
                         else:
-                            logger.warning("⚠️ Failed to send chunk even after re-authentication")
+                            logger.warning(
+                                "⚠️ Failed to send chunk even after re-authentication"
+                            )
                     else:
-                        logger.error("❌ Failed to re-authenticate, will retry on next chunk")
+                        logger.error(
+                            "❌ Failed to re-authenticate, will retry on next chunk"
+                        )
                         if auth_failures > 5:
-                            logger.error("❌ Too many authentication failures, stopping audio processor")
+                            logger.error(
+                                "❌ Too many authentication failures, stopping audio processor"
+                            )
                             break
                 else:
                     failed_sends += 1
                     if failed_sends > 20:
-                        logger.error("❌ Too many consecutive send failures, stopping audio processor")
+                        logger.error(
+                            "❌ Too many consecutive send failures, stopping audio processor"
+                        )
                         break
 
             # Send to ASR (if implemented)
             # await asr_client.write_event(chunk.event())
-            
+
     except asyncio.CancelledError:
         logger.info("🛑 ESP32 audio processor cancelled")
         raise
@@ -429,10 +458,12 @@ async def run_audio_processor(args, esp32_file_sink):
             logger.info(f"🌐 Backend WebSocket: {BACKEND_WS_URL}")
             logger.info(f"👤 Auth Username: {AUTH_USERNAME}")
             logger.info(f"🔧 Device: {DEVICE_NAME}")
-            
+
             socket_client = await create_and_connect_socket_client()
             if not socket_client:
-                logger.error("❌ Failed to create authenticated WebSocket client, retrying...")
+                logger.error(
+                    "❌ Failed to create authenticated WebSocket client, retrying..."
+                )
                 await exponential_backoff_sleep(retry_attempt)
                 retry_attempt += 1
                 continue
@@ -444,14 +475,16 @@ async def run_audio_processor(args, esp32_file_sink):
             # Start ESP32 server
             async with esp32_server:
                 logger.info(f"🎧 ESP32 server listening on {args.host}:{args.port}")
-                logger.info("🎵 Starting authenticated audio recording and processing...")
+                logger.info(
+                    "🎵 Starting authenticated audio recording and processing..."
+                )
 
                 # Start audio processing task
                 await process_esp32_audio(
                     esp32_server,
                     socket_client,
                     asr_client=None,
-                    file_sink=esp32_file_sink
+                    file_sink=esp32_file_sink,
                 )
                 logger.info("🏁 Audio processing session ended")
 
@@ -468,8 +501,10 @@ async def run_audio_processor(args, esp32_file_sink):
 async def main():
     # Override global constants with command line arguments
     global BACKEND_URL, BACKEND_WS_URL, AUTH_USERNAME, AUTH_PASSWORD
-    
-    parser = argparse.ArgumentParser(description="TCP WAV recorder with ESP32 I²S swap detection and backend authentication")
+
+    parser = argparse.ArgumentParser(
+        description="TCP WAV recorder with ESP32 I²S swap detection and backend authentication"
+    )
     parser.add_argument(
         "--port",
         type=int,
@@ -512,18 +547,24 @@ async def main():
         default=BACKEND_WS_URL,
         help=f"Backend WebSocket URL (default: {BACKEND_WS_URL})",
     )
-    parser.add_argument("-v", "--verbose", action="count", default=0, help="-v: INFO, -vv: DEBUG")
-    parser.add_argument("--debug-audio", action="store_true", help="Debug audio recording")
+    parser.add_argument(
+        "-v", "--verbose", action="count", default=0, help="-v: INFO, -vv: DEBUG"
+    )
+    parser.add_argument(
+        "--debug-audio", action="store_true", help="Debug audio recording"
+    )
     args = parser.parse_args()
-    
+
     BACKEND_URL = args.backend_url
     BACKEND_WS_URL = args.backend_ws_url
     AUTH_USERNAME = args.username
     AUTH_PASSWORD = args.password
 
     loglevel = logging.WARNING - (10 * min(args.verbose, 2))
-    logging.basicConfig(format="%(asctime)s  %(levelname)s  %(message)s", level=loglevel)
-    
+    logging.basicConfig(
+        format="%(asctime)s  %(levelname)s  %(message)s", level=loglevel
+    )
+
     # Print startup banner with authentication info
     logger.info("🎵 ========================================")
     logger.info("🎵 Chronicle HAVPE Relay with Authentication")
@@ -535,20 +576,24 @@ async def main():
     logger.info(f"🔧 Device: {DEVICE_NAME}")
     logger.info(f"🔧 Debug Audio: {'Enabled' if args.debug_audio else 'Disabled'}")
     logger.info("🎵 ========================================")
-    
+
     # Test authentication on startup
     logger.info("🔐 Testing backend authentication...")
     try:
         if not AUTH_USERNAME or not AUTH_PASSWORD:
             logger.error("❌ Missing authentication credentials")
-            logger.error("💡 Set AUTH_USERNAME and AUTH_PASSWORD environment variables or use command line arguments")
+            logger.error(
+                "💡 Set AUTH_USERNAME and AUTH_PASSWORD environment variables or use command line arguments"
+            )
             return
         test_token = await get_jwt_token(AUTH_USERNAME, AUTH_PASSWORD, BACKEND_URL)
         if test_token:
             logger.info("✅ Authentication test successful! Ready to start.")
         else:
             logger.error("❌ Authentication test failed! Please check credentials.")
-            logger.error("💡 Update AUTH_USERNAME and AUTH_PASSWORD constants or use command line arguments")
+            logger.error(
+                "💡 Update AUTH_USERNAME and AUTH_PASSWORD constants or use command line arguments"
+            )
             return
     except Exception as e:
         logger.error(f"❌ Authentication test error: {e}")
@@ -562,7 +607,6 @@ async def main():
     if args.debug_audio:
         esp32_recordings = recordings / "esp32_raw"
         esp32_recordings.mkdir(exist_ok=True, parents=True)
-
 
     # Create rolling file sink for ESP32 data
     if args.debug_audio:

@@ -40,7 +40,7 @@ async def get_memories(user: User, limit: int, user_id: Optional[str] = None):
             "memories": memories_dicts,
             "count": len(memories),
             "total_count": total_count,
-            "user_id": target_user_id
+            "user_id": target_user_id,
         }
 
     except Exception as e:
@@ -50,7 +50,9 @@ async def get_memories(user: User, limit: int, user_id: Optional[str] = None):
         )
 
 
-async def get_memories_with_transcripts(user: User, limit: int, user_id: Optional[str] = None):
+async def get_memories_with_transcripts(
+    user: User, limit: int, user_id: Optional[str] = None
+):
     """Get memories with their source transcripts. Users see only their own memories, admins can see all or filter by user."""
     try:
         memory_service = get_memory_service()
@@ -72,14 +74,22 @@ async def get_memories_with_transcripts(user: User, limit: int, user_id: Optiona
         }
 
     except Exception as e:
-        audio_logger.error(f"Error fetching memories with transcripts: {e}", exc_info=True)
+        audio_logger.error(
+            f"Error fetching memories with transcripts: {e}", exc_info=True
+        )
         return JSONResponse(
             status_code=500,
             content={"message": f"Error fetching memories with transcripts: {str(e)}"},
         )
 
 
-async def search_memories(query: str, user: User, limit: int, score_threshold: float = 0.0, user_id: Optional[str] = None):
+async def search_memories(
+    query: str,
+    user: User,
+    limit: int,
+    score_threshold: float = 0.0,
+    user_id: Optional[str] = None,
+):
     """Search memories by text query. Users can only search their own memories, admins can search all or filter by user."""
     try:
         memory_service = get_memory_service()
@@ -90,7 +100,9 @@ async def search_memories(query: str, user: User, limit: int, score_threshold: f
             target_user_id = user_id
 
         # Execute search directly (now async)
-        search_results = await memory_service.search_memories(query, target_user_id, limit, score_threshold)
+        search_results = await memory_service.search_memories(
+            query, target_user_id, limit, score_threshold
+        )
 
         # Convert MemoryEntry objects to dicts for JSON serialization
         results_dicts = [result.to_dict() for result in search_results]
@@ -122,16 +134,26 @@ async def delete_memory(memory_id: str, user: User):
             # MemoryEntry is a dataclass, access id attribute directly
             memory_ids = [str(mem.id) for mem in user_memories]
             if memory_id not in memory_ids:
-                return JSONResponse(status_code=404, content={"message": "Memory not found"})
+                return JSONResponse(
+                    status_code=404, content={"message": "Memory not found"}
+                )
 
         # Delete the memory
-        audio_logger.info(f"Deleting memory {memory_id} for user_id={user.user_id}, email={user.email}")
-        success = await memory_service.delete_memory(memory_id, user_id=user.user_id, user_email=user.email)
+        audio_logger.info(
+            f"Deleting memory {memory_id} for user_id={user.user_id}, email={user.email}"
+        )
+        success = await memory_service.delete_memory(
+            memory_id, user_id=user.user_id, user_email=user.email
+        )
 
         if success:
-            return JSONResponse(content={"message": f"Memory {memory_id} deleted successfully"})
+            return JSONResponse(
+                content={"message": f"Memory {memory_id} deleted successfully"}
+            )
         else:
-            return JSONResponse(status_code=404, content={"message": "Memory not found"})
+            return JSONResponse(
+                status_code=404, content={"message": "Memory not found"}
+            )
 
     except Exception as e:
         audio_logger.error(f"Error deleting memory: {e}", exc_info=True)
@@ -146,7 +168,9 @@ async def add_memory(content: str, user: User, source_id: Optional[str] = None):
         memory_service = get_memory_service()
 
         # Use source_id or generate a unique one
-        memory_source_id = source_id or f"manual_{user.user_id}_{int(asyncio.get_event_loop().time())}"
+        memory_source_id = (
+            source_id or f"manual_{user.user_id}_{int(asyncio.get_event_loop().time())}"
+        )
 
         # Extract memories from content
         success, memory_ids = await memory_service.add_memory(
@@ -156,7 +180,7 @@ async def add_memory(content: str, user: User, source_id: Optional[str] = None):
             user_id=user.user_id,
             user_email=user.email,
             allow_update=False,
-            db_helper=None
+            db_helper=None,
         )
 
         if success:
@@ -165,18 +189,19 @@ async def add_memory(content: str, user: User, source_id: Optional[str] = None):
                 "memory_ids": memory_ids,
                 "count": len(memory_ids),
                 "source_id": memory_source_id,
-                "message": f"Successfully created {len(memory_ids)} memory/memories"
+                "message": f"Successfully created {len(memory_ids)} memory/memories",
             }
         else:
             return JSONResponse(
                 status_code=500,
-                content={"success": False, "message": "Failed to create memories"}
+                content={"success": False, "message": "Failed to create memories"},
             )
 
     except Exception as e:
         audio_logger.error(f"Error adding memory: {e}", exc_info=True)
         return JSONResponse(
-            status_code=500, content={"success": False, "message": f"Error adding memory: {str(e)}"}
+            status_code=500,
+            content={"success": False, "message": f"Error adding memory: {str(e)}"},
         )
 
 
@@ -225,7 +250,8 @@ async def get_all_memories_admin(user: User, limit: int):
     except Exception as e:
         audio_logger.error(f"Error fetching admin memories: {e}", exc_info=True)
         return JSONResponse(
-            status_code=500, content={"message": f"Error fetching admin memories: {str(e)}"}
+            status_code=500,
+            content={"message": f"Error fetching admin memories: {str(e)}"},
         )
 
 
@@ -265,11 +291,15 @@ async def get_memory_by_id(memory_id: str, user: User, user_id: Optional[str] = 
                             ),
                         }
                 except Exception as e:
-                    logger.warning(f"Failed to fetch source conversation {source_id}: {e}")
+                    logger.warning(
+                        f"Failed to fetch source conversation {source_id}: {e}"
+                    )
 
             return {"memory": memory_dict}
         else:
-            return JSONResponse(status_code=404, content={"message": "Memory not found"})
+            return JSONResponse(
+                status_code=404, content={"message": "Memory not found"}
+            )
 
     except Exception as e:
         audio_logger.error(f"Error fetching memory {memory_id}: {e}", exc_info=True)

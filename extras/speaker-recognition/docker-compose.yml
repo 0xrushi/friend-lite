@@ -59,7 +59,7 @@ services:
       default:
         aliases:
           - speaker-service
-  
+
   # Strix Halo / AMD ROCm Profile Configuration
   speaker-service-strixhalo:
     <<: *base-speaker-service

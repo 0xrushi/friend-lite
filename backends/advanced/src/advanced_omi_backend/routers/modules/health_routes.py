@@ -48,7 +48,7 @@ if REGISTRY:
 else:
     _llm_def = _embed_def = _vs_def = None
 
-QDRANT_BASE_URL = (_vs_def.model_params.get("host") if _vs_def else "qdrant")
+QDRANT_BASE_URL = _vs_def.model_params.get("host") if _vs_def else "qdrant"
 QDRANT_PORT = str(_vs_def.model_params.get("port") if _vs_def else "6333")
 
 
@@ -58,7 +58,7 @@ async def auth_health_check():
     try:
         # Test database connectivity
         await mongo_client.admin.command("ping")
-        
+
         # Test memory service if available
         if memory_service:
             try:
@@ -69,12 +69,12 @@ async def auth_health_check():
                 memory_status = "degraded"
         else:
             memory_status = "unavailable"
-        
+
         return {
             "status": "ok",
-            "database": "ok", 
+            "database": "ok",
             "memory_service": memory_status,
-            "timestamp": int(time.time())
+            "timestamp": int(time.time()),
         }
     except Exception as e:
         logger.error(f"Auth health check failed: {e}")
@@ -84,8 +84,8 @@ async def auth_health_check():
                 "status": "error",
                 "detail": "Service connectivity check failed",
                 "error_type": "connection_failure",
-                "timestamp": int(time.time())
-            }
+                "timestamp": int(time.time()),
+            },
         )
 
 
@@ -129,16 +129,18 @@ async def health_check():
                 else "Not configured"
             ),
             "transcription_provider": (
-                REGISTRY.get_default("stt").name if REGISTRY and REGISTRY.get_default("stt")
+                REGISTRY.get_default("stt").name
+                if REGISTRY and REGISTRY.get_default("stt")
                 else "not configured"
             ),
-
             "provider_type": (
                 transcription_provider.mode if transcription_provider else "none"
             ),
             "chunk_dir": str(os.getenv("CHUNK_DIR", "./audio_chunks")),
             "active_clients": get_client_manager().get_client_count(),
-            "new_conversation_timeout_minutes": float(os.getenv("NEW_CONVERSATION_TIMEOUT_MINUTES", "1.5")),
+            "new_conversation_timeout_minutes": float(
+                os.getenv("NEW_CONVERSATION_TIMEOUT_MINUTES", "1.5")
+            ),
             "llm_provider": (_llm_def.model_provider if _llm_def else None),
             "llm_model": (_llm_def.model_name if _llm_def else None),
             "llm_base_url": (_llm_def.model_url if _llm_def else None),
@@ -204,14 +206,14 @@ async def health_check():
                 "worker_count": worker_count,
                 "active_workers": active_workers,
                 "idle_workers": idle_workers,
-                "queues": queue_health.get("queues", {})
+                "queues": queue_health.get("queues", {}),
             }
         else:
             health_status["services"]["redis"] = {
                 "status": f"❌ Connection Failed: {queue_health.get('redis_connection')}",
                 "healthy": False,
                 "critical": True,
-                "worker_count": 0
+                "worker_count": 0,
             }
             overall_healthy = False
             critical_services_healthy = False
@@ -221,7 +223,7 @@ async def health_check():
             "status": "❌ Connection Timeout (5s)",
             "healthy": False,
             "critical": True,
-            "worker_count": 0
+            "worker_count": 0,
         }
         overall_healthy = False
         critical_services_healthy = False
@@ -230,7 +232,7 @@ async def health_check():
             "status": f"❌ Connection Failed: {str(e)}",
             "healthy": False,
             "critical": True,
-            "worker_count": 0
+            "worker_count": 0,
         }
         overall_healthy = False
         critical_services_healthy = False
@@ -267,7 +269,9 @@ async def health_check():
     if memory_provider == "chronicle":
         try:
             # Test Chronicle memory service connection with timeout
-            test_success = await asyncio.wait_for(memory_service.test_connection(), timeout=8.0)
+            test_success = await asyncio.wait_for(
+                memory_service.test_connection(), timeout=8.0
+            )
             if test_success:
                 health_status["services"]["memory_service"] = {
                     "status": "✅ Chronicle Memory Connected",
@@ -361,7 +365,8 @@ async def health_check():
             # Make a health check request to the speaker service
             async with aiohttp.ClientSession() as session:
                 async with session.get(
-                    f"{speaker_service_url}/health", timeout=aiohttp.ClientTimeout(total=5)
+                    f"{speaker_service_url}/health",
+                    timeout=aiohttp.ClientTimeout(total=5),
                 ) as response:
                     if response.status == 200:
                         health_status["services"]["speaker_recognition"] = {
@@ -401,7 +406,8 @@ async def health_check():
             # Make a health check request to the OpenMemory MCP service
             async with aiohttp.ClientSession() as session:
                 async with session.get(
-                    f"{openmemory_mcp_url}/api/v1/apps/", timeout=aiohttp.ClientTimeout(total=5)
+                    f"{openmemory_mcp_url}/api/v1/apps/",
+                    timeout=aiohttp.ClientTimeout(total=5),
                 ) as response:
                     if response.status == 200:
                         health_status["services"]["openmemory_mcp"] = {
@@ -464,7 +470,9 @@ async def health_check():
             if not service["healthy"] and not service.get("critical", True)
         ]
         if unhealthy_optional:
-            messages.append(f"Optional services unavailable: {', '.join(unhealthy_optional)}")
+            messages.append(
+                f"Optional services unavailable: {', '.join(unhealthy_optional)}"
+            )
 
         health_status["message"] = "; ".join(messages)
 
@@ -476,15 +484,21 @@ async def readiness_check():
     """Simple readiness check for container orchestration."""
     # Use debug level for health check to reduce log spam
     logger.debug("Readiness check requested")
-    
+
     # Only check critical services for readiness
     try:
         # Quick MongoDB ping to ensure we can serve requests
         await asyncio.wait_for(mongo_client.admin.command("ping"), timeout=2.0)
-        return JSONResponse(content={"status": "ready", "timestamp": int(time.time())}, status_code=200)
+        return JSONResponse(
+            content={"status": "ready", "timestamp": int(time.time())}, status_code=200
+        )
     except Exception as e:
         logger.error(f"Readiness check failed: {e}")
         return JSONResponse(
-            content={"status": "not_ready", "error": str(e), "timestamp": int(time.time())}, 
-            status_code=503
+            content={
+                "status": "not_ready",
+                "error": str(e),
+                "timestamp": int(time.time()),
+            },
+            status_code=503,
         )

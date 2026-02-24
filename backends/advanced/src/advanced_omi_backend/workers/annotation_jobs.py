@@ -199,15 +199,11 @@ async def finetune_hallucination_model():
 
         # Calculate acceptance rate
         if accepted_count + rejected_count > 0:
-            acceptance_rate = (
-                accepted_count / (accepted_count + rejected_count)
-            ) * 100
+            acceptance_rate = (accepted_count / (accepted_count + rejected_count)) * 100
             logger.info(f"   Suggestion acceptance rate: {acceptance_rate:.1f}%")
 
         logger.info("✅ Training check complete (placeholder implementation)")
-        logger.info(
-            "   ℹ️  TODO: Implement model fine-tuning using user feedback data"
-        )
+        logger.info("   ℹ️  TODO: Implement model fine-tuning using user feedback data")
 
     except Exception as e:
         logger.error(f"❌ Error in finetune_hallucination_model: {e}", exc_info=True)
@@ -215,6 +211,7 @@ async def finetune_hallucination_model():
 
 
 # Additional helper functions for future implementation
+
 
 async def analyze_common_error_patterns() -> List[dict]:
     """

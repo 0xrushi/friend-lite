@@ -45,15 +45,15 @@ export default function App() {
 
   // State for WebSocket URL for custom audio streaming
   const [webSocketUrl, setWebSocketUrl] = useState<string>('');
-  
+
   // State for User ID
   const [userId, setUserId] = useState<string>('');
-  
+
   // Authentication state
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(null);
   const [jwtToken, setJwtToken] = useState<string | null>(null);
-  
+
   // Bluetooth Management Hook
   const {
     bleManager,
@@ -65,7 +65,7 @@ export default function App() {
 
   // Custom Audio Streamer Hook
   const audioStreamer = useAudioStreamer();
-  
+
   // Phone Audio Recorder Hook
   const phoneAudioRecorder = usePhoneAudioRecorder();
   const [isPhoneAudioMode, setIsPhoneAudioMode] = useState<boolean>(false);
@@ -195,7 +195,7 @@ export default function App() {
     bluetoothState === BluetoothState.PoweredOn, // Derived from useBluetoothManager
     requestBluetoothPermission // From useBluetoothManager, should be stable
   );
-  
+
   // Effect for attempting auto-reconnection
   useEffect(() => {
     if (
@@ -260,15 +260,15 @@ export default function App() {
 
     try {
       let finalWebSocketUrl = webSocketUrl.trim();
-      
+
       // Check if this is the advanced backend (requires authentication) or simple backend
       const isAdvancedBackend = jwtToken && isAuthenticated;
-      
+
       if (isAdvancedBackend) {
         // Advanced backend: include JWT token and device parameters
         const params = new URLSearchParams();
         params.append('token', jwtToken);
-        
+
         if (userId && userId.trim() !== '') {
           params.append('device_name', userId.trim());
           console.log('[App.tsx] Using advanced backend with token and device_name:', userId.trim());
@@ -276,7 +276,7 @@ export default function App() {
           params.append('device_name', 'phone'); // Default device name
           console.log('[App.tsx] Using advanced backend with token and default device_name');
         }
-        
+
         const separator = webSocketUrl.includes('?') ? '&' : '?';
         finalWebSocketUrl = `${webSocketUrl}${separator}${params.toString()}`;
         console.log('[App.tsx] Advanced backend WebSocket URL constructed (token hidden for security)');
@@ -318,10 +318,10 @@ export default function App() {
 
     try {
       let finalWebSocketUrl = webSocketUrl.trim();
-      
+
       // Convert HTTP/HTTPS to WS/WSS protocol
       finalWebSocketUrl = finalWebSocketUrl.replace(/^http:/, 'ws:').replace(/^https:/, 'wss:');
-      
+
       // Ensure /ws endpoint is included
       if (!finalWebSocketUrl.includes('/ws')) {
         // Remove trailing slash if present, then add /ws
@@ -333,19 +333,19 @@ export default function App() {
         const separator = finalWebSocketUrl.includes('?') ? '&' : '?';
         finalWebSocketUrl = finalWebSocketUrl + separator + 'codec=pcm';
       }
-      
+
       // Check if this is the advanced backend (requires authentication) or simple backend
       const isAdvancedBackend = jwtToken && isAuthenticated;
-      
+
       if (isAdvancedBackend) {
         // Advanced backend: include JWT token and device parameters
         const params = new URLSearchParams();
         params.append('token', jwtToken);
-        
+
         const deviceName = userId && userId.trim() !== '' ? userId.trim() : 'phone-mic';
         params.append('device_name', deviceName);
         console.log('[App.tsx] Using advanced backend with token and device_name:', deviceName);
-        
+
         const separator = finalWebSocketUrl.includes('?') ? '&' : '?';
         finalWebSocketUrl = `${finalWebSocketUrl}${separator}${params.toString()}`;
         console.log('[App.tsx] Advanced backend WebSocket URL constructed for phone audio');
@@ -356,7 +356,7 @@ export default function App() {
 
       // Start WebSocket streaming first
       await audioStreamer.startStreaming(finalWebSocketUrl);
-      
+
       // Start phone audio recording
       await phoneAudioRecorder.startRecording(async (pcmBuffer) => {
         const wsReadyState = audioStreamer.getWebSocketReadyState();
@@ -364,7 +364,7 @@ export default function App() {
           await audioStreamer.sendAudio(pcmBuffer);
         }
       });
-      
+
       setIsPhoneAudioMode(true);
       console.log('[App.tsx] Phone audio streaming started successfully');
     } catch (error) {
@@ -417,7 +417,7 @@ export default function App() {
     return () => {
       console.log('App unmounting - cleaning up OmiConnection, BleManager, AudioStreamer, and PhoneAudioRecorder');
       const refs = cleanupRefs.current;
-      
+
       if (refs.omiConnection.isConnected()) {
         refs.disconnectFromDevice().catch(err => console.error("Error disconnecting in cleanup:", err));
       }
@@ -486,7 +486,7 @@ export default function App() {
     }
     // Attempt to stop any ongoing connection process
     // disconnectFromDevice also sets isConnecting to false internally.
-    await deviceConnection.disconnectFromDevice(); 
+    await deviceConnection.disconnectFromDevice();
     setIsAttemptingAutoReconnect(false); // Explicitly set to false to hide the auto-reconnect screen
   }, [deviceConnection, lastKnownDeviceId, saveLastConnectedDeviceId, setLastKnownDeviceId, setTriedAutoReconnectForCurrentId, setIsAttemptingAutoReconnect]);
 
@@ -495,8 +495,8 @@ export default function App() {
       <View style={styles.centeredMessageContainer}>
         <ActivityIndicator size="large" />
         <Text style={styles.centeredMessageText}>
-          {isAttemptingAutoReconnect 
-            ? `Attempting to reconnect to the last device (${lastKnownDeviceId ? lastKnownDeviceId.substring(0, 10) + '...' : ''})...` 
+          {isAttemptingAutoReconnect
+            ? `Attempting to reconnect to the last device (${lastKnownDeviceId ? lastKnownDeviceId.substring(0, 10) + '...' : ''})...`
             : 'Initializing Bluetooth...'}
         </Text>
       </View>
@@ -519,12 +519,12 @@ export default function App() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <KeyboardAvoidingView 
+      <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 0}
       >
-        <ScrollView 
+        <ScrollView
           contentContainerStyle={styles.content}
           keyboardShouldPersistTaps="handled"
         >
@@ -618,7 +618,7 @@ export default function App() {
               ) : (
                 <View style={styles.noDevicesContainer}>
                   <Text style={styles.noDevicesText}>
-                    {showOnlyOmi 
+                    {showOnlyOmi
                       ? `No OMI/Friend devices found. ${scannedDevices.length} other device(s) hidden by filter.`
                       : 'No devices found.'
                     }
@@ -627,7 +627,7 @@ export default function App() {
               )}
             </View>
           )}
-          
+
           {deviceConnection.connectedDeviceId && filteredDevices.find(d => d.id === deviceConnection.connectedDeviceId) && (
                <View style={styles.section}>
                   <Text style={styles.sectionTitle}>Connected Device</Text>
@@ -638,9 +638,9 @@ export default function App() {
                         console.log('[App.tsx] Manual disconnect initiated via DeviceListItem.');
                         // Prevent auto-reconnection by clearing the last known device ID *before* disconnecting.
                         await saveLastConnectedDeviceId(null);
-                        setLastKnownDeviceId(null); 
-                        setTriedAutoReconnectForCurrentId(true); 
-                        
+                        setLastKnownDeviceId(null);
+                        setTriedAutoReconnectForCurrentId(true);
+
                         // TODO: Consider adding setIsDisconnecting(true) here if a visual indicator is needed
                         // and a finally block to set it to false, similar to the old handleDisconnectPress.
                         // For now, focusing on the core logic.
@@ -658,7 +658,7 @@ export default function App() {
                   />
               </View>
           )}
-          
+
           {/* Show disconnect button when connected but scan list isn't visible */}
           {deviceConnection.connectedDeviceId && !filteredDevices.find(d => d.id === deviceConnection.connectedDeviceId) && (
             <View style={styles.section}>
@@ -671,9 +671,9 @@ export default function App() {
                   onPress={async () => {
                     console.log('[App.tsx] Manual disconnect initiated via standalone disconnect button.');
                     await saveLastConnectedDeviceId(null);
-                    setLastKnownDeviceId(null); 
+                    setLastKnownDeviceId(null);
                     setTriedAutoReconnectForCurrentId(true);
-                    
+
                     try {
                       await deviceConnection.disconnectFromDevice();
                       console.log('[App.tsx] Manual disconnect from device successful.');

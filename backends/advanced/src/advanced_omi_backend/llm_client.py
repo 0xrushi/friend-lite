@@ -11,7 +11,10 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional
 
 from advanced_omi_backend.model_registry import get_models_registry
-from advanced_omi_backend.openai_factory import create_openai_client, is_langfuse_enabled
+from advanced_omi_backend.openai_factory import (
+    create_openai_client,
+    is_langfuse_enabled,
+)
 from advanced_omi_backend.services.memory.config import (
     load_config_yml as _load_root_config,
 )
@@ -62,7 +65,9 @@ class OpenAILLMClient(LLMClient):
         self.base_url = base_url
         self.model = model
         if not self.api_key or not self.base_url or not self.model:
-            raise ValueError(f"LLM configuration incomplete: api_key={'set' if self.api_key else 'MISSING'}, base_url={'set' if self.base_url else 'MISSING'}, model={'set' if self.model else 'MISSING'}")
+            raise ValueError(
+                f"LLM configuration incomplete: api_key={'set' if self.api_key else 'MISSING'}, base_url={'set' if self.base_url else 'MISSING'}, model={'set' if self.model else 'MISSING'}"
+            )
 
         # Initialize OpenAI client with optional Langfuse tracing
         try:
@@ -71,14 +76,19 @@ class OpenAILLMClient(LLMClient):
             )
             self.logger.info(f"OpenAI client initialized, base_url: {self.base_url}")
         except ImportError:
-            self.logger.error("OpenAI library not installed. Install with: pip install openai")
+            self.logger.error(
+                "OpenAI library not installed. Install with: pip install openai"
+            )
             raise
         except Exception as e:
             self.logger.error(f"Failed to initialize OpenAI client: {e}")
             raise
 
     def generate(
-        self, prompt: str, model: str | None = None, temperature: float | None = None,
+        self,
+        prompt: str,
+        model: str | None = None,
+        temperature: float | None = None,
         **langfuse_kwargs,
     ) -> str:
         """Generate text completion using OpenAI-compatible API."""
@@ -101,8 +111,12 @@ class OpenAILLMClient(LLMClient):
             raise
 
     def chat_with_tools(
-        self, messages: list, tools: list | None = None, model: str | None = None,
-        temperature: float | None = None, **langfuse_kwargs,
+        self,
+        messages: list,
+        tools: list | None = None,
+        model: str | None = None,
+        temperature: float | None = None,
+        **langfuse_kwargs,
     ):
         """Chat completion with tool/function calling support. Returns raw response object."""
         model_name = model or self.model
@@ -127,14 +141,18 @@ class OpenAILLMClient(LLMClient):
                     "status": "✅ Connected",
                     "base_url": self.base_url,
                     "default_model": self.model,
-                    "api_key_configured": bool(self.api_key and self.api_key != "dummy"),
+                    "api_key_configured": bool(
+                        self.api_key and self.api_key != "dummy"
+                    ),
                 }
             else:
                 return {
                     "status": "⚠️ Configuration incomplete",
                     "base_url": self.base_url,
                     "default_model": self.model,
-                    "api_key_configured": bool(self.api_key and self.api_key != "dummy"),
+                    "api_key_configured": bool(
+                        self.api_key and self.api_key != "dummy"
+                    ),
                 }
         except Exception as e:
             self.logger.error(f"Health check failed: {e}")
@@ -157,11 +175,13 @@ class LLMClientFactory:
     def create_client() -> LLMClient:
         """Create an LLM client based on model registry configuration (config.yml)."""
         registry = get_models_registry()
-        
+
         if registry:
             llm_def = registry.get_default("llm")
             if llm_def:
-                logger.info(f"Creating LLM client from registry: {llm_def.name} ({llm_def.model_provider})")
+                logger.info(
+                    f"Creating LLM client from registry: {llm_def.name} ({llm_def.model_provider})"
+                )
                 params = llm_def.model_params or {}
                 return OpenAILLMClient(
                     api_key=llm_def.api_key,
@@ -169,7 +189,7 @@ class LLMClientFactory:
                     model=llm_def.model_name,
                     temperature=params.get("temperature", 0.1),
                 )
-        
+
         raise ValueError("No default LLM defined in config.yml")
 
     @staticmethod
