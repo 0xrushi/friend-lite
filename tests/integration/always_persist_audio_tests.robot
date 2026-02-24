@@ -32,6 +32,8 @@ Suite Setup Actions
     # Initialize API session for test user
     ${session}=    Get Admin API Session
     Set Suite Variable    ${API_SESSION}    ${session}
+    # Ensure always_persist is enabled (may have been disabled by a previous test suite)
+    Set Always Persist Enabled    ${API_SESSION}    ${True}
 
 Suite Teardown Actions
     [Documentation]    Cleanup after all tests complete

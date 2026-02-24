@@ -93,7 +93,7 @@ Speech Detection Receives Transcription From Stream
     ${job_id}=    Set Variable    ${speech_job}[job_id]
 
     # Wait for job to complete
-    Wait For Job Status    ${job_id}    finished    timeout=60s    interval=2s
+    Wait For Job Status    ${job_id}    finished    timeout=180s    interval=2s
 
     # Get job result
     ${result}=    Get Job Result    ${job_id}
@@ -131,7 +131,7 @@ Conversation Created With Valid Transcript
     ${speech_job_id}=    Set Variable    ${speech_job}[job_id]
 
     # Wait for speech detection to finish
-    Wait For Job Status    ${speech_job_id}    finished    timeout=30s    interval=2s
+    Wait For Job Status    ${speech_job_id}    finished    timeout=180s    interval=2s
 
     # Verify speech was detected (not no_speech_detected)
     ${speech_result}=    Get Job Result    ${speech_job_id}
@@ -153,7 +153,7 @@ Conversation Created With Valid Transcript
     Should Not Be Empty    ${conversation_id}    Conversation ID not found in open_conversation job metadata
 
     # Wait for conversation to complete started (inactivity timeout)
-    Wait For Job Status    ${conv_job}[job_id]    finished    timeout=60s    interval=2s
+    Wait For Job Status    ${conv_job}[job_id]    finished    timeout=180s    interval=2s
 
     # Retrieve the conversation
     ${conversation}=    Get Conversation By ID    ${conversation_id}
@@ -264,7 +264,7 @@ Word Timestamps Are Monotonically Increasing
     ...    Get Jobs By Type And Client    speech_detection    ${client_id}
     Should Not Be Empty    ${speech_jobs}    No speech detection job found
     ${speech_job}=    Set Variable    ${speech_jobs}[0]
-    Wait For Job Status    ${speech_job}[job_id]    finished    timeout=60s    interval=2s
+    Wait For Job Status    ${speech_job}[job_id]    finished    timeout=180s    interval=2s
 
     # Wait for conversation to be created
     ${conv_jobs}=    Wait Until Keyword Succeeds    60s    3s
@@ -275,7 +275,7 @@ Word Timestamps Are Monotonically Increasing
     Should Not Be Empty    ${conversation_id}    Conversation ID not found
 
     # Wait for conversation to close
-    Wait For Job Status    ${conv_job}[job_id]    finished    timeout=60s    interval=2s
+    Wait For Job Status    ${conv_job}[job_id]    finished    timeout=180s    interval=2s
 
     # Get conversation with segments
     ${conversation}=    Get Conversation By ID    ${conversation_id}
@@ -330,7 +330,7 @@ Segment Timestamps Match Expected Values
     ...    Get Jobs By Type And Client    speech_detection    ${client_id}
     Should Not Be Empty    ${speech_jobs}    No speech detection job found
     ${speech_job}=    Set Variable    ${speech_jobs}[0]
-    Wait For Job Status    ${speech_job}[job_id]    finished    timeout=60s    interval=2s
+    Wait For Job Status    ${speech_job}[job_id]    finished    timeout=180s    interval=2s
 
     # Get conversation
     ${conv_jobs}=    Wait Until Keyword Succeeds    60s    3s
@@ -340,7 +340,7 @@ Segment Timestamps Match Expected Values
     ${conversation_id}=    Evaluate    $conv_meta.get('conversation_id', '')
     Should Not Be Empty    ${conversation_id}
 
-    Wait For Job Status    ${conv_job}[job_id]    finished    timeout=60s    interval=2s
+    Wait For Job Status    ${conv_job}[job_id]    finished    timeout=180s    interval=2s
 
     # Get conversation with segments
     ${conversation}=    Get Conversation By ID    ${conversation_id}

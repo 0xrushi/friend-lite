@@ -42,9 +42,13 @@ cu128 = [
   "torch>=2.3",
   "torchaudio>=2.3",
 ]
+
+# AMD Strix Halo (gfx1151) - uses pip in Dockerfile due to rocm[libraries] source dist
+# This extra is handled separately in Docker builds
+# torch2.10+ officially supports strixhalo
 strixhalo = [
-  "torch>=2.3",
-  "torchaudio>=2.3",
+  "torch>=2.10",
+  "torchaudio>=2.10",
 ]
 
 [tool.uv]
@@ -71,13 +75,11 @@ torch = [
     { index = "pytorch-cu121", extra = "cu121" },
     { index = "pytorch-cu126", extra = "cu126" },
     { index = "pytorch-cu128", extra = "cu128" },
-    { index = "rocm-gfx1151", extra = "strixhalo" },
 ]
 torchaudio = [
     { index = "pytorch-cu121", extra = "cu121" },
     { index = "pytorch-cu126", extra = "cu126" },
     { index = "pytorch-cu128", extra = "cu128" },
-    { index = "rocm-gfx1151", extra = "strixhalo" },
 ]
 
 [[tool.uv.index]]
@@ -93,11 +95,6 @@ explicit = true
 [[tool.uv.index]]
 name = "pytorch-cu128"
 url = "https://download.pytorch.org/whl/cu128"
-explicit = true
-
-[[tool.uv.index]]
-name = "rocm-gfx1151"
-url = "https://rocm.nightlies.amd.com/v2/gfx1151/"
 explicit = true
 
 [dependency-groups]
@@ -119,6 +116,7 @@ nemo = [
     "nemo-toolkit[asr]>=2.2.0",
     "cuda-python>=12.3",
     "numpy>=1.26,<2.0",
+    "ml-dtypes>=0.5.0; python_version < '3.13'",
 ]
 
 vibevoice = [
@@ -151,6 +149,7 @@ parakeet = [
     "nemo-toolkit[asr]>=2.2.0",
     "cuda-python>=12.3",
     "numpy>=1.26,<2.0",
+    "ml-dtypes>=0.5.0; python_version < '3.13'",
 ]
 
 # Development dependencies

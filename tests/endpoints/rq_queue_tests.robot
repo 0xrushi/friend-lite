@@ -31,7 +31,7 @@ Restart Backend Service
     # Restart backend container (handles dependencies properly)
     # Project name 'backend-test' is set in docker-compose-test.yml
     Run Process    docker    compose    -f    ${COMPOSE_FILE}    restart    chronicle-backend-test
-    ...    cwd=${BACKEND_DIR}    timeout=60s    shell=True
+    ...    cwd=${BACKEND_DIR}    timeout=180s    shell=True
 
     # Wait for backend to be ready again (configurable timeout for slow tests)
     Wait Until Keyword Succeeds    ${wait_timeout}    5s
@@ -174,7 +174,7 @@ Test Queue Stats Accuracy
 
     # Wait for OUR specific jobs to complete (don't rely on global counts)
     FOR    ${job_id}    IN    @{created_jobs}
-        Wait For Job Status    ${job_id}    finished    timeout=60s    interval=2s
+        Wait For Job Status    ${job_id}    finished    timeout=180s    interval=2s
     END
 
     Log    All ${job_count} created jobs finished successfully

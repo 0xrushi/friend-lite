@@ -178,6 +178,41 @@ services:
       # Batching config: managed via config/defaults.yml (asr_services.vibevoice)
     restart: unless-stopped
 
+  # AMD ROCm / Strix Halo variant for VibeVoice
+  vibevoice-asr-strixhalo:
+    profiles: ["strixhalo", "amd"]
+    build:
+      context: .
+      dockerfile: providers/vibevoice/Dockerfile.strixhalo
+    image: chronicle-asr-vibevoice-strixhalo:latest
+    ports:
+      - "${ASR_PORT:-8767}:8765"
+    volumes:
+      - ./model_cache:/models
+      - ./debug:/app/debug
+      - ./results:/app/results
+      - ../../config:/app/config:ro
+      - ./lora_adapters:/models/lora_adapters
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    group_add:
+      - video
+    security_opt:
+      - seccomp:unconfined
+    environment:
+      - HF_HOME=/models
+      - ASR_MODEL=${ASR_MODEL:-microsoft/VibeVoice-ASR}
+      - VIBEVOICE_LLM_MODEL=${VIBEVOICE_LLM_MODEL:-Qwen/Qwen2.5-7B}
+      - VIBEVOICE_ATTN_IMPL=${VIBEVOICE_ATTN_IMPL:-sdpa}
+      - DEVICE=${DEVICE:-cuda}
+      - TORCH_DTYPE=${TORCH_DTYPE:-bfloat16}
+      - MAX_NEW_TOKENS=${MAX_NEW_TOKENS:-8192}
+      - QUANTIZATION=${QUANTIZATION:-4bit}
+      - LORA_ADAPTER_PATH=${LORA_ADAPTER_PATH:-}
+      - HSA_OVERRIDE_GFX_VERSION=11.5.1
+    restart: unless-stopped
+
   # ============================================================================
   # Transformers Provider (Hindi Whisper, HuggingFace models)
   # ============================================================================

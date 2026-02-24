@@ -17,7 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Dependency manifest first for cache‑friendly installs
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-install-project --group parakeet --extra ${PYTORCH_CUDA_VERSION} && \
+RUN uv sync --frozen --no-install-project --group parakeet --extra local-audio --extra wyoming --extra ${PYTORCH_CUDA_VERSION} && \
     uv cache clean
 
 # Should prepare the .venv for use :)

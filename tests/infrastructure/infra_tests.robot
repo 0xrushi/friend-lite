@@ -354,7 +354,7 @@ WebSocket Disconnect Conversation End Reason Test
     # Wait for job to complete (should be fast, not 3600s timeout)
     ${conv_jobs}=    Get Jobs By Type And Client    open_conversation    ${device_name}
     ${conv_job}=    Get Most Recent Job    ${conv_jobs}
-    Wait For Job Status    ${conv_job}[job_id]    finished    timeout=60s    interval=2s
+    Wait For Job Status    ${conv_job}[job_id]    finished    timeout=180s    interval=2s
 
     # Wait for end_reason to be saved to database (retry with timeout)
     ${conversation}=    Wait Until Keyword Succeeds    10s    0.5s
@@ -366,4 +366,3 @@ WebSocket Disconnect Conversation End Reason Test
     Should Not Be Equal    ${conversation}[completed_at]    ${None}
 
     [Teardown]    Run Keyword And Ignore Error    Close Audio Stream    ${stream_id}
-

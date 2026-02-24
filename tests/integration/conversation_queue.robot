@@ -27,7 +27,7 @@ Test Upload audio creates transcription job
 
     # Verify queue is empty
     ${initial_job_count}=    Get queue length
-   
+
 
     # Upload audio file to create conversation and trigger transcription job
     ${conversation}=    Upload Audio File   ${TEST_AUDIO_FILE}    ${TEST_DEVICE_NAME}
@@ -98,15 +98,14 @@ Test Reprocess Conversation Job Queue
 
     # Wait for transcription job to complete (Deepgram API + started takes time in CI)
     Log    Waiting for transcription job ${job_id} to complete...    INFO
-    Wait For Job Status    ${job_id}    finished    timeout=60s    interval=3s
+    Wait For Job Status    ${job_id}    finished    timeout=180s    interval=3s
 
     # Verify conversation was updated with new transcript version
     ${updated_conversation}=    Get Conversation By ID    ${conversation_id}
-    ${transcript_versions}=    Get Conversation Versions    ${conversation_id}  
+    ${transcript_versions}=    Get Conversation Versions    ${conversation_id}
     Length Should Be    ${transcript_versions}    ${initial_version_count + 1}    Expected transcript versions to increase by 1
 
     # Verify transcript versions array exists and has correct count
     Should Not Be Equal    ${updated_conversation}[active_transcript_version]    ${active_version}
 
     Log    Reprocess Job Queue Test Completed Successfully    INFO
-

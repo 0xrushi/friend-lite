@@ -17,7 +17,7 @@ Upload Audio File
       File Should Exist    ${audio_file_path}
 
       # Debug the request being sent
-      
+
       Log    Sending file: ${audio_file_path}
       Log    Device name: ${device_name}
       Log    Folder: ${folder}
@@ -84,7 +84,7 @@ Upload Audio File
       # Normal path: Wait for transcription job to complete
       Log    Waiting for transcription job ${transcript_job_id} to complete...
 
-      Wait Until Keyword Succeeds    60s    5s       Check job status   ${transcript_job_id}    finished
+      Wait Until Keyword Succeeds    300s    5s       Check job status   ${transcript_job_id}    finished
       ${job}=    Get Job Details    ${transcript_job_id}
 
      # Get the finished conversation

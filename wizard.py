@@ -47,6 +47,7 @@ SERVICES = {
             "cmd": [
                 "uv",
                 "run",
+                "--no-project",
                 "--with-requirements",
                 "../../setup-requirements.txt",
                 "python",
@@ -59,6 +60,7 @@ SERVICES = {
             "cmd": [
                 "uv",
                 "run",
+                "--no-project",
                 "--with-requirements",
                 "../../setup-requirements.txt",
                 "python",
@@ -344,7 +346,12 @@ def run_service_setup(
 
             speaker_env_path = "extras/speaker-recognition/.env"
             cuda_version = read_env_value(speaker_env_path, "PYTORCH_CUDA_VERSION")
-            if cuda_version and cuda_version in ["cu121", "cu126", "cu128", "strixhalo"]:
+            if cuda_version and cuda_version in [
+                "cu121",
+                "cu126",
+                "cu128",
+                "strixhalo",
+            ]:
                 cmd.extend(["--pytorch-cuda-version", cuda_version])
                 console.print(
                     f"[blue][INFO][/blue] Found existing PYTORCH_CUDA_VERSION ({cuda_version}) from speaker-recognition, reusing"
@@ -1212,10 +1219,10 @@ def main():
         f"[dim]   cd backends/advanced && uv run --with-requirements ../../setup-requirements.txt python init.py[/dim]"
     )
     console.print(
-        f"[dim]   cd extras/speaker-recognition && uv run --with-requirements ../../setup-requirements.txt python init.py[/dim]"
+        f"[dim]   cd extras/speaker-recognition && uv run --no-project --with-requirements ../../setup-requirements.txt python init.py[/dim]"
     )
     console.print(
-        f"[dim]   cd extras/asr-services && uv run --with-requirements ../../setup-requirements.txt python init.py[/dim]"
+        f"[dim]   cd extras/asr-services && uv run --no-project --with-requirements ../../setup-requirements.txt python init.py[/dim]"
     )
 
 

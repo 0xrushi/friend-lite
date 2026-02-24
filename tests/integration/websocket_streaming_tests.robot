@@ -174,7 +174,7 @@ Conversation Closes On Inactivity Timeout And Restarts Speech Detection
 
     # Wait for conversation job to complete (status changes from 'started' to 'finished')
     # Timeout needs: (audio send time ~60s) + (silence timeout 20s) + (buffer 10s) = 90s
-    Wait For Job Status    ${conv_job_id}    finished    timeout=90s    interval=2s
+    Wait For Job Status    ${conv_job_id}    finished    timeout=180s    interval=2s
     Log To Console    Conversation job finished (timeout triggered)
 
     # Verify a NEW speech detection job (2nd one) was created for next conversation

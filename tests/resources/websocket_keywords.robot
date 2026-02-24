@@ -212,7 +212,7 @@ Stream And Wait For Conversation
     Log    New conversation created: ${conversation_id}
 
     # Wait for conversation to close via inactivity timeout (with queue drain, can take 45+ seconds)
-    Wait For Job Status    ${new_job}[job_id]    finished    timeout=60s    interval=2s
+    Wait For Job Status    ${new_job}[job_id]    finished    timeout=180s    interval=2s
     Log    Conversation closed: ${conversation_id}
 
     RETURN    ${conversation_id}

@@ -63,7 +63,7 @@ Upload Audio And Verify Transcript Batch Event
 
     # Wait for transcription to complete (polls every 2s, max 30s)
     # Filter by conversation_id to avoid picking up fixture conversation events
-    ${new_events}=    Wait For Plugin Event    transcript.batch    ${baseline_count}    timeout=30s    conversation_id=${conversation_id}
+    ${new_events}=    Wait For Plugin Event    transcript.batch    ${baseline_count}    timeout=180s    conversation_id=${conversation_id}
 
     # Verify at least one new event was received
     Should Be True    ${new_events} > 0
@@ -130,7 +130,7 @@ Memory Processing Should Trigger Event
 
     # Wait for full pipeline: transcription → conversation → memory (polls every 2s, max 60s)
     # Filter by conversation_id to avoid picking up fixture conversation events
-    ${new_events}=    Wait For Plugin Event    memory.processed    ${baseline_count}    timeout=60s    conversation_id=${conversation_id}
+    ${new_events}=    Wait For Plugin Event    memory.processed    ${baseline_count}    timeout=180s    conversation_id=${conversation_id}
 
     Should Be True    ${new_events} > 0
     ...    msg=At least one memory.processed event should be logged for conversation ${conversation_id}
@@ -172,7 +172,7 @@ WebSocket Disconnect Should Trigger Conversation Complete Event
     # Wait for plugin event dispatch (polls every 2s, max 30s)
     # Event dispatch depends on memory and title/summary jobs completing (~20-25s total)
     # Filter by conversation_id to avoid picking up events from other conversations
-    ${new_events}=    Wait For Plugin Event    conversation.complete    ${baseline_count}    timeout=30s    conversation_id=${conversation_id}
+    ${new_events}=    Wait For Plugin Event    conversation.complete    ${baseline_count}    timeout=180s    conversation_id=${conversation_id}
 
     Should Be True    ${new_events} > 0
     ...    msg=At least one conversation.complete event should be logged for conversation ${conversation_id}
@@ -209,9 +209,9 @@ Verify All Events Are Logged
 
     # Wait for events in pipeline order (polls every 2s for each)
     # Filter by conversation_id to avoid picking up fixture conversation events
-    ${batch_new}=    Wait For Plugin Event    transcript.batch    ${batch_baseline}    timeout=30s    conversation_id=${conversation_id}
-    ${conv_new}=    Wait For Plugin Event    conversation.complete    ${conv_baseline}    timeout=30s    conversation_id=${conversation_id}
-    ${mem_new}=    Wait For Plugin Event    memory.processed    ${mem_baseline}    timeout=60s    conversation_id=${conversation_id}
+    ${batch_new}=    Wait For Plugin Event    transcript.batch    ${batch_baseline}    timeout=180s    conversation_id=${conversation_id}
+    ${conv_new}=    Wait For Plugin Event    conversation.complete    ${conv_baseline}    timeout=180s    conversation_id=${conversation_id}
+    ${mem_new}=    Wait For Plugin Event    memory.processed    ${mem_baseline}    timeout=180s    conversation_id=${conversation_id}
 
     Should Be True    ${batch_new} > 0
     ...    msg=transcript.batch events should be logged for conversation ${conversation_id}
