@@ -9,6 +9,9 @@ import logging
 from datetime import datetime, timezone
 from typing import List
 
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import JSONResponse
+
 from advanced_omi_backend.auth import current_active_user
 from advanced_omi_backend.models.annotation import (
     Annotation,
@@ -28,8 +31,6 @@ from advanced_omi_backend.models.conversation import Conversation
 from advanced_omi_backend.services.knowledge_graph import get_knowledge_graph_service
 from advanced_omi_backend.services.memory import get_memory_service
 from advanced_omi_backend.users import User
-from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import JSONResponse
 
 logger = logging.getLogger(__name__)
 
