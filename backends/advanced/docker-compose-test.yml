@@ -202,7 +202,10 @@ services:
       context: ../..
       dockerfile: tests/Dockerfile.mock-asr
     ports:
-      - "8765:8765"
+      - target: 8765
+        published: 8765
+        protocol: tcp
+        host_ip: 0.0.0.0
     environment:
       # Provider mode for mock ASR: mock, parakeet, vibevoice, deepgram
       # vibevoice mode returns diarized segments with speaker labels

@@ -604,7 +604,7 @@ async def open_conversation_job(
 
             logger.info(
                 f"🕐 Conversation {conversation_id} inactive for "
-                f"{inactivity_duration/60:.1f} minutes (threshold: {inactivity_timeout_minutes} min), "
+                f"{inactivity_duration / 60:.1f} minutes (threshold: {inactivity_timeout_minutes} min), "
                 f"auto-closing conversation (session remains active for next conversation)..."
             )
             # DON'T set session to finalizing - just close this conversation
@@ -702,6 +702,21 @@ async def open_conversation_job(
     logger.info(
         f"📊 Conversation {conversation_id[:12]} end_reason determined: {end_reason}"
     )
+
+    conversation_for_end_reason = await Conversation.find_one(
+        Conversation.conversation_id == conversation_id
+    )
+    if conversation_for_end_reason and conversation_for_end_reason.end_reason is None:
+        try:
+            conversation_for_end_reason.end_reason = Conversation.EndReason(end_reason)
+        except ValueError:
+            logger.warning(f"⚠️ Invalid end_reason '{end_reason}', using UNKNOWN")
+            conversation_for_end_reason.end_reason = Conversation.EndReason.UNKNOWN
+        await conversation_for_end_reason.save()
+        logger.info(
+            f"💾 Persisted end_reason={conversation_for_end_reason.end_reason} early for "
+            f"conversation {conversation_id[:12]}"
+        )
 
     # Wrap all post-processing in try/finally to guarantee handle_end_of_conversation()
     # is always called, even if an exception occurs during transcript saving, job

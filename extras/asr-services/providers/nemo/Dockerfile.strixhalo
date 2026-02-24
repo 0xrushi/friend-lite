@@ -1,0 +1,64 @@
+# syntax=docker/dockerfile:1
+#
+# NeMo ASR Provider Dockerfile for AMD Strix Halo (gfx1151)
+#
+# Uses pip for PyTorch/ROCm installation because uv cannot resolve the ROCm
+# nightly torch build from source dist. NeMo runs without cuda-python (CUDA-only
+# binding) — ROCm support for NeMo is experimental.
+
+#########################  builder #################################
+FROM python:3.12-slim-bookworm AS builder
+
+WORKDIR /app
+
+# NeMo and texterrors need libs and C++ compiler
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libsndfile1 \
+        build-essential git portaudio19-dev curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv for dependency management
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+ENV UV_COMPILE_BYTECODE=1
+ENV UV_LINK_MODE=copy
+
+# Dependency manifest first for cache-friendly installs
+COPY pyproject.toml uv.lock ./
+
+# Sync nemo-rocm group (NeMo without cuda-python; torch provided separately)
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-install-project --group nemo-rocm
+
+# Install PyTorch with ROCm support using uv pip
+# uv cannot resolve rocm[libraries] from source dist, so we use pip index directly
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --index-url https://rocm.nightlies.amd.com/v2/gfx1151/ \
+    --pre "torch>=2.10" "torchaudio>=2.10"
+
+#########################  runtime #################################
+FROM python:3.12-slim-bookworm AS runtime
+ENV PYTHONUNBUFFERED=1
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libsndfile1 build-essential portaudio19-dev curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy installed packages from builder's venv to system Python
+COPY --from=builder /app/.venv/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+
+# Copy application code
+COPY common/ ./common/
+COPY providers/nemo/ ./providers/nemo/
+
+# Default environment variables
+ENV ASR_MODEL="nvidia/parakeet-tdt-0.6b-v3"
+ENV CHUNKING_ENABLED="true"
+ENV MIN_AUDIO_FOR_CHUNKING="60.0"
+ENV CHUNK_DURATION_SECONDS="30.0"
+ENV HSA_OVERRIDE_GFX_VERSION=11.5.1
+
+EXPOSE 8765
+
+CMD ["python", "-m", "providers.nemo.service", "--port", "8765"]
