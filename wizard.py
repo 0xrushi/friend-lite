@@ -388,14 +388,78 @@ def run_service_setup(
         # For openmemory-mcp, try to pass OpenAI API key from backend if available
         if service_name == "openmemory-mcp":
             backend_env_path = "backends/advanced/.env"
+            openmemory_env_path = "extras/openmemory-mcp/.env"
             openai_key = read_env_value(backend_env_path, "OPENAI_API_KEY")
-            if openai_key and not is_placeholder(
+            backend_openai_base_url = read_env_value(
+                backend_env_path, "OPENAI_BASE_URL"
+            )
+            backend_embedding_model = read_env_value(
+                backend_env_path, "OPENAI_EMBEDDING_MODEL"
+            )
+            backend_embedding_dims = read_env_value(
+                backend_env_path, "OPENAI_EMBEDDING_DIMENSIONS"
+            )
+
+            existing_embeddings_provider = read_env_value(
+                openmemory_env_path, "OPENMEMORY_EMBEDDINGS_PROVIDER"
+            )
+            existing_embeddings_base_url = read_env_value(
+                openmemory_env_path, "OPENMEMORY_EMBEDDINGS_BASE_URL"
+            )
+            existing_embeddings_model = read_env_value(
+                openmemory_env_path, "OPENMEMORY_EMBEDDINGS_MODEL"
+            )
+            existing_embeddings_api_key = read_env_value(
+                openmemory_env_path, "OPENMEMORY_EMBEDDINGS_API_KEY"
+            )
+            existing_embeddings_dims = read_env_value(
+                openmemory_env_path, "OPENMEMORY_EMBEDDINGS_DIMENSIONS"
+            )
+
+            def _has_value(value):
+                return value and value.strip()
+
+            has_openai_key = _has_value(openai_key) and not is_placeholder(
                 openai_key,
                 "your_openai_api_key_here",
                 "your-openai-api-key-here",
                 "your_openai_key_here",
                 "your-openai-key-here",
+            )
+
+            # Prefer an existing OpenMemory local embedding configuration if available.
+            if (
+                existing_embeddings_provider == "local"
+                and _has_value(existing_embeddings_base_url)
+                and _has_value(existing_embeddings_model)
+                and _has_value(existing_embeddings_api_key)
+                and _has_value(existing_embeddings_dims)
             ):
+                cmd.extend(["--embeddings-provider", "local"])
+                cmd.extend(["--embeddings-base-url", existing_embeddings_base_url])
+                cmd.extend(["--embeddings-model", existing_embeddings_model])
+                cmd.extend(["--embeddings-api-key", existing_embeddings_api_key])
+                cmd.extend(["--embeddings-dimensions", existing_embeddings_dims])
+                console.print(
+                    "[blue][INFO][/blue] Found existing local embeddings config for OpenMemory, reusing"
+                )
+            elif (
+                has_openai_key
+                and _has_value(backend_openai_base_url)
+                and "api.openai.com" not in backend_openai_base_url
+            ):
+                # Backend appears to use a local OpenAI-compatible endpoint.
+                cmd.extend(["--embeddings-provider", "local"])
+                cmd.extend(["--embeddings-base-url", backend_openai_base_url])
+                cmd.extend(["--embeddings-api-key", openai_key])
+                if _has_value(backend_embedding_model):
+                    cmd.extend(["--embeddings-model", backend_embedding_model])
+                if _has_value(backend_embedding_dims):
+                    cmd.extend(["--embeddings-dimensions", backend_embedding_dims])
+                console.print(
+                    "[blue][INFO][/blue] Found OpenAI-compatible local endpoint in backend config, pre-filling OpenMemory local embeddings"
+                )
+            elif has_openai_key:
                 cmd.extend(["--openai-api-key", openai_key])
                 console.print(
                     "[blue][INFO][/blue] Found existing OPENAI_API_KEY from backend config, reusing"
@@ -1099,12 +1163,16 @@ def main():
         )
         console.print()
 
-        # Always prompt for Neo4j password (masked input)
+        # Prompt for Neo4j password (remembers previous value on re-run)
         try:
-            console.print(
-                "Neo4j password (min 8 chars) [leave empty for default: neo4jpassword]"
+            neo4j_password = prompt_with_existing_masked(
+                "Neo4j password (min 8 chars)",
+                env_file_path="backends/advanced/.env",
+                env_key="NEO4J_PASSWORD",
+                placeholders=["", "your-neo4j-password"],
+                is_password=True,
+                default="neo4jpassword",
             )
-            neo4j_password = prompt_password("Neo4j password", min_length=8)
         except (EOFError, KeyboardInterrupt):
             neo4j_password = "neo4jpassword"
             console.print("Using default password")
