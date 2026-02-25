@@ -95,7 +95,7 @@ services:
     build:
       context: webui
       dockerfile: Dockerfile
-    profiles: ["cpu", "gpu"]
+    profiles: ["cpu", "gpu", "strixhalo"]
     ports:
       - "${REACT_UI_PORT:-5173}:${REACT_UI_PORT:-5173}"
     volumes:
@@ -122,7 +122,7 @@ services:
   # Caddy reverse proxy for unified HTTPS endpoint
   caddy:
     image: caddy:2-alpine
-    profiles: ["cpu", "gpu"]
+    profiles: ["cpu", "gpu", "strixhalo"]
     ports:
       - "8444:443"
       - "8081:80"
