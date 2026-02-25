@@ -30,6 +30,9 @@ BACKEND_WS_URL = os.getenv("BACKEND_WS_URL", "ws://localhost:8000")
 AUTH_USERNAME = os.getenv("AUTH_USERNAME")
 AUTH_PASSWORD = os.getenv("AUTH_PASSWORD")
 DEVICE_NAME = os.getenv("DEVICE_NAME", "havpe")
+SAMPLE_RATE = int(os.getenv("SAMPLE_RATE", "16000"))
+SAMPLE_WIDTH = int(os.getenv("SAMPLE_WIDTH", "2"))
+CHANNELS = int(os.getenv("CHANNELS", "1"))
 
 
 async def get_jwt_token(username: str, password: str, backend_url: str) -> str | None:
@@ -67,14 +70,18 @@ async def handle_device(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
         writer.close()
         return
 
-    backend_uri = f"{BACKEND_WS_URL}/ws?codec=pcm&token={token}&device_name={DEVICE_NAME}"
+    backend_uri = (
+        f"{BACKEND_WS_URL}/ws?codec=pcm&token={token}&device_name={DEVICE_NAME}"
+    )
 
     try:
         async with websockets.connect(backend_uri) as ws:
             logger.info("Backend connected, proxying")
 
             # Send audio-start
-            await ws.send('{"type":"audio-start","data":{"rate":16000,"width":2,"channels":1,"mode":"streaming"},"payload_length":0}')
+            await ws.send(
+                f'{{"type":"audio-start","data":{{"rate":{SAMPLE_RATE},"width":{SAMPLE_WIDTH},"channels":{CHANNELS},"mode":"streaming"}},"payload_length":0}}'
+            )
 
             # Drain incoming WS messages (interim transcripts, etc.) so the
             # buffer doesn't fill up and kill the connection.
@@ -100,7 +107,7 @@ async def handle_device(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
 
                     if msg_type == MSG_AUDIO:
                         # Wyoming audio-chunk: JSON header then binary
-                        header = f'{{"type":"audio-chunk","data":{{"rate":16000,"width":2,"channels":1}},"payload_length":{payload_len}}}'
+                        header = f'{{"type":"audio-chunk","data":{{"rate":{SAMPLE_RATE},"width":{SAMPLE_WIDTH},"channels":{CHANNELS}}},"payload_length":{payload_len}}}'
                         await ws.send(header)
                         await ws.send(payload)
 
@@ -128,9 +135,11 @@ async def handle_device(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
 
 
 async def main():
-    global BACKEND_URL, BACKEND_WS_URL, AUTH_USERNAME, AUTH_PASSWORD, DEVICE_NAME
+    global BACKEND_URL, BACKEND_WS_URL, AUTH_USERNAME, AUTH_PASSWORD, DEVICE_NAME, SAMPLE_RATE, SAMPLE_WIDTH, CHANNELS
 
-    parser = argparse.ArgumentParser(description="HAVPE Relay - TCP to WebSocket bridge")
+    parser = argparse.ArgumentParser(
+        description="HAVPE Relay - TCP to WebSocket bridge"
+    )
     parser.add_argument("--port", type=int, default=8989)
     parser.add_argument("--host", type=str, default="0.0.0.0")
     parser.add_argument("--backend-url", type=str, default=BACKEND_URL)
@@ -138,6 +147,9 @@ async def main():
     parser.add_argument("--username", type=str, default=AUTH_USERNAME)
     parser.add_argument("--password", type=str, default=AUTH_PASSWORD)
     parser.add_argument("--device-name", type=str, default=DEVICE_NAME)
+    parser.add_argument("--sample-rate", type=int, default=SAMPLE_RATE)
+    parser.add_argument("--sample-width", type=int, default=SAMPLE_WIDTH)
+    parser.add_argument("--channels", type=int, default=CHANNELS)
     parser.add_argument("-v", "--verbose", action="count", default=0)
     args = parser.parse_args()
 
@@ -146,12 +158,17 @@ async def main():
     AUTH_USERNAME = args.username
     AUTH_PASSWORD = args.password
     DEVICE_NAME = args.device_name
+    SAMPLE_RATE = args.sample_rate
+    SAMPLE_WIDTH = args.sample_width
+    CHANNELS = args.channels
 
     level = logging.WARNING - (10 * min(args.verbose, 2))
     logging.basicConfig(format="%(asctime)s %(levelname)s %(message)s", level=level)
 
     if not AUTH_USERNAME or not AUTH_PASSWORD:
-        logger.error("Set AUTH_USERNAME and AUTH_PASSWORD (env or --username/--password)")
+        logger.error(
+            "Set AUTH_USERNAME and AUTH_PASSWORD (env or --username/--password)"
+        )
         return
 
     token = await get_jwt_token(AUTH_USERNAME, AUTH_PASSWORD, BACKEND_URL)

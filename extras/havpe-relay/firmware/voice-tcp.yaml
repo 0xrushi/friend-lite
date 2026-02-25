@@ -176,7 +176,7 @@ microphone:
     i2s_audio_id: i2s_input
     i2s_din_pin: GPIO15
     i2s_mode: secondary
-    sample_rate: 16000
+    sample_rate: 48000
     bits_per_sample: 32bit
     channel: stereo
 
