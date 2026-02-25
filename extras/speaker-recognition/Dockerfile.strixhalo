@@ -6,7 +6,7 @@ ENV PYTORCH_CUDA_VERSION=${PYTORCH_CUDA_VERSION}
 # Install system dependencies
 RUN set -eux; \
     dnf -y install \
-        gcc gcc-c++ make git ffmpeg curl libjpeg-turbo-devel zlib-devel libpng-devel; \
+        gcc gcc-c++ make git ffmpeg curl libjpeg-turbo-devel zlib-devel libpng-devel sudo; \
     dnf -y clean all
 
 WORKDIR /app
@@ -53,6 +53,15 @@ RUN python -c "import torch, torchvision; print('torch', torch.__version__, torc
 # Create directories
 RUN mkdir -p /app/audio_chunks /app/debug /app/data /models
 
+ARG APP_UID=10001
+ARG APP_GID=10001
+
+RUN groupadd --system --gid ${APP_GID} app \
+    && useradd --system --uid ${APP_UID} --gid app --home-dir /home/app --create-home --shell /bin/bash app \
+    && usermod -aG wheel app \
+    && echo "app:root" | chpasswd \
+    && chown -R app:app /app /models /opt/venv
+
 # Set environment variables
 ENV HF_HOME=/models
 ENV PYTHONPATH=/app
@@ -60,6 +69,8 @@ ENV LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/lib/host-math/lib:/opt/rocm/lib/rocm
 
 # Expose port
 EXPOSE 8085
+
+USER app
 
 # Run the service
 CMD ["/opt/venv/bin/simple-speaker-service"]
