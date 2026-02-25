@@ -1,16 +1,23 @@
 [project]
 name = "havpe-relay"
-version = "0.1.0"
-description = "TCP-to-WebSocket relay for ESPHome Voice-PE that connects to the Omi advanced backend."
+version = "0.2.0"
+description = "TCP→WebSocket bridge between ESP32 Voice PE and Chronicle backend."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "easy-audio-interfaces>=0.5",
     "httpx>=0.27.0",
     "websockets>=15.0.1",
+    "rumps>=0.4.0",
+    "python-dotenv>=1.0.0",
 ]
 
 [dependency-groups]
 dev = [
     "black>=25.1.0",
+]
+firmware = [
+    "esphome>=2025.12.0",
+]
+test = [
+    "aioesphomeapi>=30.2.0",
 ]
