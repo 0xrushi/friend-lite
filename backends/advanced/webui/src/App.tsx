@@ -24,6 +24,7 @@ const LiveRecord = lazy(() => import('./pages/LiveRecord'))
 const Plugins = lazy(() => import('./pages/Plugins'))
 const Finetuning = lazy(() => import('./pages/Finetuning'))
 
+
 function PageSkeleton() {
   return (
     <div className="flex items-center justify-center h-64">
@@ -159,6 +160,7 @@ function App() {
                     </Suspense>
                   </PageErrorBoundary>
                 } />
+
               </Route>
             </Routes>
             </Router>

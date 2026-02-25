@@ -16,6 +16,7 @@ export default function Layout() {
     { path: '/conversations', label: 'Conversations', icon: MessageSquare },
     { path: '/memories', label: 'Memories', icon: Brain },
     { path: '/users', label: 'User Management', icon: Users },
+
     ...(isAdmin ? [
       { path: '/upload', label: 'Upload Audio', icon: Upload },
       { path: '/queue', label: 'Queue & Events', icon: Layers },
