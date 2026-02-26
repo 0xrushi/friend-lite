@@ -9,7 +9,7 @@ services:
       dockerfile: Dockerfile
       args:
         PYTORCH_CUDA_VERSION: ${PYTORCH_CUDA_VERSION:-cpu}
-    image: speaker-recognition:latest
+    image: ${CHRONICLE_REGISTRY:-}chronicle-speaker:${CHRONICLE_TAG:-latest}
     env_file:
       - .env
     ports:
@@ -63,6 +63,7 @@ services:
   # React Web UI
   web-ui:
     platform: linux/amd64
+    image: ${CHRONICLE_REGISTRY:-}chronicle-speaker-webui:${CHRONICLE_TAG:-latest}
     build:
       context: webui
       dockerfile: Dockerfile

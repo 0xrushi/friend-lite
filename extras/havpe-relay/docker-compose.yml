@@ -1,5 +1,6 @@
 services:
   havpe-relay:
+    image: ${CHRONICLE_REGISTRY:-}chronicle-havpe-relay:${CHRONICLE_TAG:-latest}
     build:
       context: .
       dockerfile: Dockerfile
@@ -21,7 +22,7 @@ services:
       timeout: 10s
       retries: 3
       start_period: 10s
-    command: ["uv", "run", "python3", "main.py"] 
+    command: ["uv", "run", "python3", "main.py"]
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
