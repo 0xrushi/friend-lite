@@ -56,6 +56,7 @@ export const useAudioStreamingOrchestrator = ({
     }
     const isAdvanced = settings.jwtToken && settings.isAuthenticated;
 
+    const isAdvanced = settings.jwtToken && settings.isAuthenticated;
     if (isAdvanced) {
       const params = new URLSearchParams();
       params.append('token', settings.jwtToken!);
