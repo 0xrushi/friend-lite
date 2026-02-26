@@ -207,12 +207,15 @@ models:
     api_family: websocket
     model_url: wss://api.deepgram.com/v1/listen
     api_key: ${oc.env:DEEPGRAM_API_KEY,''}
+    capabilities:
+      - diarization
     operations:
       query:
         model: nova-3
         language: multi
         smart_format: 'true'
         punctuate: 'true'
+        diarize: 'true'
         encoding: linear16
         sample_rate: 16000
         channels: '1'
@@ -298,6 +301,7 @@ models:
         sample_rate: 16000
         word_timestamps: 'true'
         diarize: 'true'
+        sentence_timestamps: 'true'
       end:
         message:
           type: finalize
@@ -503,6 +507,16 @@ backend:
 # ===========================
 # Cron Jobs Configuration
 # ===========================
+# ===========================
+# Observability Configuration
+# ===========================
+observability:
+  langfuse:
+    # Browser-accessible URL for linking to Langfuse sessions.
+    # Distinct from LANGFUSE_HOST which may be an internal Docker URL.
+    # Example: http://localhost:3002
+    public_url: ''
+
 cron_jobs:
   speaker_finetuning:
     description: "Process speaker diarization annotations and send to speaker recognition service for training"
@@ -520,3 +534,7 @@ cron_jobs:
     description: "Analyze user annotations and optimize LLM prompts"
     enabled: false
     schedule: "0 4 * * 0"
+  annotation_suggestions:
+    description: "Use LLM to surface potential transcript errors for user review"
+    enabled: false
+    schedule: "0 5 * * *"

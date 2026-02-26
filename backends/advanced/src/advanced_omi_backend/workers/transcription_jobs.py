@@ -10,10 +10,8 @@ import json
 import logging
 import os
 import time
-import uuid
 import wave
 from datetime import datetime
-from pathlib import Path
 from typing import Any, Dict
 
 from beanie.operators import In
@@ -21,20 +19,18 @@ from rq import get_current_job
 from rq.exceptions import NoSuchJobError
 from rq.job import Job
 
-from advanced_omi_backend.config import get_backend_config, get_transcription_job_timeout
+from advanced_omi_backend.config import get_transcription_job_timeout
 from advanced_omi_backend.controllers.queue_controller import (
     JOB_RESULT_TTL,
-    REDIS_URL,
-    redis_conn,
     start_post_conversation_jobs,
     transcription_queue,
 )
 from advanced_omi_backend.models.audio_chunk import AudioChunkDocument
 from advanced_omi_backend.models.conversation import Conversation
-from advanced_omi_backend.models.job import BaseRQJob, JobPriority, async_job
-from advanced_omi_backend.services.audio_stream import TranscriptionResultsAggregator
+from advanced_omi_backend.models.job import async_job
 from advanced_omi_backend.plugins.events import PluginEvent
-from advanced_omi_backend.services.plugin_service import ensure_plugin_router
+from advanced_omi_backend.services.audio_stream import TranscriptionResultsAggregator
+from advanced_omi_backend.services.plugin_service import dispatch_plugin_event
 from advanced_omi_backend.services.transcription import (
     get_transcription_provider,
     is_transcription_available,
@@ -47,6 +43,7 @@ from advanced_omi_backend.utils.conversation_utils import (
     analyze_speech,
     mark_conversation_deleted,
 )
+from advanced_omi_backend.utils.job_utils import update_job_meta
 
 logger = logging.getLogger(__name__)
 
@@ -236,11 +233,27 @@ async def transcribe_full_audio_job(
         actual_sample_rate = 16000
 
     try:
+        # Progress callback: writes batch progress to RQ job.meta so the
+        # queue API and UI can show "Transcribing segment X of Y".
+        def _on_batch_progress(event: dict) -> None:
+            job = get_current_job()
+            if job:
+                current = event.get("current", 0)
+                total = event.get("total", 0)
+                job.meta["batch_progress"] = {
+                    "current": current,
+                    "total": total,
+                    "percent": int(current / total * 100) if total else 0,
+                    "message": f"Transcribing segment {current} of {total}",
+                }
+                job.save_meta()
+
         # Transcribe the audio directly from memory (no disk I/O needed)
         transcribe_kwargs: Dict[str, Any] = {
             "audio_data": wav_data,
             "sample_rate": actual_sample_rate,
             "diarize": True,
+            "progress_callback": _on_batch_progress,
         }
         if context_info:
             transcribe_kwargs["context_info"] = context_info
@@ -265,48 +278,21 @@ async def transcribe_full_audio_job(
 
     # Trigger transcript-level plugins BEFORE speech validation
     # This ensures wake-word commands execute even if conversation gets deleted
-    logger.info(
-        f"🔍 DEBUG: About to trigger plugins - transcript_text exists: {bool(transcript_text)}"
-    )
     if transcript_text:
         try:
-            plugin_router = await ensure_plugin_router()
-
-            if plugin_router:
-                logger.info(
-                    f"🔍 DEBUG: Preparing to trigger transcript plugins for conversation {conversation_id}"
-                )
-                plugin_data = {
+            await dispatch_plugin_event(
+                event=PluginEvent.TRANSCRIPT_BATCH,
+                user_id=user_id,
+                data={
                     "transcript": transcript_text,
                     "segment_id": f"{conversation_id}_batch",
                     "conversation_id": conversation_id,
                     "segments": segments,
                     "word_count": len(words),
-                }
-
-                logger.info(
-                    f"🔌 DISPATCH: transcript.batch event "
-                    f"(conversation={conversation_id[:12]}, words={len(words)})"
-                )
-
-                plugin_results = await plugin_router.dispatch_event(
-                    event=PluginEvent.TRANSCRIPT_BATCH,
-                    user_id=user_id,
-                    data=plugin_data,
-                    metadata={"client_id": client_id},
-                )
-
-                logger.info(
-                    f"🔌 RESULT: transcript.batch dispatched to {len(plugin_results) if plugin_results else 0} plugins"
-                )
-
-                if plugin_results:
-                    logger.info(
-                        f"✅ Triggered {len(plugin_results)} transcript plugins in batch mode"
-                    )
-                    for result in plugin_results:
-                        if result.message:
-                            logger.info(f"  Plugin: {result.message}")
+                },
+                metadata={"client_id": client_id},
+                description=f"conversation={conversation_id[:12]}, words={len(words)}",
+            )
         except Exception as e:
             logger.exception(f"⚠️ Error triggering transcript plugins in batch mode: {e}")
 
@@ -539,21 +525,14 @@ async def transcribe_full_audio_job(
     )
 
     # Update job metadata with title and summary for UI display
-    current_job = get_current_job()
-    if current_job:
-        if not current_job.meta:
-            current_job.meta = {}
-        current_job.meta.update(
-            {
-                "conversation_id": conversation_id,
-                "title": conversation.title,
-                "summary": conversation.summary,
-                "transcript_length": len(transcript_text),
-                "word_count": len(words),
-                "processing_time": processing_time,
-            }
-        )
-        current_job.save_meta()
+    update_job_meta(
+        conversation_id=conversation_id,
+        title=conversation.title,
+        summary=conversation.summary,
+        transcript_length=len(transcript_text),
+        word_count=len(words),
+        processing_time=processing_time,
+    )
 
     return {
         "success": True,
@@ -586,7 +565,10 @@ async def create_audio_only_conversation(
     placeholder_conversation = await Conversation.find_one(
         Conversation.client_id == session_id,
         Conversation.always_persist == True,
-        In(Conversation.processing_status, ["pending_transcription", "transcription_failed"]),
+        In(
+            Conversation.processing_status,
+            ["pending_transcription", "transcription_failed"],
+        ),
     )
 
     if placeholder_conversation:
@@ -630,7 +612,12 @@ async def create_audio_only_conversation(
 
 @async_job(redis=True, beanie=True)
 async def transcription_fallback_check_job(
-    session_id: str, user_id: str, client_id: str, timeout_seconds: int = None, *, redis_client=None
+    session_id: str,
+    user_id: str,
+    client_id: str,
+    timeout_seconds: int = None,
+    *,
+    redis_client=None,
 ) -> Dict[str, Any]:
     """
     Check if streaming transcription succeeded, fallback to batch if needed.
@@ -912,18 +899,12 @@ async def stream_speech_detection_job(
     )
 
     # Update job metadata to show status
-    if current_job:
-        if not current_job.meta:
-            current_job.meta = {}
-        current_job.meta.update(
-            {
-                "status": "listening_for_speech",
-                "session_id": session_id,
-                "client_id": client_id,
-                "session_level": True,  # Mark as session-level job
-            }
-        )
-        current_job.save_meta()
+    update_job_meta(
+        status="listening_for_speech",
+        session_id=session_id,
+        client_id=client_id,
+        session_level=True,  # Mark as session-level job
+    )
 
     # Track when session closes for graceful shutdown
     session_closed_at = None
@@ -942,7 +923,10 @@ async def stream_speech_detection_job(
 
         # Check if session has closed
         session_status = await redis_client.hget(session_key, "status")
-        session_closed = session_status and session_status.decode() in ["finalizing", "finished"]
+        session_closed = session_status and session_status.decode() in [
+            "finalizing",
+            "finished",
+        ]
 
         if session_closed and session_closed_at is None:
             # Session just closed - start grace period for final transcription
@@ -955,6 +939,19 @@ async def stream_speech_detection_job(
         if session_closed_at and (time.time() - session_closed_at) > final_check_grace_period:
             logger.info(f"✅ Session ended without speech (grace period expired)")
             break
+
+        # Consume any stale conversation close request (defensive — shouldn't normally
+        # appear since services.py gates on conversation:current, but handles race conditions)
+        close_reason = await redis_client.hget(session_key, "conversation_close_requested")
+        if close_reason:
+            await redis_client.hdel(session_key, "conversation_close_requested")
+            close_reason_str = (
+                close_reason.decode() if isinstance(close_reason, bytes) else close_reason
+            )
+            logger.info(
+                f"🔒 Conversation close requested ({close_reason_str}) during speech detection — "
+                f"no open conversation to close, flag consumed"
+            )
 
         if time.time() - start_time > max_runtime:
             logger.warning(f"⏱️ Max runtime reached, exiting")
@@ -1016,7 +1013,9 @@ async def stream_speech_detection_job(
         from datetime import datetime
 
         await redis_client.hset(
-            session_key, "last_event", f"speech_detected:{datetime.utcnow().isoformat()}"
+            session_key,
+            "last_event",
+            f"speech_detected:{datetime.utcnow().isoformat()}",
         )
         await redis_client.hset(session_key, "speech_detected_at", datetime.utcnow().isoformat())
 
@@ -1028,7 +1027,9 @@ async def stream_speech_detection_job(
 
             # Add session event for speaker check starting
             await redis_client.hset(
-                session_key, "last_event", f"speaker_check_starting:{datetime.utcnow().isoformat()}"
+                session_key,
+                "last_event",
+                f"speaker_check_starting:{datetime.utcnow().isoformat()}",
             )
             await redis_client.hset(session_key, "speaker_check_status", "checking")
             from .speaker_jobs import check_enrolled_speakers_job
@@ -1041,7 +1042,7 @@ async def stream_speech_detection_job(
                 client_id,
                 job_timeout=300,  # 5 minutes for speaker recognition
                 result_ttl=600,
-                job_id=f"speaker-check_{session_id[:12]}_{conversation_count}",
+                job_id=f"speaker-check_{session_id}_{conversation_count}",
                 description=f"Speaker check for conversation #{conversation_count+1}",
                 meta={"client_id": client_id},
             )
@@ -1083,7 +1084,9 @@ async def stream_speech_detection_job(
                     )
                     if identified_speakers:
                         await redis_client.hset(
-                            session_key, "identified_speakers", ",".join(identified_speakers)
+                            session_key,
+                            "identified_speakers",
+                            ",".join(identified_speakers),
                         )
                     break
                 elif speaker_check_job.is_failed:
@@ -1142,8 +1145,8 @@ async def stream_speech_detection_job(
             speech_job_id,  # Pass speech detection job ID
             job_timeout=10800,  # 3 hours to match max_runtime in open_conversation_job
             result_ttl=JOB_RESULT_TTL,  # Use configured TTL (24 hours) instead of 10 minutes
-            job_id=f"open-conv_{session_id[:12]}_{conversation_count}",
-            description=f"Conversation #{conversation_count+1} for {session_id[:12]}",
+            job_id=f"open-conv_{session_id}_{conversation_count}",
+            description=f"Conversation #{conversation_count+1} for {session_id}",
             meta={"client_id": client_id},
         )
 
@@ -1161,7 +1164,7 @@ async def stream_speech_detection_job(
             current_job.meta.update(
                 {
                     "conversation_job_id": open_job.id,
-                    "speaker_check_job_id": speaker_check_job.id if speaker_check_job else None,
+                    "speaker_check_job_id": (speaker_check_job.id if speaker_check_job else None),
                     "detected_speakers": identified_speakers,
                     "speech_detected_at": datetime.fromtimestamp(speech_detected_at).isoformat(),
                     "session_id": session_id,
@@ -1245,7 +1248,7 @@ async def stream_speech_detection_job(
         client_id,
         timeout_seconds=config_timeout,
         job_timeout=config_timeout + 300,  # Extra 5 min overhead for fallback check
-        job_id=f"fallback_check_{session_id[:12]}",
+        job_id=f"fallback_check_{session_id}",
         description=f"Transcription fallback check for {session_id[:8]} (no speech)",
         meta={"session_id": session_id, "client_id": client_id, "no_speech": True},
     )

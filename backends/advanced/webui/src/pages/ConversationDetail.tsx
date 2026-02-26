@@ -3,10 +3,10 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import {
   ArrowLeft, Calendar, User, Trash2, RefreshCw, MoreVertical,
-  RotateCcw, Zap, Play, Pause,
-  Save, X, Pencil, Brain, Clock, Database, Layers, Star
+  RotateCcw, Zap, Play, Pause, Download,
+  Save, X, Pencil, Brain, Clock, Database, Layers, Star, BarChart3
 } from 'lucide-react'
-import { annotationsApi, speakerApi, BACKEND_URL } from '../services/api'
+import { annotationsApi, speakerApi, systemApi, BACKEND_URL } from '../services/api'
 import {
   useConversationDetail, useConversationMemories,
   useDeleteConversation, useReprocessTranscript, useReprocessMemory, useReprocessSpeakers, useToggleStar
@@ -87,6 +87,17 @@ export default function ConversationDetail() {
 
   // Dropdown menu state
   const [openDropdown, setOpenDropdown] = useState(false)
+
+  // Langfuse observability link
+  const [langfuseSessionUrl, setLangfuseSessionUrl] = useState<string | null>(null)
+  useEffect(() => {
+    systemApi.getObservabilityConfig().then(res => {
+      const cfg = res.data?.langfuse
+      if (cfg?.enabled && cfg?.session_base_url) {
+        setLangfuseSessionUrl(cfg.session_base_url)
+      }
+    }).catch(() => {})
+  }, [])
 
   // Reprocessing state
   const [reprocessingTranscript, setReprocessingTranscript] = useState(false)
@@ -322,6 +333,27 @@ export default function ConversationDetail() {
   }
 
   // Action handlers
+  const handleDownloadAudio = async () => {
+    if (!id) return
+    setOpenDropdown(false)
+    try {
+      const token = localStorage.getItem(getStorageKey('token')) || ''
+      const resp = await fetch(`${BACKEND_URL}/api/audio/get_audio/${id}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!resp.ok) throw new Error(`Download failed: ${resp.status}`)
+      const blob = await resp.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${conversation?.title || id}.wav`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (err: any) {
+      setActionError(`Failed to download audio: ${err.message || 'Unknown error'}`)
+    }
+  }
+
   const handleDelete = async () => {
     if (!id) return
     const confirmed = window.confirm('Are you sure you want to delete this conversation?')
@@ -455,6 +487,7 @@ export default function ConversationDetail() {
         })
       }
       setEnrolledSpeakers(prev => {
+        if (newSpeaker === 'Unknown Speaker') return prev
         if (prev.some(s => s.name === newSpeaker)) return prev
         return [...prev, { speaker_id: `temp_${Date.now()}_${newSpeaker}`, name: newSpeaker }]
       })
@@ -589,6 +622,17 @@ export default function ConversationDetail() {
         </button>
 
         <div className="flex items-center space-x-1">
+          {langfuseSessionUrl && conversation.conversation_id && (
+            <a
+              href={`${langfuseSessionUrl}/${conversation.conversation_id}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="p-2 rounded-full hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors"
+              title="View traces in Langfuse"
+            >
+              <BarChart3 className="h-5 w-5 text-gray-400 dark:text-gray-500 hover:text-blue-500 dark:hover:text-blue-400" />
+            </a>
+          )}
           <button
             onClick={handleToggleStar}
             className="p-2 rounded-full hover:bg-yellow-100 dark:hover:bg-yellow-900/30 transition-colors"
@@ -635,6 +679,15 @@ export default function ConversationDetail() {
                 {reprocessingSpeakers ? <RefreshCw className="h-4 w-4 animate-spin" /> : <User className="h-4 w-4" />}
                 <span>Reprocess Speakers</span>
               </button>
+              {conversation.audio_chunks_count && conversation.audio_chunks_count > 0 && (
+                <button
+                  onClick={handleDownloadAudio}
+                  className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center space-x-2"
+                >
+                  <Download className="h-4 w-4" />
+                  <span>Download Audio</span>
+                </button>
+              )}
               <div className="border-t border-gray-200 dark:border-gray-600 my-1"></div>
               <button
                 onClick={handleDelete}

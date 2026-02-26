@@ -184,6 +184,7 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
+      - ../../certs:/certs:ro
     depends_on:
       chronicle-backend:
         condition: service_healthy

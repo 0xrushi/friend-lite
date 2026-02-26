@@ -1,8 +1,41 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Activity, RefreshCw, CheckCircle, XCircle, AlertCircle, Users, Database, Server, MoreVertical, RotateCcw, Power } from 'lucide-react'
+import { Activity, RefreshCw, CheckCircle, XCircle, AlertCircle, Users, Database, Server, MoreVertical, RotateCcw, Power, Smartphone, Copy, Check } from 'lucide-react'
+import { QRCodeSVG } from 'qrcode.react'
 import { useAuth } from '../contexts/AuthContext'
+import { useTheme } from '../contexts/ThemeContext'
 import { useSystemData, useRestartWorkers, useRestartBackend } from '../hooks/useSystem'
 import { systemApi } from '../services/api'
+
+function getBackendHttpUrl(): string {
+  const { protocol, hostname, port } = window.location
+
+  const isStandardPort =
+    (protocol === 'https:' && (port === '' || port === '443')) ||
+    (protocol === 'http:' && (port === '' || port === '80'))
+
+  const basePath = import.meta.env.BASE_URL
+  if (isStandardPort && basePath && basePath !== '/') {
+    return `${protocol}//${hostname}`
+  }
+
+  if (import.meta.env.VITE_BACKEND_URL) {
+    const url = import.meta.env.VITE_BACKEND_URL as string
+    if (url.startsWith('/') || url === '') {
+      return `${protocol}//${hostname}${port ? `:${port}` : ''}`
+    }
+    return url
+  }
+
+  if (isStandardPort) {
+    return `${protocol}//${hostname}`
+  }
+
+  if (port === '5173') {
+    return `${protocol}//${hostname}:8000`
+  }
+
+  return `${protocol}//${hostname}${port ? `:${port}` : ''}`
+}
 
 interface ServiceStatus {
   healthy: boolean
@@ -12,6 +45,26 @@ interface ServiceStatus {
 
 export default function System() {
   const { isAdmin } = useAuth()
+  const { isDark } = useTheme()
+  const [copied, setCopied] = useState(false)
+  const backendUrl = getBackendHttpUrl()
+
+  const handleCopyUrl = async () => {
+    try {
+      await navigator.clipboard.writeText(backendUrl)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      const textArea = document.createElement('textarea')
+      textArea.value = backendUrl
+      document.body.appendChild(textArea)
+      textArea.select()
+      document.execCommand('copy')
+      document.body.removeChild(textArea)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    }
+  }
 
   // TanStack Query hooks for data fetching
   const { data: systemData, isLoading: loading, error: systemError, refetch: refetchSystem, dataUpdatedAt } = useSystemData(isAdmin)
@@ -22,7 +75,7 @@ export default function System() {
 
   // UI state
   const [menuOpen, setMenuOpen] = useState(false)
-  const [confirmModal, setConfirmModal] = useState<'workers' | 'backend' | null>(null)
+  const [confirmModal, setConfirmModal] = useState<'workers' | 'backend' | 'both' | null>(null)
   const [restartingBackend, setRestartingBackend] = useState(false)
   const [workerBanner, setWorkerBanner] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -104,6 +157,19 @@ export default function System() {
     restartBackendMutation.mutate(undefined, {
       onSuccess: () => {
         pollHealth()
+      },
+    })
+  }
+
+  const handleRestartBoth = () => {
+    setConfirmModal(null)
+    restartWorkersMutation.mutate(undefined, {
+      onSuccess: () => {
+        restartBackendMutation.mutate(undefined, {
+          onSuccess: () => {
+            pollHealth()
+          },
+        })
       },
     })
   }
@@ -233,13 +299,20 @@ export default function System() {
                   <RotateCcw className="h-4 w-4 mr-2" />
                   Restart Workers
                 </button>
-                <div className="border-t border-gray-200 dark:border-gray-700 my-1" />
                 <button
                   onClick={() => { setMenuOpen(false); setConfirmModal('backend') }}
                   className="w-full flex items-center px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-gray-50 dark:hover:bg-gray-700"
                 >
                   <Power className="h-4 w-4 mr-2" />
                   Restart Backend
+                </button>
+                <div className="border-t border-gray-200 dark:border-gray-700 my-1" />
+                <button
+                  onClick={() => { setMenuOpen(false); setConfirmModal('both') }}
+                  className="w-full flex items-center px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-gray-50 dark:hover:bg-gray-700"
+                >
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Restart Both
                 </button>
               </div>
             )}
@@ -285,7 +358,7 @@ export default function System() {
                   </button>
                 </div>
               </>
-            ) : (
+            ) : confirmModal === 'backend' ? (
               <>
                 <div className="flex items-center space-x-3 mb-4">
                   <div className="p-2 rounded-full bg-red-100 dark:bg-red-900/30">
@@ -315,6 +388,39 @@ export default function System() {
                     className="px-4 py-2 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
                   >
                     Restart Backend
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="flex items-center space-x-3 mb-4">
+                  <div className="p-2 rounded-full bg-red-100 dark:bg-red-900/30">
+                    <RefreshCw className="h-5 w-5 text-red-600 dark:text-red-400" />
+                  </div>
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                    Restart Both
+                  </h3>
+                </div>
+                <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+                  This will restart workers and then the backend. The service will be briefly unavailable.
+                </p>
+                <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md p-3 mb-6">
+                  <p className="text-sm text-red-700 dark:text-red-300">
+                    Active WebSocket connections and streaming sessions will be dropped.
+                  </p>
+                </div>
+                <div className="flex justify-end space-x-3">
+                  <button
+                    onClick={() => setConfirmModal(null)}
+                    className="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleRestartBoth}
+                    className="px-4 py-2 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+                  >
+                    Restart Both
                   </button>
                 </div>
               </>
@@ -637,6 +743,44 @@ export default function System() {
             </div>
           </div>
         )}
+      </div>
+
+      {/* Connect App */}
+      <div className="mt-6 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
+        <div className="flex items-center space-x-3 mb-3">
+          <Smartphone className="h-5 w-5 text-blue-600" />
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Connect App</h3>
+        </div>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+          Scan this QR code with the Chronicle mobile app to connect it to your backend.
+        </p>
+        <div className="flex flex-col items-center space-y-4">
+          <div className="p-4 bg-white rounded-xl shadow-sm border border-gray-200 dark:border-gray-600">
+            <QRCodeSVG
+              value={backendUrl}
+              size={200}
+              level="M"
+              fgColor={isDark ? '#1f2937' : '#111827'}
+              bgColor="#ffffff"
+            />
+          </div>
+          <div className="flex items-center space-x-2">
+            <code className="px-3 py-1.5 bg-gray-100 dark:bg-gray-700 rounded text-sm text-gray-800 dark:text-gray-200 font-mono">
+              {backendUrl}
+            </code>
+            <button
+              onClick={handleCopyUrl}
+              className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-gray-600 dark:text-gray-300"
+              title="Copy URL"
+            >
+              {copied ? (
+                <Check className="h-4 w-4 text-green-500" />
+              ) : (
+                <Copy className="h-4 w-4" />
+              )}
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* Raw Data (Debug) */}

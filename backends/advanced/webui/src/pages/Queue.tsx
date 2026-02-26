@@ -22,7 +22,7 @@ import {
   Repeat,
   Zap
 } from 'lucide-react';
-import { queueApi } from '../services/api';
+import { queueApi, conversationsApi } from '../services/api';
 
 interface QueueStats {
   total_jobs: number;
@@ -162,6 +162,7 @@ const Queue: React.FC = () => {
   const [expandedJobs, setExpandedJobs] = useState<Set<string>>(new Set());
   const [conversationJobs, setConversationJobs] = useState<{[conversationId: string]: any[]}>({});
   const [lastUpdate, setLastUpdate] = useState<number>(Date.now());
+  const [selectedEvent, setSelectedEvent] = useState<EventRecord | null>(null);
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState<boolean>(() => {
     // Load from localStorage, default to true
     const saved = localStorage.getItem('queue_auto_refresh');
@@ -371,7 +372,9 @@ const Queue: React.FC = () => {
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        if (selectedJob) {
+        if (selectedEvent) {
+          setSelectedEvent(null);
+        } else if (selectedJob) {
           setSelectedJob(null);
         } else if (showFlushModal) {
           setShowFlushModal(false);
@@ -381,7 +384,7 @@ const Queue: React.FC = () => {
 
     document.addEventListener('keydown', handleEscape);
     return () => document.removeEventListener('keydown', handleEscape);
-  }, [selectedJob, showFlushModal]);
+  }, [selectedJob, showFlushModal, selectedEvent]);
 
   // Commented out - keeping for future use
   // const retryJob = async (jobId: string) => {
@@ -935,7 +938,7 @@ const Queue: React.FC = () => {
                         {health.consumer_groups && health.consumer_groups.map((group) => (
                           <div key={group.name} className="mt-2 pt-2 border-t border-gray-200">
                             <div className="text-xs text-gray-600 mb-1">{group.name}:</div>
-                            {group.consumers.map((consumer) => (
+                            {(group.consumers || []).map((consumer) => (
                               <div key={consumer.name} className="flex justify-between text-xs pl-2">
                                 <span className="text-gray-700 truncate">{consumer.name}</span>
                                 <span className={consumer.pending > 0 ? 'text-yellow-600' : 'text-green-600'}>
@@ -1140,7 +1143,7 @@ const Queue: React.FC = () => {
                               className={`flex items-center justify-between p-3 cursor-pointer transition-colors ${hasFailedJob ? 'hover:bg-red-100' : 'hover:bg-cyan-100'}`}
                               onClick={() => toggleConversationExpansion(conversationId)}
                             >
-                              <div className="flex-1">
+                              <div className="flex-1 min-w-0">
                                 <div className="flex items-center space-x-2">
                                   {isExpanded ? (
                                     <ChevronDown className={`w-4 h-4 ${hasFailedJob ? 'text-red-600' : 'text-cyan-600'}`} />
@@ -1166,7 +1169,7 @@ const Queue: React.FC = () => {
                                     </span>
                                   )}
                                 </div>
-                                <div className="mt-1 text-xs text-gray-600">
+                                <div className="mt-1 text-xs text-gray-600 truncate">
                                   Conversation: {conversationId.substring(0, 8)}... •
                                   {createdAt && `Started: ${new Date(createdAt).toLocaleTimeString()} • `}
                                   Words: {wordCount}
@@ -1178,6 +1181,27 @@ const Queue: React.FC = () => {
                                   </div>
                                 )}
                               </div>
+                              {/* Close Conversation Button - only for actively running conversations */}
+                              {openConvJob && openConvJob.status === 'started' && (
+                                <button
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    if (!confirm(`Close the active conversation for ${clientId}? This will end the current conversation and trigger post-processing.`)) return;
+                                    try {
+                                      await conversationsApi.closeActiveConversation(clientId);
+                                      fetchData();
+                                    } catch (error: any) {
+                                      console.error('Failed to close conversation:', error);
+                                      alert(`Failed to close conversation: ${error.response?.data?.error || error.message}`);
+                                    }
+                                  }}
+                                  className="flex items-center space-x-1 px-3 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors text-sm font-medium flex-shrink-0 ml-3"
+                                  title="Close the current active conversation"
+                                >
+                                  <StopCircle className="w-4 h-4" />
+                                  <span>Close</span>
+                                </button>
+                              )}
                             </div>
 
                           {/* Expanded Jobs Section */}
@@ -1396,6 +1420,19 @@ const Queue: React.FC = () => {
                                                     </div>
                                                   )}
                                                 </>
+                                              )}
+
+                                              {/* transcribe_full_audio_job batch progress */}
+                                              {job.job_type === 'transcribe_full_audio_job' && job.status === 'started' && job.meta?.batch_progress && (
+                                                <div className="mt-1">
+                                                  <div className="flex items-center justify-between text-xs mb-1">
+                                                    <span className="text-blue-700">{job.meta.batch_progress.message}</span>
+                                                    <span className="text-blue-600 font-medium">{job.meta.batch_progress.percent}%</span>
+                                                  </div>
+                                                  <div className="w-full bg-blue-200 rounded-full h-1.5">
+                                                    <div className="bg-blue-600 h-1.5 rounded-full transition-all duration-300" style={{ width: `${job.meta.batch_progress.percent}%` }} />
+                                                  </div>
+                                                </div>
                                               )}
 
                                               {/* transcribe_full_audio_job metadata */}
@@ -1829,10 +1866,12 @@ const Queue: React.FC = () => {
                                                       left: `${startPercent}%`,
                                                       width: `${widthPercent}%`
                                                     }}
-                                                    title={`Started: ${new Date(startTime).toLocaleTimeString()}\nDuration: ${formatDuration(duration)}`}
+                                                    title={`Started: ${new Date(startTime).toLocaleTimeString()}\nDuration: ${formatDuration(duration)}${job.meta?.batch_progress ? `\n${job.meta.batch_progress.message}` : ''}`}
                                                   >
                                                     <span className="text-xs text-white font-medium px-2 truncate">
-                                                      {formatDuration(duration)}
+                                                      {job.status === 'started' && job.meta?.batch_progress
+                                                        ? `${job.meta.batch_progress.current}/${job.meta.batch_progress.total}`
+                                                        : formatDuration(duration)}
                                                     </span>
                                                   </div>
                                                 </div>
@@ -2137,8 +2176,9 @@ const Queue: React.FC = () => {
                   </thead>
                   <tbody className="divide-y divide-gray-200">
                     {filtered.map((evt, idx) => {
-                      const allSuccess = evt.plugins_executed.length > 0 && evt.plugins_executed.every(p => p.success);
-                      const anyFailure = evt.plugins_executed.some(p => !p.success);
+                      const pluginsExecuted = evt.plugins_executed || [];
+                      const allSuccess = pluginsExecuted.length > 0 && pluginsExecuted.every(p => p.success);
+                      const anyFailure = pluginsExecuted.some(p => !p.success);
 
                       return (
                         <tr key={idx} className="hover:bg-gray-50">
@@ -2151,30 +2191,41 @@ const Queue: React.FC = () => {
                             </span>
                           </td>
                           <td className="px-4 py-2 text-xs text-gray-600 font-mono">
-                            {evt.user_id.length > 12 ? `${evt.user_id.slice(-8)}` : evt.user_id}
+                            {(evt.user_id || '').length > 12 ? `${evt.user_id.slice(-8)}` : evt.user_id}
                           </td>
                           <td className="px-4 py-2 text-xs text-gray-700">
-                            {evt.plugins_executed.length > 0
-                              ? evt.plugins_executed.map(p => p.plugin_id).join(', ')
+                            {pluginsExecuted.length > 0
+                              ? pluginsExecuted.map(p => p.plugin_id).join(', ')
                               : <span className="text-gray-400">none</span>
                             }
                           </td>
                           <td className="px-4 py-2">
-                            {evt.plugins_executed.length === 0 ? (
-                              <span className="text-xs text-gray-400">no plugins ran</span>
-                            ) : allSuccess ? (
-                              <span className="flex items-center space-x-1 text-xs text-green-600">
-                                <CheckCircle className="w-3.5 h-3.5" />
-                                <span>OK</span>
-                              </span>
-                            ) : anyFailure ? (
-                              <span className="flex items-center space-x-1 text-xs text-red-600" title={evt.plugins_executed.filter(p => !p.success).map(p => `${p.plugin_id}: ${p.message}`).join('; ')}>
-                                <XCircle className="w-3.5 h-3.5" />
-                                <span>Error</span>
-                              </span>
-                            ) : (
-                              <span className="text-xs text-gray-500">partial</span>
-                            )}
+                            <div className="flex items-center space-x-2">
+                              {pluginsExecuted.length === 0 ? (
+                                <span className="text-xs text-gray-400">no plugins ran</span>
+                              ) : allSuccess ? (
+                                <span className="flex items-center space-x-1 text-xs text-green-600">
+                                  <CheckCircle className="w-3.5 h-3.5" />
+                                  <span>OK</span>
+                                </span>
+                              ) : anyFailure ? (
+                                <span className="flex items-center space-x-1 text-xs text-red-600">
+                                  <XCircle className="w-3.5 h-3.5" />
+                                  <span>Error</span>
+                                </span>
+                              ) : (
+                                <span className="text-xs text-gray-500">partial</span>
+                              )}
+                              {pluginsExecuted.length > 0 && (
+                                <button
+                                  onClick={() => setSelectedEvent(evt)}
+                                  className="text-gray-400 hover:text-gray-600 p-0.5 rounded hover:bg-gray-100"
+                                  title="View details"
+                                >
+                                  <Eye className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       );
@@ -2627,6 +2678,84 @@ const Queue: React.FC = () => {
                 )}
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Event Detail Modal */}
+      {selectedEvent && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+          <div className="relative top-20 mx-auto p-5 border w-11/12 md:w-2/3 lg:w-1/2 shadow-lg rounded-md bg-white">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-medium text-gray-900">Event Details</h3>
+              <button onClick={() => setSelectedEvent(null)} className="text-gray-400 hover:text-gray-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Time</label>
+                  <p className="text-sm text-gray-900">{new Date(selectedEvent.timestamp * 1000).toLocaleString()}</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Event</label>
+                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${getEventColor(selectedEvent.event)}`}>
+                    {selectedEvent.event}
+                  </span>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">User</label>
+                  <p className="text-sm text-gray-900 font-mono">{selectedEvent.user_id}</p>
+                </div>
+                {selectedEvent.metadata?.client_id && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Client</label>
+                    <p className="text-sm text-gray-900 font-mono">{selectedEvent.metadata.client_id}</p>
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Plugin Results</label>
+                <div className="space-y-2">
+                  {(selectedEvent.plugins_executed || []).map((p, i) => (
+                    <div
+                      key={i}
+                      className={`p-3 rounded-lg border ${p.success ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}
+                    >
+                      <div className="flex items-center space-x-2 mb-1">
+                        {p.success
+                          ? <CheckCircle className="w-4 h-4 text-green-600" />
+                          : <XCircle className="w-4 h-4 text-red-600" />
+                        }
+                        <span className="text-sm font-medium">{p.plugin_id}</span>
+                        <span className={`text-xs px-1.5 py-0.5 rounded ${p.success ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                          {p.success ? 'OK' : 'Error'}
+                        </span>
+                      </div>
+                      {p.message && (
+                        <p className={`text-sm ml-6 ${p.success ? 'text-green-800' : 'text-red-800'}`}>
+                          {p.message}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {selectedEvent.metadata && Object.keys(selectedEvent.metadata).length > 0 && (
+                <details>
+                  <summary className="text-sm font-medium text-gray-700 cursor-pointer hover:text-gray-900">
+                    Raw Metadata
+                  </summary>
+                  <pre className="text-xs text-gray-900 bg-gray-50 p-2 rounded overflow-auto max-h-40 mt-2 whitespace-pre-wrap break-words">
+                    {JSON.stringify(selectedEvent.metadata, null, 2)}
+                  </pre>
+                </details>
+              )}
+            </div>
           </div>
         </div>
       )}

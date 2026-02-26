@@ -3,6 +3,7 @@ import { Music, MessageSquare, MessageCircle, Brain, Users, Upload, Settings, Lo
 import { useAuth } from '../../contexts/AuthContext'
 import { useTheme } from '../../contexts/ThemeContext'
 import GlobalRecordingIndicator from './GlobalRecordingIndicator'
+import UserLoopModal from '../UserLoopModal'
 
 export default function Layout() {
   const location = useLocation()
@@ -15,6 +16,7 @@ export default function Layout() {
     { path: '/conversations', label: 'Conversations', icon: MessageSquare },
     { path: '/memories', label: 'Memories', icon: Brain },
     { path: '/users', label: 'User Management', icon: Users },
+
     ...(isAdmin ? [
       { path: '/upload', label: 'Upload Audio', icon: Upload },
       { path: '/queue', label: 'Queue & Events', icon: Layers },
@@ -56,7 +58,7 @@ export default function Layout() {
                   <span>{user?.name || user?.email}</span>
                 </div>
               </div>
-              
+
               <button
                 onClick={logout}
                 className="flex items-center space-x-2 px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-gray-600 dark:text-gray-300"
@@ -112,6 +114,9 @@ export default function Layout() {
           </div>
         </div>
       </footer>
+
+      {/* User Loop: AI suggestion review modal (auto-opens when suggestions exist) */}
+      <UserLoopModal />
     </div>
   )
 }

@@ -53,16 +53,13 @@ WebSocket Stream Produces Final Transcripts In Redis
     Log    Closing stream - should trigger: end_marker → CloseStream → final results
     Close Audio Stream    ${stream_id}
 
-    # Allow time for streaming consumer to process end_marker and get final results
-    Sleep    5s
-
-    # Verify Redis stream transcription:results:{client_id} has entries
+    # Wait for streaming consumer to process end_marker and write final results to Redis
+    # Use retry loop instead of fixed sleep - consumer processing time varies
     ${stream_name}=    Set Variable    transcription:results:${client_id}
+    Wait Until Keyword Succeeds    30s    2s
+    ...    Redis Stream Should Not Be Empty    ${stream_name}
+
     ${stream_length}=    Redis Command    XLEN    ${stream_name}
-
-    Should Be True    ${stream_length} > 0
-    ...    Redis stream ${stream_name} is empty - no final transcripts received! This means end_marker was not sent or CloseStream failed.
-
     Log    ✅ Redis stream has ${stream_length} final transcript(s)
 
 
@@ -195,22 +192,19 @@ Stream Close Sends End Marker To Redis Stream
     # Close stream - this MUST send end_marker
     Close Audio Stream    ${stream_id}
 
-    # Allow time for end_marker to be written
-    Sleep    2s
+    # The audio stream is intentionally deleted ~1.2s after close by _try_delete_finished_stream(),
+    # so we can't rely on XRANGE to find end_marker. Instead, verify via transcription:complete
+    # which is a durable key (5-min TTL) set by StreamingTranscriptionConsumer.end_session_stream()
+    # only AFTER it processes the end_marker.
+    ${completion_key}=    Set Variable    transcription:complete:${client_id}
+    Wait Until Keyword Succeeds    30s    1s
+    ...    Verify Redis Key Exists    ${completion_key}
 
-    # Read all messages from audio stream to find end_marker
-    # Note: Redis Command returns string output from redis-cli, not a list
-    ${xrange_output}=    Redis Command    XRANGE    ${audio_stream_name}    -    +
+    ${signal_value}=    Redis Command    GET    ${completion_key}
+    Should Be Equal As Strings    ${signal_value}    1
+    ...    Completion signal should be "1" (clean close), got: ${signal_value}
 
-    # Search for end_marker in the redis-cli output string
-    # redis-cli XRANGE returns text with field names, so we just check if end_marker appears
-    ${found_end_marker}=    Run Keyword And Return Status
-    ...    Should Contain    ${xrange_output}    end_marker
-    ...    ignore_case=True
-
-    Should Be True    ${found_end_marker}    end_marker NOT found in Redis stream ${audio_stream_name}! Producer.finalize_session() did not send end_marker. XRANGE output: ${xrange_output}
-
-    Log    ✅ end_marker successfully sent to Redis stream
+    Log    ✅ end_marker was processed by streaming consumer (transcription:complete=${signal_value})
 
 
 Streaming Consumer Closes Deepgram Connection On End Marker
@@ -387,3 +381,13 @@ Streaming Completion Signal Is Set Before Transcript Read
     Log    ✅ Completion signal ${completion_key} = ${signal_value} (consumer completed before job reads)
 
 
+*** Keywords ***
+
+Redis Stream Should Not Be Empty
+    [Documentation]    Assert that a Redis stream has at least one entry.
+    ...                Used with Wait Until Keyword Succeeds for retry-based checks.
+    [Arguments]    ${stream_name}
+
+    ${stream_length}=    Redis Command    XLEN    ${stream_name}
+    Should Be True    ${stream_length} > 0
+    ...    Redis stream ${stream_name} is empty - no final transcripts received! This means end_marker was not sent or CloseStream failed.

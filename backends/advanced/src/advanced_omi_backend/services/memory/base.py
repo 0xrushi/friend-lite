@@ -341,7 +341,10 @@ class LLMProviderBase(ABC):
 
     @abstractmethod
     async def extract_memories(
-        self, text: str, prompt: str, user_id: Optional[str] = None,
+        self,
+        text: str,
+        prompt: str,
+        user_id: Optional[str] = None,
     ) -> List[str]:
         """Extract meaningful fact memories from text using an LLM.
 
@@ -356,7 +359,10 @@ class LLMProviderBase(ABC):
         pass
 
     @abstractmethod
-    async def generate_embeddings(self, texts: List[str]) -> List[List[float]]:
+    async def generate_embeddings(
+        self,
+        texts: List[str],
+    ) -> List[List[float]]:
         """Generate vector embeddings for the given texts.
 
         Args:

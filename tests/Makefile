@@ -5,7 +5,7 @@
         containers-start containers-stop containers-restart containers-rebuild \
         containers-start-rebuild containers-clean containers-status containers-logs \
         start stop restart rebuild start-rebuild status logs \
-        test test-quick test-slow test-sdk test-no-api test-with-api-keys test-all-with-slow-and-sdk clean-all \
+        test test-quick test-custom test-slow test-sdk test-no-api test-with-api-keys test-all-with-slow-and-sdk clean-all \
         test-asr test-asr-gpu \
         results results-path results-detailed
 
@@ -55,6 +55,11 @@ help:
 	@echo "ASR Tests:"
 	@echo "  make test-asr      - Run ASR protocol tests (no GPU required)"
 	@echo "  make test-asr-gpu  - Run ASR GPU tests (requires NVIDIA GPU)"
+	@echo ""
+	@echo "Running Specific Tests:"
+	@echo "  make test-custom T=\"Test Name\"     - Run a single test by name"
+	@echo "  make test-custom TAG=audio-streaming - Run tests by tag"
+	@echo "  make test-custom F=integration/foo.robot - Run a specific file"
 	@echo ""
 	@echo "Special Test Tags:"
 	@echo "  make test-slow                    - Run ONLY slow tests (backend restarts)"
@@ -213,24 +218,36 @@ logs: containers-logs
 # ============================================================================
 
 # Full workflow: start containers + run all tests
-# If CONFIG is specified and differs from running containers, recreates them
+# Auto-detects config mismatch and recreates containers if needed
 test:
-	@if docker compose -f ../backends/advanced/docker-compose-test.yml ps chronicle-backend-test 2>/dev/null | grep -q "Up"; then \
-		echo "ℹ️  Containers already running"; \
-		if [ "$(CONFIG)" != "" ]; then \
-			echo "🔄 CONFIG specified - will recreate containers to apply new config"; \
+	@RUNNING_CONFIG=$$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' \
+		$$(docker compose -f ../backends/advanced/docker-compose-test.yml ps -q chronicle-backend-test 2>/dev/null) 2>/dev/null \
+		| grep '^CONFIG_FILE=' | cut -d= -f2); \
+	if [ -n "$$RUNNING_CONFIG" ]; then \
+		if [ "$$RUNNING_CONFIG" != "$(TEST_CONFIG_FILE)" ]; then \
+			echo "⚠️  Container config mismatch: running=$$RUNNING_CONFIG expected=$(TEST_CONFIG_FILE)"; \
+			echo "🔄 Recreating containers with correct config..."; \
 			$(MAKE) containers-stop; \
 			$(MAKE) containers-start; \
 		else \
-			echo "✅ Using existing containers (use CONFIG=... to switch config)"; \
-		fi \
+			echo "✅ Containers running with correct config: $$RUNNING_CONFIG"; \
+		fi; \
 	else \
+		echo "🚀 Starting containers..."; \
 		$(MAKE) containers-start; \
 	fi
 	@$(MAKE) all
 
 # Quick workflow: run tests on existing containers (ignores CONFIG changes)
 test-quick: all
+
+# Run specific test by name, tag, or file
+# Usage:
+#   make test-custom T="Chunk Count Increments In Redis Session"
+#   make test-custom TAG=audio-streaming
+#   make test-custom F=integration/audio_streaming_integration_tests.robot
+test-custom:
+	@./run-custom.sh $(if $(T),--test "$(T)") $(if $(TAG),--tag $(TAG)) $(if $(F),$(F))
 
 # Run ONLY slow tests (backend restarts, long timeouts)
 test-slow:

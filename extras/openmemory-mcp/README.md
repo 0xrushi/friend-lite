@@ -17,7 +17,9 @@ OpenMemory MCP is a memory service from mem0.ai that provides:
 
 ```bash
 cp .env.template .env
-# Edit .env and add your OPENAI_API_KEY
+# Edit .env and add your embedding provider settings
+# - OpenAI: OPENAI_API_KEY
+# - Local OpenAI-compatible: OPENAI_BASE_URL, OPENAI_API_KEY, OPENAI_EMBEDDING_MODEL, OPENAI_EMBEDDING_DIMENSIONS
 ```
 
 ### 2. Start Services
@@ -64,7 +66,7 @@ The deployment includes:
 - **MCP Server**: http://localhost:8765
   - REST API: `/api/v1/memories`
   - MCP SSE: `/mcp/{client_name}/sse/{user_id}`
-  
+
 - **Qdrant Dashboard**: http://localhost:6334/dashboard
 
 - **UI** (if enabled): http://localhost:3001

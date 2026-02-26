@@ -118,7 +118,9 @@ def analyze_speech(transcript_data: dict) -> dict:
                 else:
                     # Check minimum duration threshold when we have timing data
                     min_duration = settings.get("min_duration", 10.0)
-                    logger.info(f"📏 Comparing duration {speech_duration:.1f}s vs threshold {min_duration:.1f}s")
+                    logger.info(
+                        f"📏 Comparing duration {speech_duration:.1f}s vs threshold {min_duration:.1f}s"
+                    )
                     if speech_duration < min_duration:
                         return {
                             "has_speech": False,
@@ -248,7 +250,6 @@ TRANSCRIPT:
         return fallback_title or "Conversation", fallback_summary or "No content"
 
 
-
 async def generate_detailed_summary(
     text: str,
     segments: Optional[list] = None,
@@ -348,7 +349,6 @@ TRANSCRIPT:
 # ============================================================================
 
 
-
 def extract_speakers_from_segments(segments: list) -> List[str]:
     """
     Extract unique speaker names from segments.
@@ -362,7 +362,11 @@ def extract_speakers_from_segments(segments: list) -> List[str]:
     speakers = []
     if segments:
         for seg in segments:
-            speaker = seg.get("speaker", "Unknown") if isinstance(seg, dict) else (seg.speaker or "Unknown")
+            speaker = (
+                seg.get("speaker", "Unknown")
+                if isinstance(seg, dict)
+                else (seg.speaker or "Unknown")
+            )
             if speaker and speaker != "Unknown" and speaker not in speakers:
                 speakers.append(speaker)
     return speakers

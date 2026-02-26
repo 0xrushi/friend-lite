@@ -524,7 +524,7 @@ Only return valid JSON, no additional text.""",
     # ------------------------------------------------------------------
     registry.register_default(
         "asr.hot_words",
-        template="hey vivi, chronicle, omi",
+        template="vivi, chronicle, omi",
         name="ASR Hot Words",
         description="Comma-separated hot words for speech recognition. "
         "For Deepgram: boosts keyword recognition via keyterm. "
@@ -604,6 +604,42 @@ When creating plugins, generate complete plugin.py code based on the user's desc
         description="System prompt for the AI plugin configuration assistant. Receives current plugin metadata.",
         category="plugin_assistant",
         variables=["plugins_metadata", "available_events", "plugin_count"],
+        is_dynamic=True,
+    )
+
+    # ------------------------------------------------------------------
+    # annotation.transcript_error_detection
+    # ------------------------------------------------------------------
+    registry.register_default(
+        "annotation.transcript_error_detection",
+        template="""\
+You are a transcript quality reviewer. Analyze the following transcript segments \
+from a conversation and identify potential transcription errors.
+
+Look for:
+- Misheard words (homophones, phonetically similar substitutions)
+- Nonsensical phrases that are likely ASR mistakes
+- Obvious hallucinations or repeated/garbled text
+- Missing or extra words that break sentence meaning
+
+Conversation title: {{title}}
+
+Segments (index: speaker - text):
+{{segments_text}}
+
+Return a JSON array of issues found. Each issue should have:
+- "segment_index": the index number of the problematic segment
+- "original_text": the exact text from that segment
+- "corrected_text": your suggested correction
+- "reason": brief explanation (e.g. "misheard word", "garbled text", "hallucination")
+
+If no issues are found, return an empty array: []
+
+Return ONLY the JSON array, no other text.""",
+        name="Transcript Error Detection",
+        description="Analyzes transcript segments for ASR errors, hallucinations, and misheard words.",
+        category="annotation",
+        variables=["title", "segments_text"],
         is_dynamic=True,
     )
 
