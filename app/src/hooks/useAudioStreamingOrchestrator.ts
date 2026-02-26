@@ -45,9 +45,18 @@ export const useAudioStreamingOrchestrator = ({
   const [isPhoneAudioMode, setIsPhoneAudioMode] = useState<boolean>(false);
 
   const buildWebSocketUrl = useCallback((baseUrl: string): string => {
+    // Normalize user input so we can safely build a websocket URL.
     let url = baseUrl.trim();
+
+    // Convert HTTP(S) scheme to WS(S) for websocket connections.
     url = url.replace(/^http:/, 'ws:').replace(/^https:/, 'wss:');
+
+    // Ensure the websocket endpoint path is present.
     if (!url.includes('/ws')) url = url.replace(/\/$/, '') + '/ws';
+
+    // Force OMI stream codec to Opus:
+    // - replace existing codec query value, or
+    // - append codec=opus if missing.
     if (/[?&]codec=/i.test(url)) {
       url = url.replace(/([?&])codec=[^&]*/i, '$1codec=opus');
     } else {
