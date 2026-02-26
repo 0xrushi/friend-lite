@@ -46,6 +46,14 @@ export const useAudioStreamingOrchestrator = ({
 
   const buildWebSocketUrl = useCallback((baseUrl: string): string => {
     let url = baseUrl.trim();
+    url = url.replace(/^http:/, 'ws:').replace(/^https:/, 'wss:');
+    if (!url.includes('/ws')) url = url.replace(/\/$/, '') + '/ws';
+    if (/[?&]codec=/i.test(url)) {
+      url = url.replace(/([?&])codec=[^&]*/i, '$1codec=opus');
+    } else {
+      const sep = url.includes('?') ? '&' : '?';
+      url = url + sep + 'codec=opus';
+    }
     const isAdvanced = settings.jwtToken && settings.isAuthenticated;
 
     if (isAdvanced) {
@@ -63,7 +71,9 @@ export const useAudioStreamingOrchestrator = ({
     let url = baseUrl.trim();
     url = url.replace(/^http:/, 'ws:').replace(/^https:/, 'wss:');
     if (!url.includes('/ws')) url = url.replace(/\/$/, '') + '/ws';
-    if (!url.includes('codec=')) {
+    if (/[?&]codec=/i.test(url)) {
+      url = url.replace(/([?&])codec=[^&]*/i, '$1codec=pcm');
+    } else {
       const sep = url.includes('?') ? '&' : '?';
       url = url + sep + 'codec=pcm';
     }
