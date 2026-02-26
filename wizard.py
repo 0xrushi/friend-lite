@@ -25,6 +25,48 @@ from setup_utils import (
 
 console = Console()
 
+
+def read_config_yml() -> dict:
+    """Read config/config.yml and return parsed dict, or empty dict if not found.
+
+    Used to load existing configuration as defaults for wizard prompts so that
+    re-runs default to previously configured values.
+    """
+    config_path = Path("config/config.yml")
+    if not config_path.exists():
+        return {}
+    with open(config_path, 'r') as f:
+        result = yaml.safe_load(f)
+        return result if result else {}
+
+
+def get_existing_stt_provider(config_yml: dict):
+    """Map config.yml defaults.stt value back to wizard provider name, or None."""
+    stt = config_yml.get("defaults", {}).get("stt", "")
+    mapping = {
+        "stt-deepgram": "deepgram",
+        "stt-deepgram-stream": "deepgram",
+        "stt-parakeet-batch": "parakeet",
+        "stt-vibevoice": "vibevoice",
+        "stt-qwen3-asr": "qwen3-asr",
+        "stt-smallest": "smallest",
+        "stt-smallest-stream": "smallest",
+    }
+    return mapping.get(stt)
+
+
+def get_existing_stream_provider(config_yml: dict):
+    """Map config.yml defaults.stt_stream value back to wizard streaming provider name, or None."""
+    stt_stream = config_yml.get("defaults", {}).get("stt_stream", "")
+    mapping = {
+        "stt-deepgram-stream": "deepgram",
+        "stt-smallest-stream": "smallest",
+        "stt-qwen3-asr": "qwen3-asr",
+        "stt-qwen3-asr-stream": "qwen3-asr",
+    }
+    return mapping.get(stt_stream)
+
+
 SERVICES = {
     'backend': {
         'advanced': {
@@ -115,8 +157,9 @@ def check_service_exists(service_name, service_config):
 
     return True, "OK"
 
-def select_services(transcription_provider=None):
+def select_services(transcription_provider=None, config_yml=None, memory_provider=None):
     """Let user select which services to setup"""
+    config_yml = config_yml or {}
     console.print("🚀 [bold cyan]Chronicle Service Setup[/bold cyan]")
     console.print("Select which services to configure:\n")
 
@@ -151,8 +194,19 @@ def select_services(transcription_provider=None):
             console.print(f"  ⏸️  {service_config['description']} - [dim]{msg}[/dim]")
             continue
 
-        # Speaker recognition is recommended by default
-        default_enable = service_name == 'speaker-recognition'
+        # Determine smart default based on existing config
+        if service_name == 'speaker-recognition':
+            # Default to True if speaker-recognition .env exists and has a valid (non-placeholder) HF_TOKEN
+            speaker_env = 'extras/speaker-recognition/.env'
+            existing_hf = read_env_value(speaker_env, 'HF_TOKEN')
+            default_enable = bool(existing_hf and not is_placeholder(
+                existing_hf, 'your_huggingface_token_here', 'your-huggingface-token-here', 'hf_xxxxx'
+            ))
+        elif service_name == 'openmemory-mcp':
+            # Default to True if memory provider was selected as openmemory_mcp
+            default_enable = (memory_provider == "openmemory_mcp")
+        else:
+            default_enable = False
 
         try:
             enable_service = Confirm.ask(f"  Setup {service_config['description']}?", default=default_enable)
@@ -189,7 +243,8 @@ def run_service_setup(service_name, selected_services, https_enabled=False, serv
                      obsidian_enabled=False, neo4j_password=None, hf_token=None,
                      transcription_provider='deepgram', admin_email=None, admin_password=None,
                      langfuse_public_key=None, langfuse_secret_key=None, langfuse_host=None,
-                     streaming_provider=None):
+                     streaming_provider=None, llm_provider=None, memory_provider=None,
+                     knowledge_graph_enabled=None):
     """Execute individual service setup script"""
     if service_name == 'advanced':
         service = SERVICES['backend'][service_name]
@@ -217,9 +272,25 @@ def run_service_setup(service_name, selected_services, https_enabled=False, serv
         if neo4j_password:
             cmd.extend(['--neo4j-password', neo4j_password])
 
-        # Add Obsidian configuration
+        # Always pass obsidian choice to avoid double-ask
         if obsidian_enabled:
             cmd.extend(['--enable-obsidian'])
+        else:
+            cmd.extend(['--no-obsidian'])
+
+        # Always pass knowledge graph choice to avoid double-ask
+        if knowledge_graph_enabled is True:
+            cmd.extend(['--enable-knowledge-graph'])
+        elif knowledge_graph_enabled is False:
+            cmd.extend(['--no-knowledge-graph'])
+
+        # Pass LLM provider choice
+        if llm_provider:
+            cmd.extend(['--llm-provider', llm_provider])
+
+        # Pass memory provider choice
+        if memory_provider:
+            cmd.extend(['--memory-provider', memory_provider])
 
         # Pass LangFuse keys from langfuse init or external config
         if langfuse_public_key and langfuse_secret_key:
@@ -527,11 +598,27 @@ def setup_config_file():
 STREAMING_CAPABLE = {"deepgram", "smallest", "qwen3-asr"}
 
 
-def select_transcription_provider():
+def select_transcription_provider(config_yml: dict = None):
     """Ask user which transcription provider they want (batch/primary)."""
+    config_yml = config_yml or {}
+    existing_provider = get_existing_stt_provider(config_yml)
+
+    provider_to_choice = {
+        "deepgram": "1", "parakeet": "2", "vibevoice": "3",
+        "qwen3-asr": "4", "smallest": "5", "none": "6",
+    }
+    choice_to_provider = {v: k for k, v in provider_to_choice.items()}
+    default_choice = provider_to_choice.get(existing_provider, "1")
+
     console.print("\n🎤 [bold cyan]Transcription Provider[/bold cyan]")
     console.print("Choose your speech-to-text provider (used for [bold]batch[/bold]/high-quality transcription):")
     console.print("[dim]If it also supports streaming, it will be used for real-time too by default.[/dim]")
+    if existing_provider:
+        provider_labels = {
+            "deepgram": "Deepgram", "parakeet": "Parakeet ASR", "vibevoice": "VibeVoice ASR",
+            "qwen3-asr": "Qwen3-ASR", "smallest": "Smallest.ai Pulse",
+        }
+        console.print(f"[blue][INFO][/blue] Current: {provider_labels.get(existing_provider, existing_provider)}")
     console.print()
 
     choices = {
@@ -544,32 +631,22 @@ def select_transcription_provider():
     }
 
     for key, desc in choices.items():
-        console.print(f"  {key}) {desc}")
+        marker = " [dim](current)[/dim]" if key == default_choice else ""
+        console.print(f"  {key}) {desc}{marker}")
     console.print()
 
     while True:
         try:
-            choice = Prompt.ask("Enter choice", default="1")
+            choice = Prompt.ask("Enter choice", default=default_choice)
             if choice in choices:
-                if choice == "1":
-                    return "deepgram"
-                elif choice == "2":
-                    return "parakeet"
-                elif choice == "3":
-                    return "vibevoice"
-                elif choice == "4":
-                    return "qwen3-asr"
-                elif choice == "5":
-                    return "smallest"
-                elif choice == "6":
-                    return "none"
+                return choice_to_provider[choice]
             console.print(f"[red]Invalid choice. Please select from {list(choices.keys())}[/red]")
         except EOFError:
-            console.print("Using default: Deepgram")
-            return "deepgram"
+            console.print(f"Using default: {choices.get(default_choice, 'Deepgram')}")
+            return choice_to_provider.get(default_choice, "deepgram")
 
 
-def select_streaming_provider(batch_provider):
+def select_streaming_provider(batch_provider, config_yml: dict = None):
     """Ask if user wants a different provider for real-time streaming.
 
     If the batch provider supports streaming, offer to use the same (saves a step).
@@ -578,15 +655,20 @@ def select_streaming_provider(batch_provider):
     Returns:
         Streaming provider name if different from batch, or None (same / skipped).
     """
+    config_yml = config_yml or {}
     if batch_provider in ("none", None):
         return None
 
+    existing_stream = get_existing_stream_provider(config_yml)
+
     if batch_provider in STREAMING_CAPABLE:
         # Batch provider can already stream — just confirm
+        # Default to "use different" if a different streaming provider was previously configured
+        has_different_stream = bool(existing_stream and existing_stream != batch_provider)
         console.print(f"\n🔊 [bold cyan]Streaming[/bold cyan]")
         console.print(f"{batch_provider} supports both batch and streaming.")
         try:
-            use_different = Confirm.ask("Use a different provider for real-time streaming?", default=False)
+            use_different = Confirm.ask("Use a different provider for real-time streaming?", default=has_different_stream)
         except EOFError:
             return None
         if not use_different:
@@ -615,13 +697,22 @@ def select_streaming_provider(batch_provider):
     streaming_choices[skip_key] = "Skip (no real-time streaming)"
     provider_map[skip_key] = None
 
+    # Pre-select the default based on existing config
+    default_stream_choice = "1"
+    if existing_stream and existing_stream != batch_provider:
+        for k, v in provider_map.items():
+            if v == existing_stream:
+                default_stream_choice = k
+                break
+
     for key, desc in streaming_choices.items():
-        console.print(f"  {key}) {desc}")
+        marker = " [dim](current)[/dim]" if key == default_stream_choice else ""
+        console.print(f"  {key}) {desc}{marker}")
     console.print()
 
     while True:
         try:
-            choice = Prompt.ask("Enter choice", default="1")
+            choice = Prompt.ask("Enter choice", default=default_stream_choice)
             if choice in streaming_choices:
                 result = provider_map[choice]
                 if result:
@@ -713,6 +804,103 @@ def setup_langfuse_choice():
     }
 
 
+def select_llm_provider(config_yml: dict = None) -> str:
+    """Ask user which LLM provider to use for memory extraction.
+
+    Returns:
+        "openai", "ollama", or "none"
+    """
+    config_yml = config_yml or {}
+    existing_llm = config_yml.get("defaults", {}).get("llm", "")
+    llm_to_choice = {"openai-llm": "1", "local-llm": "2"}
+    default_choice = llm_to_choice.get(existing_llm, "1")
+
+    console.print("\n🤖 [bold cyan]LLM Provider[/bold cyan]")
+    console.print("Choose your language model provider for memory extraction and analysis:")
+    console.print()
+
+    choices = {
+        "1": "OpenAI (GPT-4o-mini, requires API key)",
+        "2": "Ollama (local models, runs on your machine)",
+        "3": "None (skip memory extraction)",
+    }
+
+    for key, desc in choices.items():
+        marker = " [dim](current)[/dim]" if key == default_choice else ""
+        console.print(f"  {key}) {desc}{marker}")
+    console.print()
+
+    while True:
+        try:
+            choice = Prompt.ask("Enter choice", default=default_choice)
+            if choice in choices:
+                return {"1": "openai", "2": "ollama", "3": "none"}[choice]
+            console.print(f"[red]Invalid choice. Please select from {list(choices.keys())}[/red]")
+        except EOFError:
+            console.print(f"Using default: {choices.get(default_choice, 'OpenAI')}")
+            return {"1": "openai", "2": "ollama", "3": "none"}.get(default_choice, "openai")
+
+
+def select_memory_provider(config_yml: dict = None) -> str:
+    """Ask user which memory storage backend to use.
+
+    This is separate from the 'Setup OpenMemory MCP server?' service question.
+    That question is about running the extra service; this is about the backend provider.
+
+    Returns:
+        "chronicle" or "openmemory_mcp"
+    """
+    config_yml = config_yml or {}
+    existing_provider = config_yml.get("memory", {}).get("provider", "chronicle")
+    default_choice = "2" if existing_provider == "openmemory_mcp" else "1"
+
+    console.print("\n🧠 [bold cyan]Memory Storage Backend[/bold cyan]")
+    console.print("Choose where your memories and conversation facts are stored:")
+    console.print()
+
+    choices = {
+        "1": "Chronicle Native (Qdrant vector database, self-hosted)",
+        "2": "OpenMemory MCP (cross-client compatible, requires openmemory-mcp service)",
+    }
+
+    for key, desc in choices.items():
+        marker = " [dim](current)[/dim]" if key == default_choice else ""
+        console.print(f"  {key}) {desc}{marker}")
+    console.print()
+
+    while True:
+        try:
+            choice = Prompt.ask("Enter choice", default=default_choice)
+            if choice in choices:
+                return {"1": "chronicle", "2": "openmemory_mcp"}[choice]
+            console.print(f"[red]Invalid choice. Please select from {list(choices.keys())}[/red]")
+        except EOFError:
+            return {"1": "chronicle", "2": "openmemory_mcp"}.get(default_choice, "chronicle")
+
+
+def select_knowledge_graph(config_yml: dict = None) -> bool:
+    """Ask user if Knowledge Graph should be enabled.
+
+    Returns:
+        True if Knowledge Graph should be enabled, False otherwise.
+    """
+    config_yml = config_yml or {}
+    existing_enabled = config_yml.get("memory", {}).get("knowledge_graph", {}).get("enabled", True)
+
+    console.print("\n🕸️  [bold cyan]Knowledge Graph[/bold cyan]")
+    console.print("Extracts people, places, organizations, events, and tasks from conversations")
+    console.print("Uses Neo4j (included in the stack)")
+    console.print()
+
+    try:
+        enabled = Confirm.ask("Enable Knowledge Graph?", default=existing_enabled)
+    except EOFError:
+        console.print(f"Using default: {'Yes' if existing_enabled else 'No'}")
+        enabled = existing_enabled
+
+    return enabled
+
+
 def main():
     """Main orchestration logic"""
     console.print("🎉 [bold green]Welcome to Chronicle![/bold green]\n")
@@ -729,14 +917,23 @@ def main():
     # Show what's available
     show_service_status()
 
+    # Read existing config.yml once — used as defaults for ALL wizard questions below
+    config_yml = read_config_yml()
+
     # Ask about transcription provider FIRST (determines which services are needed)
-    transcription_provider = select_transcription_provider()
+    transcription_provider = select_transcription_provider(config_yml)
 
     # Ask about streaming provider (if batch provider doesn't stream, or user wants a different one)
-    streaming_provider = select_streaming_provider(transcription_provider)
+    streaming_provider = select_streaming_provider(transcription_provider, config_yml)
+
+    # LLM Provider selection (asked once here, passed to init.py — avoids double-ask)
+    llm_provider = select_llm_provider(config_yml)
+
+    # Memory Provider selection (asked once here, passed to init.py — avoids double-ask)
+    memory_provider = select_memory_provider(config_yml)
 
     # Service Selection (pass transcription_provider so we skip asking about ASR when already chosen)
-    selected_services = select_services(transcription_provider)
+    selected_services = select_services(transcription_provider, config_yml, memory_provider)
 
     # Auto-add asr-services if any local ASR was chosen (batch or streaming)
     local_asr_providers = ("parakeet", "vibevoice", "qwen3-asr")
@@ -745,6 +942,13 @@ def main():
         reason = transcription_provider if transcription_provider in local_asr_providers else streaming_provider
         console.print(f"[blue][INFO][/blue] Auto-adding ASR services for {reason} transcription")
         selected_services.append('asr-services')
+
+    # Auto-add openmemory-mcp service if openmemory_mcp was selected as memory provider
+    if memory_provider == "openmemory_mcp" and 'openmemory-mcp' not in selected_services:
+        exists, _ = check_service_exists('openmemory-mcp', SERVICES['extras']['openmemory-mcp'])
+        if exists:
+            console.print("[blue][INFO][/blue] Memory provider is OpenMemory MCP — auto-adding openmemory-mcp service")
+            selected_services.append('openmemory-mcp')
 
     if not selected_services:
         console.print("\n[yellow]No services selected. Exiting.[/yellow]")
@@ -770,11 +974,15 @@ def main():
         console.print("\n🔒 [bold cyan]HTTPS Configuration[/bold cyan]")
         console.print("HTTPS enables microphone access in browsers and secure connections")
 
+        # Default to existing HTTPS_ENABLED setting
+        existing_https = read_env_value('backends/advanced/.env', 'HTTPS_ENABLED')
+        default_https = existing_https == "true"
+
         try:
-            https_enabled = Confirm.ask("Enable HTTPS for selected services?", default=False)
+            https_enabled = Confirm.ask("Enable HTTPS for selected services?", default=default_https)
         except EOFError:
-            console.print("Using default: No")
-            https_enabled = False
+            console.print(f"Using default: {'Yes' if default_https else 'No'}")
+            https_enabled = default_https
 
         if https_enabled:
             # Try to auto-detect Tailscale address
@@ -816,19 +1024,22 @@ def main():
     # Neo4j Configuration (always required - used by Knowledge Graph)
     neo4j_password = None
     obsidian_enabled = False
+    knowledge_graph_enabled = None
 
     if 'advanced' in selected_services:
         console.print("\n🗄️ [bold cyan]Neo4j Configuration[/bold cyan]")
         console.print("Neo4j is used for Knowledge Graph (entity/relationship extraction from conversations)")
         console.print()
 
-        # Always prompt for Neo4j password (masked input)
-        try:
-            console.print("Neo4j password (min 8 chars) [leave empty for default: neo4jpassword]")
-            neo4j_password = prompt_password("Neo4j password", min_length=8)
-        except (EOFError, KeyboardInterrupt):
-            neo4j_password = "neo4jpassword"
-            console.print("Using default password")
+        # Read existing Neo4j password and use as default (masked prompt)
+        existing_neo4j_pw = read_env_value('backends/advanced/.env', 'NEO4J_PASSWORD')
+        neo4j_password = prompt_with_existing_masked(
+            prompt_text="Neo4j password (min 8 chars)",
+            existing_value=existing_neo4j_pw,
+            placeholders=['neo4jpassword', 'your_neo4j_password', 'your-neo4j-password'],
+            is_password=True,
+            default="neo4jpassword"
+        )
         if not neo4j_password:
             neo4j_password = "neo4jpassword"
 
@@ -839,14 +1050,19 @@ def main():
         console.print("Enable graph-based knowledge management for Obsidian vault notes")
         console.print()
 
+        # Load existing obsidian enabled state from config.yml as default
+        existing_obsidian = config_yml.get("memory", {}).get("obsidian", {}).get("enabled", False)
         try:
-            obsidian_enabled = Confirm.ask("Enable Obsidian integration?", default=False)
+            obsidian_enabled = Confirm.ask("Enable Obsidian integration?", default=existing_obsidian)
         except EOFError:
-            console.print("Using default: No")
-            obsidian_enabled = False
+            console.print(f"Using default: {'Yes' if existing_obsidian else 'No'}")
+            obsidian_enabled = existing_obsidian
 
         if obsidian_enabled:
             console.print("[green]✅[/green] Obsidian integration will be configured")
+
+        # Knowledge Graph configuration (asked here once, passed to init.py)
+        knowledge_graph_enabled = select_knowledge_graph(config_yml)
 
     # Pure Delegation - Run Each Service Setup
     console.print(f"\n📋 [bold]Setting up {len(selected_services)} services...[/bold]")
@@ -882,7 +1098,9 @@ def main():
                             obsidian_enabled, neo4j_password, hf_token, transcription_provider,
                             admin_email=wizard_admin_email, admin_password=wizard_admin_password,
                             langfuse_public_key=langfuse_public_key, langfuse_secret_key=langfuse_secret_key,
-                            langfuse_host=langfuse_host, streaming_provider=streaming_provider):
+                            langfuse_host=langfuse_host, streaming_provider=streaming_provider,
+                            llm_provider=llm_provider, memory_provider=memory_provider,
+                            knowledge_graph_enabled=knowledge_graph_enabled):
             success_count += 1
 
             # After local langfuse setup, read generated API keys for backend
