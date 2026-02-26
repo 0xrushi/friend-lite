@@ -2,51 +2,49 @@
 #
 # VibeVoice ASR Provider Dockerfile for AMD Strix Halo (gfx1151)
 #
-# Uses pip for PyTorch/ROCm installation due to rocm[libraries] source distribution.
-# VibeVoice provides speech-to-text with speaker diarization.
+# Uses the known-good ROCm PyTorch base from the VibeVoice ROCm recipe,
+# then layers Chronicle's service code on top.
 
-#########################  builder #################################
-FROM python:3.12-slim-bookworm AS builder
+FROM rocm/pytorch:rocm7.2_ubuntu24.04_py3.12_pytorch_release_2.9.1
 
+ENV PYTHONUNBUFFERED=1
 WORKDIR /app
 
-# Install system dependencies for building
+# Build/runtime dependencies for audio IO and ROCm flash-attention compilation
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        build-essential git curl \
+        build-essential cmake ninja-build git curl ffmpeg libsndfile1 sudo \
     && rm -rf /var/lib/apt/lists/*
 
-# Install uv for dependency management
+# Install uv for locked dependency sync
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 ENV UV_COMPILE_BYTECODE=1
 ENV UV_LINK_MODE=copy
 
-# Dependency manifest first for cache-friendly installs
+# Install Python deps into the base image ROCm venv (/opt/venv),
+# but keep base torch/torchaudio untouched.
 COPY pyproject.toml uv.lock ./
-
-# Sync dependencies WITHOUT torch (will install via pip)
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-install-project --group vibevoice --no-extra strixhalo
+    uv export --frozen --format requirements.txt --no-hashes \
+    --group vibevoice \
+    --no-emit-project \
+    --prune torch --prune torchaudio --prune bitsandbytes \
+    --prune cuda-bindings --prune cuda-pathfinder --prune triton \
+    --output-file /tmp/requirements.txt \
+    && uv pip install --python /opt/venv/bin/python --no-managed-python --prerelease=if-necessary-or-explicit \
+        --requirements /tmp/requirements.txt \
+    && uv pip install --python /opt/venv/bin/python --no-managed-python "einops>=0.7.0"
 
-# Install PyTorch with ROCm support using uv pip
-# This is needed because uv cannot resolve rocm[libraries] from source dist
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --index-url https://rocm.nightlies.amd.com/v2/gfx1151/ \
-    --extra-index-url https://pypi.org/simple \
-    --pre "torch>=2.10" "torchaudio>=2.10"
+# Install ROCm flash-attention (AMD Triton path)
+ENV FLASH_ATTENTION_TRITON_AMD_ENABLE=TRUE
+RUN --mount=type=cache,target=/root/.cache/pip \
+    git clone --depth 1 https://github.com/ROCm/flash-attention.git /tmp/flash-attention \
+    && cd /tmp/flash-attention \
+    && /opt/venv/bin/python setup.py install \
+    && rm -rf /tmp/flash-attention
 
-#########################  runtime #################################
-FROM python:3.12-slim-bookworm AS runtime
-ENV PYTHONUNBUFFERED=1
-WORKDIR /app
-
-# Install runtime dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        curl ffmpeg git libsndfile1 gcc libc6-dev sudo \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy installed packages from builder's venv to system Python
-COPY --from=builder /app/.venv/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+# Verify we are on ROCm/HIP torch.
+RUN /opt/venv/bin/python -c "import torch; assert torch.version.hip is not None, f'Expected ROCm/HIP torch build, got {torch.__version__} (cuda={torch.version.cuda!r}, hip={torch.version.hip!r})'"
 
 # Copy application code
 COPY common/ ./common/
@@ -54,8 +52,8 @@ COPY providers/vibevoice/ ./providers/vibevoice/
 
 # Pre-clone VibeVoice repository for faster startup
 ENV HF_HOME="/models"
-RUN mkdir -p /models && \
-    git clone https://github.com/microsoft/VibeVoice.git /models/vibevoice
+RUN mkdir -p /models \
+    && git clone --depth 1 https://github.com/microsoft/VibeVoice.git /models/vibevoice
 
 ARG VIBE_UID=10002
 ARG VIBE_GID=10002
@@ -67,13 +65,14 @@ RUN groupadd --system --gid ${VIBE_GID} vibeuser \
     && chown -R vibeuser:vibeuser /app /models
 
 # Default environment variables
+ENV PATH="/opt/venv/bin:${PATH}"
 ENV ASR_MODEL="microsoft/VibeVoice-ASR"
 ENV VIBEVOICE_LLM_MODEL="Qwen/Qwen2.5-7B"
 ENV VIBEVOICE_ATTN_IMPL="sdpa"
 ENV DEVICE="cuda"
 ENV TORCH_DTYPE="bfloat16"
 ENV MAX_NEW_TOKENS="8192"
-ENV QUANTIZATION="4bit"
+ENV QUANTIZATION=""
 ENV HSA_OVERRIDE_GFX_VERSION=11.5.1
 
 EXPOSE 8765

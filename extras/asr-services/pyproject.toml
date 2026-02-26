@@ -134,6 +134,7 @@ vibevoice = [
     "diffusers>=0.30.0",
     "torch>=2.3",
     "torchaudio>=2.3",
+    "einops>=0.7.0",
     "librosa>=0.10.0",
     "bitsandbytes>=0.43.0",
     "peft>=0.17.0",

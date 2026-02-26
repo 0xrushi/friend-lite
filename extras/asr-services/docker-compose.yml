@@ -263,8 +263,8 @@ services:
       - VIBEVOICE_LLM_MODEL=${VIBEVOICE_LLM_MODEL:-Qwen/Qwen2.5-7B}
       # sdpa is supported on ROCm; flash_attention_2 requires CUDA
       - VIBEVOICE_ATTN_IMPL=sdpa
-      - DEVICE=cuda
-      - TORCH_DTYPE=bfloat16
+      - DEVICE=${VIBEVOICE_DEVICE:-cuda}
+      - TORCH_DTYPE=${VIBEVOICE_TORCH_DTYPE:-bfloat16}
       - MAX_NEW_TOKENS=${MAX_NEW_TOKENS:-8192}
       # bitsandbytes quantization requires CUDA - disable for ROCm
       # Strix Halo has lot of unified memory, quantization is not needed
