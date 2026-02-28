@@ -324,9 +324,11 @@ class ChronicleSetup:
 
         elif choice == "2":
             self.console.print("[blue][INFO][/blue] Offline Parakeet ASR selected")
-            parakeet_url = self.prompt_value(
-                "Parakeet ASR URL (without http:// prefix)", "host.docker.internal:8767"
+            existing_parakeet_url = (
+                read_env_value(".env", "PARAKEET_ASR_URL")
+                or "http://host.docker.internal:8767"
             )
+            parakeet_url = self.prompt_value("Parakeet ASR URL", existing_parakeet_url)
 
             # Write URL to .env for ${PARAKEET_ASR_URL} placeholder in config.yml
             self.config["PARAKEET_ASR_URL"] = parakeet_url
@@ -348,9 +350,12 @@ class ChronicleSetup:
             self.console.print(
                 "[blue][INFO][/blue] Offline VibeVoice ASR selected (built-in speaker diarization)"
             )
+            existing_vibevoice_url = (
+                read_env_value(".env", "VIBEVOICE_ASR_URL")
+                or "http://host.docker.internal:8767"
+            )
             vibevoice_url = self.prompt_value(
-                "VibeVoice ASR URL (without http:// prefix)",
-                "host.docker.internal:8767",
+                "VibeVoice ASR URL", existing_vibevoice_url
             )
 
             # Write URL to .env for ${VIBEVOICE_ASR_URL} placeholder in config.yml
@@ -374,9 +379,13 @@ class ChronicleSetup:
             self.console.print(
                 "[blue][INFO][/blue] Qwen3-ASR selected (52 languages, streaming + batch via vLLM)"
             )
-            qwen3_url = self.prompt_value(
-                "Qwen3-ASR URL", "http://host.docker.internal:8767"
+            existing_qwen3_url_raw = read_env_value(".env", "QWEN3_ASR_URL")
+            existing_qwen3_url = (
+                f"http://{existing_qwen3_url_raw}"
+                if existing_qwen3_url_raw
+                else "http://host.docker.internal:8767"
             )
+            qwen3_url = self.prompt_value("Qwen3-ASR URL", existing_qwen3_url)
 
             # Write URL to .env for ${QWEN3_ASR_URL} placeholder in config.yml
             self.config["QWEN3_ASR_URL"] = qwen3_url.replace("http://", "").rstrip("/")
@@ -527,21 +536,38 @@ class ChronicleSetup:
 
     def setup_llm(self):
         """Configure LLM provider - updates config.yml and .env"""
-        self.print_section("LLM Provider Configuration")
+        # Check if LLM provider was provided via command line (from wizard.py)
+        if hasattr(self.args, "llm_provider") and self.args.llm_provider:
+            provider = self.args.llm_provider
+            self.console.print(
+                f"[green]✅[/green] LLM provider: {provider} (configured via wizard)"
+            )
+            choice = {"openai": "1", "ollama": "2", "none": "3"}.get(provider, "1")
+        else:
+            # Standalone init.py run — read existing config as default
+            existing_choice = "1"
+            full_config = self.config_manager.get_full_config()
+            existing_llm = full_config.get("defaults", {}).get("llm", "")
+            if existing_llm == "local-llm":
+                existing_choice = "2"
+            elif existing_llm == "openai-llm":
+                existing_choice = "1"
 
-        self.console.print(
-            "[blue][INFO][/blue] LLM configuration will be saved to config.yml"
-        )
-        self.console.print()
+            self.print_section("LLM Provider Configuration")
+            self.console.print(
+                "[blue][INFO][/blue] LLM configuration will be saved to config.yml"
+            )
+            self.console.print()
 
-        choices = {
-            "1": "OpenAI (GPT-4, GPT-3.5 - requires API key)",
-            "2": "Ollama (local models - runs locally)",
-            "3": "OpenAI-Compatible (custom endpoint - Groq, Together AI, LM Studio, etc.)",
-            "4": "Skip (no memory extraction)",
-        }
+            choices = {
+                "1": "OpenAI (GPT-4, GPT-3.5 - requires API key)",
+                "2": "Ollama (local models - runs locally)",
+                "3": "Skip (no memory extraction)",
+            }
 
-        choice = self.prompt_choice("Which LLM provider will you use?", choices, "1")
+            choice = self.prompt_choice(
+                "Which LLM provider will you use?", choices, existing_choice
+            )
 
         if choice == "1":
             self.console.print("[blue][INFO][/blue] OpenAI selected")
@@ -717,14 +743,33 @@ class ChronicleSetup:
 
     def setup_memory(self):
         """Configure memory provider - updates config.yml"""
-        self.print_section("Memory Storage Configuration")
+        # Check if memory provider was provided via command line (from wizard.py)
+        if hasattr(self.args, "memory_provider") and self.args.memory_provider:
+            provider = self.args.memory_provider
+            self.console.print(
+                f"[green]✅[/green] Memory provider: {provider} (configured via wizard)"
+            )
+            choice = {"chronicle": "1", "openmemory_mcp": "2"}.get(provider, "1")
+        else:
+            # Standalone init.py run — read existing config as default
+            existing_choice = "1"
+            full_config = self.config_manager.get_full_config()
+            existing_provider = full_config.get("memory", {}).get(
+                "provider", "chronicle"
+            )
+            if existing_provider == "openmemory_mcp":
+                existing_choice = "2"
 
-        choices = {
-            "1": "Chronicle Native (Qdrant + custom extraction)",
-            "2": "OpenMemory MCP (cross-client compatible, external server)",
-        }
+            self.print_section("Memory Storage Configuration")
 
-        choice = self.prompt_choice("Choose your memory storage backend:", choices, "1")
+            choices = {
+                "1": "Chronicle Native (Qdrant + custom extraction)",
+                "2": "OpenMemory MCP (cross-client compatible, external server)",
+            }
+
+            choice = self.prompt_choice(
+                "Choose your memory storage backend:", choices, existing_choice
+            )
 
         if choice == "1":
             self.console.print(
@@ -852,13 +897,26 @@ class ChronicleSetup:
 
     def setup_obsidian(self):
         """Configure Obsidian integration (optional feature flag only - Neo4j credentials handled by setup_neo4j)"""
-        if hasattr(self.args, "enable_obsidian") and self.args.enable_obsidian:
+        has_enable = hasattr(self.args, "enable_obsidian") and self.args.enable_obsidian
+        has_disable = hasattr(self.args, "no_obsidian") and self.args.no_obsidian
+
+        if has_enable:
             enable_obsidian = True
             self.console.print(
                 f"[green]✅[/green] Obsidian: enabled (configured via wizard)"
             )
+        elif has_disable:
+            enable_obsidian = False
+            self.console.print(
+                f"[blue][INFO][/blue] Obsidian: disabled (configured via wizard)"
+            )
         else:
-            # Interactive prompt (fallback)
+            # Standalone init.py run — read existing config as default
+            full_config = self.config_manager.get_full_config()
+            existing_enabled = (
+                full_config.get("memory", {}).get("obsidian", {}).get("enabled", False)
+            )
+
             self.console.print()
             self.console.print("[bold cyan]Obsidian Integration (Optional)[/bold cyan]")
             self.console.print(
@@ -868,11 +926,13 @@ class ChronicleSetup:
 
             try:
                 enable_obsidian = Confirm.ask(
-                    "Enable Obsidian integration?", default=False
+                    "Enable Obsidian integration?", default=existing_enabled
                 )
             except EOFError:
-                self.console.print("Using default: No")
-                enable_obsidian = False
+                self.console.print(
+                    f"Using default: {'Yes' if existing_enabled else 'No'}"
+                )
+                enable_obsidian = existing_enabled
 
         if enable_obsidian:
             self.config_manager.update_memory_config(
@@ -887,12 +947,33 @@ class ChronicleSetup:
 
     def setup_knowledge_graph(self):
         """Configure Knowledge Graph (Neo4j-based entity/relationship extraction - enabled by default)"""
-        if (
+        has_enable = (
             hasattr(self.args, "enable_knowledge_graph")
             and self.args.enable_knowledge_graph
-        ):
+        )
+        has_disable = (
+            hasattr(self.args, "no_knowledge_graph") and self.args.no_knowledge_graph
+        )
+
+        if has_enable:
             enable_kg = True
+            self.console.print(
+                f"[green]✅[/green] Knowledge Graph: enabled (configured via wizard)"
+            )
+        elif has_disable:
+            enable_kg = False
+            self.console.print(
+                f"[blue][INFO][/blue] Knowledge Graph: disabled (configured via wizard)"
+            )
         else:
+            # Standalone init.py run — read existing config as default
+            full_config = self.config_manager.get_full_config()
+            existing_enabled = (
+                full_config.get("memory", {})
+                .get("knowledge_graph", {})
+                .get("enabled", True)
+            )
+
             self.console.print()
             self.console.print(
                 "[bold cyan]Knowledge Graph (Entity Extraction)[/bold cyan]"
@@ -903,10 +984,14 @@ class ChronicleSetup:
             self.console.print()
 
             try:
-                enable_kg = Confirm.ask("Enable Knowledge Graph?", default=True)
+                enable_kg = Confirm.ask(
+                    "Enable Knowledge Graph?", default=existing_enabled
+                )
             except EOFError:
-                self.console.print("Using default: Yes")
-                enable_kg = True
+                self.console.print(
+                    f"Using default: {'Yes' if existing_enabled else 'No'}"
+                )
+                enable_kg = existing_enabled
 
         if enable_kg:
             self.config_manager.update_memory_config(
@@ -1455,13 +1540,29 @@ def main():
         help="LangFuse host URL (default: http://langfuse-web:3000 for local)",
     )
     parser.add_argument(
-        "--langfuse-public-url",
-        help="LangFuse browser-accessible URL for deep-links (default: http://localhost:3002)",
-    )
-    parser.add_argument(
         "--streaming-provider",
         choices=["deepgram", "smallest", "qwen3-asr"],
         help="Streaming provider when different from batch (enables batch re-transcription)",
+    )
+    parser.add_argument(
+        "--llm-provider",
+        choices=["openai", "ollama", "none"],
+        help="LLM provider for memory extraction (default: prompt user)",
+    )
+    parser.add_argument(
+        "--memory-provider",
+        choices=["chronicle", "openmemory_mcp"],
+        help="Memory storage backend (default: prompt user)",
+    )
+    parser.add_argument(
+        "--no-obsidian",
+        action="store_true",
+        help="Explicitly disable Obsidian integration (complementary to --enable-obsidian)",
+    )
+    parser.add_argument(
+        "--no-knowledge-graph",
+        action="store_true",
+        help="Explicitly disable Knowledge Graph (complementary to --enable-knowledge-graph)",
     )
 
     args = parser.parse_args()
