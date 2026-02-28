@@ -5,6 +5,7 @@ Start, stop, and manage configured services
 """
 
 import argparse
+import os
 import subprocess
 from pathlib import Path
 
@@ -12,6 +13,7 @@ import yaml
 from dotenv import dotenv_values
 from rich.console import Console
 from rich.table import Table
+
 from setup_utils import read_env_value
 
 console = Console()
@@ -633,6 +635,11 @@ def main():
         action="store_true",
         help="Force recreate containers even if unchanged",
     )
+    start_parser.add_argument(
+        "--use-prebuilt",
+        metavar="TAG",
+        help="Use prebuilt images from DockerHub instead of building (requires prior pull-images.sh run)",
+    )
 
     # Stop command
     stop_parser = subparsers.add_parser("stop", help="Stop services")
@@ -695,7 +702,23 @@ def main():
             )
             return
 
-        start_services(services, args.build, args.force_recreate)
+        if args.use_prebuilt:
+            dockerhub_user = os.environ.get("DOCKERHUB_USERNAME", "")
+            if not dockerhub_user:
+                console.print(
+                    "[red]❌ DOCKERHUB_USERNAME env var required with --use-prebuilt[/red]"
+                )
+                return
+            os.environ["CHRONICLE_REGISTRY"] = f"{dockerhub_user}/"
+            os.environ["CHRONICLE_TAG"] = args.use_prebuilt
+            console.print(
+                f"[cyan]ℹ️  Using prebuilt images: {dockerhub_user}/*:{args.use_prebuilt}[/cyan]"
+            )
+            build_flag = False
+        else:
+            build_flag = args.build
+
+        start_services(services, build_flag, args.force_recreate)
 
     elif args.command == "stop":
         if args.all:
