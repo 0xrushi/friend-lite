@@ -23,7 +23,12 @@ from rich.text import Text
 # Add repo root to path for imports
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from config_manager import ConfigManager
-from setup_utils import detect_tailscale_info, mask_value
+from setup_utils import (
+    detect_tailscale_info,
+    get_stt_provider_by_id,
+    load_stt_provider_catalog,
+    mask_value,
+)
 from setup_utils import prompt_password as util_prompt_password
 from setup_utils import prompt_with_existing_masked, read_env_value
 
@@ -33,7 +38,9 @@ class ChronicleSetup:
         self.console = Console()
         self.config: Dict[str, Any] = {}
         self.args = args or argparse.Namespace()
-        self.config_yml_path = Path("../../config/config.yml")  # Main config at config/config.yml
+        self.config_yml_path = Path(
+            "../../config/config.yml"
+        )  # Main config at config/config.yml
 
         # Check if we're in the right directory
         if not Path("pyproject.toml").exists() or not Path("src").exists():
@@ -87,7 +94,9 @@ class ChronicleSetup:
         """Prompt for password (delegates to shared utility)"""
         return util_prompt_password(prompt, min_length=8, allow_generated=True)
 
-    def prompt_choice(self, prompt: str, choices: Dict[str, str], default: str = "1") -> str:
+    def prompt_choice(
+        self, prompt: str, choices: Dict[str, str], default: str = "1"
+    ) -> str:
         """Prompt for a choice from options"""
         self.console.print(prompt)
         for key, desc in choices.items():
@@ -117,7 +126,9 @@ class ChronicleSetup:
                     "[blue][INFO][/blue] plugins.yml not found, creating from template..."
                 )
                 shutil.copy2(plugins_template, plugins_yml)
-                self.console.print(f"[green]✅[/green] Created {plugins_yml} from template")
+                self.console.print(
+                    f"[green]✅[/green] Created {plugins_yml} from template"
+                )
                 self.console.print(
                     "[yellow][NOTE][/yellow] Edit config/plugins.yml to configure plugins"
                 )
@@ -139,7 +150,9 @@ class ChronicleSetup:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             backup_path = f".env.backup.{timestamp}"
             shutil.copy2(env_path, backup_path)
-            self.console.print(f"[blue][INFO][/blue] Backed up existing .env file to {backup_path}")
+            self.console.print(
+                f"[blue][INFO][/blue] Backed up existing .env file to {backup_path}"
+            )
 
     def read_existing_env_value(self, key: str) -> str:
         """Read a value from existing .env file (delegates to shared utility)"""
@@ -202,7 +215,9 @@ class ChronicleSetup:
             )
             self.config["ADMIN_PASSWORD"] = password
         else:
-            self.config["ADMIN_PASSWORD"] = self.prompt_password("Admin password (min 8 chars)")
+            self.config["ADMIN_PASSWORD"] = self.prompt_password(
+                "Admin password (min 8 chars)"
+            )
 
         # Preserve existing AUTH_SECRET_KEY to avoid invalidating JWTs
         existing_secret = self.read_existing_env_value("AUTH_SECRET_KEY")
@@ -218,204 +233,128 @@ class ChronicleSetup:
 
     def setup_transcription(self):
         """Configure transcription provider - updates config.yml and .env"""
-        # Check if transcription provider was provided via command line
-        if hasattr(self.args, "transcription_provider") and self.args.transcription_provider:
-            provider = self.args.transcription_provider
-            self.console.print(
-                f"[green]✅[/green] Transcription: {provider} (configured via wizard)"
-            )
+        catalog = load_stt_provider_catalog()
 
-            # Map provider to choice
-            if provider == "deepgram":
-                choice = "1"
-            elif provider == "parakeet":
-                choice = "2"
-            elif provider == "vibevoice":
-                choice = "3"
-            elif provider == "qwen3-asr":
-                choice = "4"
-            elif provider == "smallest":
-                choice = "5"
-            elif provider == "none":
-                choice = "6"
-            else:
-                choice = "1"  # Default to Deepgram
+        # Resolve provider_id: from CLI arg or interactive menu
+        if (
+            hasattr(self.args, "transcription_provider")
+            and self.args.transcription_provider
+        ):
+            provider_id = self.args.transcription_provider
+            self.console.print(
+                f"[green]✅[/green] Transcription: {provider_id} (configured via wizard)"
+            )
         else:
             self.print_section("Speech-to-Text Configuration")
-
             self.console.print(
                 "[blue][INFO][/blue] Provider selection is configured in config.yml (defaults.stt)"
             )
             self.console.print("[blue][INFO][/blue] API keys are stored in .env")
             self.console.print()
 
-            # Interactive prompt
             is_macos = platform.system() == "Darwin"
+            choices = {}
+            for i, p in enumerate(catalog, 1):
+                if is_macos and "description_macos" in p:
+                    desc = p["description_macos"]
+                elif not is_macos and "description_linux" in p:
+                    desc = p["description_linux"]
+                else:
+                    desc = p.get("description", p["display_name"])
+                choices[str(i)] = desc
+            skip_num = str(len(catalog) + 1)
+            choices[skip_num] = "None (skip transcription setup)"
 
-            if is_macos:
-                parakeet_desc = "Offline (Parakeet ASR - CPU-based, runs locally)"
-                vibevoice_desc = "Offline (VibeVoice - CPU-based, built-in diarization)"
-            else:
-                parakeet_desc = "Offline (Parakeet ASR - GPU recommended, runs locally)"
-                vibevoice_desc = "Offline (VibeVoice - GPU recommended, built-in diarization)"
-
-            qwen3_desc = "Offline (Qwen3-ASR - GPU required, 52 languages, streaming + batch)"
-
-            smallest_desc = "Smallest.ai Pulse (cloud-based, fast, requires API key)"
-
-            choices = {
-                "1": "Deepgram (recommended - high quality, cloud-based)",
-                "2": parakeet_desc,
-                "3": vibevoice_desc,
-                "4": qwen3_desc,
-                "5": smallest_desc,
-                "6": "None (skip transcription setup)",
-            }
-
-            choice = self.prompt_choice("Choose your transcription provider:", choices, "1")
-
-        if choice == "1":
-            self.console.print("[blue][INFO][/blue] Deepgram selected")
-            self.console.print("Get your API key from: https://console.deepgram.com/")
-
-            # Use the new masked prompt function
-            api_key = self.prompt_with_existing_masked(
-                prompt_text="Deepgram API key (leave empty to skip)",
-                env_key="DEEPGRAM_API_KEY",
-                placeholders=["your_deepgram_api_key_here", "your-deepgram-key-here"],
-                is_password=True,
-                default="",
+            choice = self.prompt_choice(
+                "Choose your transcription provider:", choices, "1"
             )
+            if choice == skip_num:
+                self.console.print("[blue][INFO][/blue] Skipping transcription setup")
+                return
+            provider_id = catalog[int(choice) - 1]["id"]
 
-            if api_key:
-                # Write API key to .env
-                self.config["DEEPGRAM_API_KEY"] = api_key
-
-                # Update config.yml to use Deepgram
-                self.config_manager.update_config_defaults({"stt": "stt-deepgram"})
-
-                self.console.print(
-                    "[green][SUCCESS][/green] Deepgram configured in config.yml and .env"
-                )
-                self.console.print("[blue][INFO][/blue] Set defaults.stt: stt-deepgram")
-            else:
-                self.console.print(
-                    "[yellow][WARNING][/yellow] No API key provided - transcription will not work"
-                )
-
-        elif choice == "2":
-            self.console.print("[blue][INFO][/blue] Offline Parakeet ASR selected")
-            existing_parakeet_url = (
-                read_env_value(".env", "PARAKEET_ASR_URL") or "http://host.docker.internal:8767"
-            )
-            parakeet_url = self.prompt_value("Parakeet ASR URL", existing_parakeet_url)
-
-            # Write URL to .env for ${PARAKEET_ASR_URL} placeholder in config.yml
-            self.config["PARAKEET_ASR_URL"] = parakeet_url
-
-            # Update config.yml to use Parakeet
-            self.config_manager.update_config_defaults({"stt": "stt-parakeet-batch"})
-
-            self.console.print(
-                "[green][SUCCESS][/green] Parakeet configured in config.yml and .env"
-            )
-            self.console.print("[blue][INFO][/blue] Set defaults.stt: stt-parakeet-batch")
-            self.console.print(
-                "[yellow][WARNING][/yellow] Remember to start Parakeet service: cd ../../extras/asr-services && docker compose up nemo-asr"
-            )
-
-        elif choice == "3":
-            self.console.print(
-                "[blue][INFO][/blue] Offline VibeVoice ASR selected (built-in speaker diarization)"
-            )
-            existing_vibevoice_url = (
-                read_env_value(".env", "VIBEVOICE_ASR_URL") or "http://host.docker.internal:8767"
-            )
-            vibevoice_url = self.prompt_value("VibeVoice ASR URL", existing_vibevoice_url)
-
-            # Write URL to .env for ${VIBEVOICE_ASR_URL} placeholder in config.yml
-            self.config["VIBEVOICE_ASR_URL"] = vibevoice_url
-
-            # Update config.yml to use VibeVoice
-            self.config_manager.update_config_defaults({"stt": "stt-vibevoice"})
-
-            self.console.print(
-                "[green][SUCCESS][/green] VibeVoice configured in config.yml and .env"
-            )
-            self.console.print("[blue][INFO][/blue] Set defaults.stt: stt-vibevoice")
-            self.console.print(
-                "[blue][INFO][/blue] VibeVoice provides built-in speaker diarization - pyannote will be skipped"
-            )
-            self.console.print(
-                "[yellow][WARNING][/yellow] Remember to start VibeVoice service: cd ../../extras/asr-services && docker compose up vibevoice-asr"
-            )
-
-        elif choice == "4":
-            self.console.print(
-                "[blue][INFO][/blue] Qwen3-ASR selected (52 languages, streaming + batch via vLLM)"
-            )
-            existing_qwen3_url_raw = read_env_value(".env", "QWEN3_ASR_URL")
-            existing_qwen3_url = (
-                f"http://{existing_qwen3_url_raw}"
-                if existing_qwen3_url_raw
-                else "http://host.docker.internal:8767"
-            )
-            qwen3_url = self.prompt_value("Qwen3-ASR URL", existing_qwen3_url)
-
-            # Write URL to .env for ${QWEN3_ASR_URL} placeholder in config.yml
-            self.config["QWEN3_ASR_URL"] = qwen3_url.replace("http://", "").rstrip("/")
-
-            # Also set streaming URL (same host, port 8769)
-            stream_host = qwen3_url.replace("http://", "").split(":")[0]
-            self.config["QWEN3_ASR_STREAM_URL"] = f"{stream_host}:8769"
-
-            # Update config.yml to use Qwen3-ASR
-            self.config_manager.update_config_defaults({"stt": "stt-qwen3-asr"})
-
-            self.console.print(
-                "[green][SUCCESS][/green] Qwen3-ASR configured in config.yml and .env"
-            )
-            self.console.print("[blue][INFO][/blue] Set defaults.stt: stt-qwen3-asr")
-            self.console.print(
-                "[yellow][WARNING][/yellow] Remember to start Qwen3-ASR: cd ../../extras/asr-services && docker compose up qwen3-asr-wrapper qwen3-asr-bridge -d"
-            )
-
-        elif choice == "5":
-            self.console.print("[blue][INFO][/blue] Smallest.ai Pulse selected")
-            self.console.print("Get your API key from: https://smallest.ai/")
-
-            # Use the new masked prompt function
-            api_key = self.prompt_with_existing_masked(
-                prompt_text="Smallest.ai API key (leave empty to skip)",
-                env_key="SMALLEST_API_KEY",
-                placeholders=["your_smallest_api_key_here", "your-smallest-key-here"],
-                is_password=True,
-                default="",
-            )
-
-            if api_key:
-                # Write API key to .env
-                self.config["SMALLEST_API_KEY"] = api_key
-
-                # Update config.yml to use Smallest.ai (batch + streaming)
-                self.config_manager.update_config_defaults(
-                    {"stt": "stt-smallest", "stt_stream": "stt-smallest-stream"}
-                )
-
-                self.console.print(
-                    "[green][SUCCESS][/green] Smallest.ai configured in config.yml and .env"
-                )
-                self.console.print("[blue][INFO][/blue] Set defaults.stt: stt-smallest")
-                self.console.print(
-                    "[blue][INFO][/blue] Set defaults.stt_stream: stt-smallest-stream"
-                )
-            else:
-                self.console.print(
-                    "[yellow][WARNING][/yellow] No API key provided - transcription will not work"
-                )
-
-        elif choice == "6":
+        if provider_id == "none":
             self.console.print("[blue][INFO][/blue] Skipping transcription setup")
+            return
+
+        provider = get_stt_provider_by_id(provider_id, catalog)
+        if not provider:
+            self.console.print(
+                f"[yellow][WARNING][/yellow] Unknown transcription provider: {provider_id}"
+            )
+            return
+
+        self.console.print(f"[blue][INFO][/blue] {provider['display_name']} selected")
+
+        # Show setup notes (informational messages specific to this provider)
+        for note in provider.get("setup_notes", []):
+            self.console.print(f"[blue][INFO][/blue] {note}")
+
+        # Process env_vars generically
+        configured = True
+        for ev in provider.get("env_vars", []):
+            if ev.get("prompt") is None or ev.get("type") == "derived":
+                continue  # Skip derived vars (e.g. QWEN3_ASR_STREAM_URL)
+
+            ev_name = ev["name"]
+            ev_type = ev["type"]
+
+            if ev_type == "secret":
+                # Show optional description line (e.g. "Get your API key from: ...")
+                if ev.get("description"):
+                    self.console.print(ev["description"])
+                api_key = self.prompt_with_existing_masked(
+                    prompt_text=ev["prompt"],
+                    env_key=ev_name,
+                    placeholders=ev.get("placeholders", []),
+                    is_password=True,
+                    default="",
+                )
+                if api_key:
+                    self.config[ev_name] = api_key
+                elif ev.get("required"):
+                    configured = False
+                    self.console.print(
+                        "[yellow][WARNING][/yellow] No API key provided - transcription will not work"
+                    )
+
+            elif ev_type == "url":
+                existing = read_env_value(".env", ev_name) or ev.get("default", "")
+                url = self.prompt_value(ev["prompt"], existing)
+                self.config[ev_name] = url
+
+            elif ev_type == "url_strip_http":
+                existing_raw = read_env_value(".env", ev_name)
+                # Re-add http:// prefix so the prompt shows a familiar URL
+                existing = (
+                    f"http://{existing_raw}" if existing_raw else ev.get("default", "")
+                )
+                url = self.prompt_value(ev["prompt"], existing)
+                self.config[ev_name] = url.replace("http://", "").rstrip("/")
+                # Special case: Qwen3-ASR URL derives the streaming URL (same host, port 8769)
+                if ev_name == "QWEN3_ASR_URL":
+                    stream_host = url.replace("http://", "").split(":")[0]
+                    self.config["QWEN3_ASR_STREAM_URL"] = f"{stream_host}:8769"
+
+        if configured:
+            batch_stt = provider["defaults"]["batch"]
+            self.config_manager.update_config_defaults({"stt": batch_stt})
+            stream_stt = provider["defaults"].get("stream")
+            if stream_stt:
+                self.config_manager.update_config_defaults({"stt_stream": stream_stt})
+
+            self.console.print(
+                f"[green][SUCCESS][/green] {provider['display_name']} configured in config.yml and .env"
+            )
+            self.console.print(f"[blue][INFO][/blue] Set defaults.stt: {batch_stt}")
+            if stream_stt:
+                self.console.print(
+                    f"[blue][INFO][/blue] Set defaults.stt_stream: {stream_stt}"
+                )
+
+        # Show warning notes (e.g. "Remember to start X service")
+        for note in provider.get("notes", []):
+            self.console.print(f"[yellow][WARNING][/yellow] {note}")
 
     def setup_streaming_provider(self):
         """Configure a separate streaming provider if --streaming-provider was passed.
@@ -423,27 +362,34 @@ class ChronicleSetup:
         When a different streaming provider is specified, sets defaults.stt_stream
         and enables always_batch_retranscribe (batch provider was set by setup_transcription).
         """
-        if not hasattr(self.args, "streaming_provider") or not self.args.streaming_provider:
+        if (
+            not hasattr(self.args, "streaming_provider")
+            or not self.args.streaming_provider
+        ):
             return
 
-        streaming_provider = self.args.streaming_provider
-        self.console.print(
-            f"\n[green]✅[/green] Streaming provider: {streaming_provider} (configured via wizard)"
-        )
-
-        # Map streaming provider to stt_stream config value
-        provider_to_stt_stream = {
-            "deepgram": "stt-deepgram-stream",
-            "smallest": "stt-smallest-stream",
-            "qwen3-asr": "stt-qwen3-asr",
-        }
-
-        stream_stt = provider_to_stt_stream.get(streaming_provider)
-        if not stream_stt:
+        streaming_provider_id = self.args.streaming_provider
+        catalog = load_stt_provider_catalog()
+        provider = get_stt_provider_by_id(streaming_provider_id, catalog)
+        if not provider:
             self.console.print(
-                f"[yellow][WARNING][/yellow] Unknown streaming provider: {streaming_provider}"
+                f"[yellow][WARNING][/yellow] Unknown streaming provider: {streaming_provider_id}"
             )
             return
+
+        # Prefer the dedicated stream config value; fall back to batch if streaming uses same model
+        stream_stt = provider["defaults"].get("stream") or provider["defaults"].get(
+            "batch"
+        )
+        if not stream_stt:
+            self.console.print(
+                f"[yellow][WARNING][/yellow] Provider {streaming_provider_id} has no streaming config"
+            )
+            return
+
+        self.console.print(
+            f"\n[green]✅[/green] Streaming provider: {provider['display_name']} (configured via wizard)"
+        )
 
         # Set stt_stream (batch stt was already set by setup_transcription)
         self.config_manager.update_config_defaults({"stt_stream": stream_stt})
@@ -458,53 +404,49 @@ class ChronicleSetup:
         self.config_manager.save_full_config(full_config)
 
         self.console.print(f"[blue][INFO][/blue] Set defaults.stt_stream: {stream_stt}")
-        self.console.print(f"[blue][INFO][/blue] Enabled always_batch_retranscribe")
+        self.console.print("[blue][INFO][/blue] Enabled always_batch_retranscribe")
 
-        # Prompt for streaming provider env vars if not already set
-        if streaming_provider == "deepgram":
-            existing_key = read_env_value(".env", "DEEPGRAM_API_KEY")
-            if not existing_key or existing_key in (
-                "your_deepgram_api_key_here",
-                "your-deepgram-key-here",
-            ):
+        # Prompt for streaming provider env vars if not already set in .env
+        for ev in provider.get("env_vars", []):
+            ev_name = ev["name"]
+            ev_type = ev.get("type", "")
+
+            # Handle the Qwen3 derived stream URL — only needed when used as streaming-only
+            if ev_type == "derived":
+                if ev_name == "QWEN3_ASR_STREAM_URL":
+                    existing = read_env_value(".env", ev_name)
+                    if not existing:
+                        qwen3_url = self.prompt_value(
+                            "Qwen3-ASR streaming URL",
+                            "http://host.docker.internal:8769",
+                        )
+                        self.config[ev_name] = qwen3_url.replace("http://", "").rstrip(
+                            "/"
+                        )
+                continue
+
+            if ev.get("prompt") is None:
+                continue
+
+            if ev_type == "secret":
+                # prompt_with_existing_masked handles the "already set" case gracefully
                 api_key = self.prompt_with_existing_masked(
-                    prompt_text="Deepgram API key for streaming",
-                    env_key="DEEPGRAM_API_KEY",
-                    placeholders=[
-                        "your_deepgram_api_key_here",
-                        "your-deepgram-key-here",
-                    ],
+                    prompt_text=f"{ev['prompt']} for streaming",
+                    env_key=ev_name,
+                    placeholders=ev.get("placeholders", []),
                     is_password=True,
                     default="",
                 )
                 if api_key:
-                    self.config["DEEPGRAM_API_KEY"] = api_key
-        elif streaming_provider == "smallest":
-            existing_key = read_env_value(".env", "SMALLEST_API_KEY")
-            if not existing_key or existing_key in (
-                "your_smallest_api_key_here",
-                "your-smallest-key-here",
-            ):
-                api_key = self.prompt_with_existing_masked(
-                    prompt_text="Smallest.ai API key for streaming",
-                    env_key="SMALLEST_API_KEY",
-                    placeholders=[
-                        "your_smallest_api_key_here",
-                        "your-smallest-key-here",
-                    ],
-                    is_password=True,
-                    default="",
-                )
-                if api_key:
-                    self.config["SMALLEST_API_KEY"] = api_key
-        elif streaming_provider == "qwen3-asr":
-            existing_url = read_env_value(".env", "QWEN3_ASR_STREAM_URL")
-            if not existing_url:
-                qwen3_url = self.prompt_value(
-                    "Qwen3-ASR streaming URL", "http://host.docker.internal:8769"
-                )
-                stream_host = qwen3_url.replace("http://", "").rstrip("/")
-                self.config["QWEN3_ASR_STREAM_URL"] = stream_host
+                    self.config[ev_name] = api_key
+
+            elif ev_type in ("url", "url_strip_http"):
+                existing = read_env_value(".env", ev_name) or ev.get("default", "")
+                url = self.prompt_value(ev["prompt"], existing)
+                if ev_type == "url_strip_http":
+                    self.config[ev_name] = url.replace("http://", "").rstrip("/")
+                else:
+                    self.config[ev_name] = url
 
     def setup_llm(self):
         """Configure LLM provider - updates config.yml and .env"""
@@ -526,7 +468,9 @@ class ChronicleSetup:
                 existing_choice = "1"
 
             self.print_section("LLM Provider Configuration")
-            self.console.print("[blue][INFO][/blue] LLM configuration will be saved to config.yml")
+            self.console.print(
+                "[blue][INFO][/blue] LLM configuration will be saved to config.yml"
+            )
             self.console.print()
 
             choices = {
@@ -541,7 +485,9 @@ class ChronicleSetup:
 
         if choice == "1":
             self.console.print("[blue][INFO][/blue] OpenAI selected")
-            self.console.print("Get your API key from: https://platform.openai.com/api-keys")
+            self.console.print(
+                "Get your API key from: https://platform.openai.com/api-keys"
+            )
 
             # Use the new masked prompt function
             api_key = self.prompt_with_existing_masked(
@@ -558,9 +504,13 @@ class ChronicleSetup:
                 self.config_manager.update_config_defaults(
                     {"llm": "openai-llm", "embedding": "openai-embed"}
                 )
-                self.console.print("[green][SUCCESS][/green] OpenAI configured in config.yml")
+                self.console.print(
+                    "[green][SUCCESS][/green] OpenAI configured in config.yml"
+                )
                 self.console.print("[blue][INFO][/blue] Set defaults.llm: openai-llm")
-                self.console.print("[blue][INFO][/blue] Set defaults.embedding: openai-embed")
+                self.console.print(
+                    "[blue][INFO][/blue] Set defaults.embedding: openai-embed"
+                )
             else:
                 self.console.print(
                     "[yellow][WARNING][/yellow] No API key provided - memory extraction will not work"
@@ -572,21 +522,31 @@ class ChronicleSetup:
             self.config_manager.update_config_defaults(
                 {"llm": "local-llm", "embedding": "local-embed"}
             )
-            self.console.print("[green][SUCCESS][/green] Ollama configured in config.yml")
+            self.console.print(
+                "[green][SUCCESS][/green] Ollama configured in config.yml"
+            )
             self.console.print("[blue][INFO][/blue] Set defaults.llm: local-llm")
-            self.console.print("[blue][INFO][/blue] Set defaults.embedding: local-embed")
+            self.console.print(
+                "[blue][INFO][/blue] Set defaults.embedding: local-embed"
+            )
             self.console.print(
                 "[yellow][WARNING][/yellow] Make sure Ollama is running and models are pulled"
             )
 
         elif choice == "3":
-            self.console.print("[blue][INFO][/blue] OpenAI-Compatible custom endpoint selected")
-            self.console.print("This works with any provider that exposes an OpenAI-compatible API")
+            self.console.print(
+                "[blue][INFO][/blue] OpenAI-Compatible custom endpoint selected"
+            )
+            self.console.print(
+                "This works with any provider that exposes an OpenAI-compatible API"
+            )
             self.console.print("(e.g., Groq, Together AI, LM Studio, vLLM, etc.)")
             self.console.print()
 
             # Prompt for base URL (required)
-            base_url = self.prompt_value("API Base URL (e.g., https://api.groq.com/openai/v1)", "")
+            base_url = self.prompt_value(
+                "API Base URL (e.g., https://api.groq.com/openai/v1)", ""
+            )
             if not base_url:
                 self.console.print(
                     "[yellow][WARNING][/yellow] No base URL provided - skipping custom LLM setup"
@@ -604,7 +564,9 @@ class ChronicleSetup:
                     self.config["CUSTOM_LLM_API_KEY"] = api_key
 
                 # Prompt for model name (required)
-                model_name = self.prompt_value("LLM Model name (e.g., llama-3.1-70b-versatile)", "")
+                model_name = self.prompt_value(
+                    "LLM Model name (e.g., llama-3.1-70b-versatile)", ""
+                )
                 if not model_name:
                     self.console.print(
                         "[yellow][WARNING][/yellow] No model name provided - skipping custom LLM setup"
@@ -663,7 +625,9 @@ class ChronicleSetup:
                         self.console.print(
                             "[green][SUCCESS][/green] Custom LLM and embedding configured in config.yml"
                         )
-                        self.console.print("[blue][INFO][/blue] Set defaults.llm: custom-llm")
+                        self.console.print(
+                            "[blue][INFO][/blue] Set defaults.llm: custom-llm"
+                        )
                         self.console.print(
                             "[blue][INFO][/blue] Set defaults.embedding: custom-embed"
                         )
@@ -674,7 +638,9 @@ class ChronicleSetup:
                         self.console.print(
                             "[green][SUCCESS][/green] Custom LLM configured in config.yml"
                         )
-                        self.console.print("[blue][INFO][/blue] Set defaults.llm: custom-llm")
+                        self.console.print(
+                            "[blue][INFO][/blue] Set defaults.llm: custom-llm"
+                        )
                         self.console.print(
                             "[blue][INFO][/blue] Set defaults.embedding: local-embed (Ollama)"
                         )
@@ -702,7 +668,9 @@ class ChronicleSetup:
             # Standalone init.py run — read existing config as default
             existing_choice = "1"
             full_config = self.config_manager.get_full_config()
-            existing_provider = full_config.get("memory", {}).get("provider", "chronicle")
+            existing_provider = full_config.get("memory", {}).get(
+                "provider", "chronicle"
+            )
             if existing_provider == "openmemory_mcp":
                 existing_choice = "2"
 
@@ -718,7 +686,9 @@ class ChronicleSetup:
             )
 
         if choice == "1":
-            self.console.print("[blue][INFO][/blue] Chronicle Native memory provider selected")
+            self.console.print(
+                "[blue][INFO][/blue] Chronicle Native memory provider selected"
+            )
 
             qdrant_url = self.prompt_value("Qdrant URL", "qdrant")
             self.config["QDRANT_BASE_URL"] = qdrant_url
@@ -764,7 +734,9 @@ class ChronicleSetup:
         has_speaker_arg = (
             hasattr(self.args, "speaker_service_url") and self.args.speaker_service_url
         )
-        has_asr_arg = hasattr(self.args, "parakeet_asr_url") and self.args.parakeet_asr_url
+        has_asr_arg = (
+            hasattr(self.args, "parakeet_asr_url") and self.args.parakeet_asr_url
+        )
 
         if has_speaker_arg:
             self.config["SPEAKER_SERVICE_URL"] = self.args.speaker_service_url
@@ -781,7 +753,9 @@ class ChronicleSetup:
         # Only show interactive section if not all configured via args
         if not has_speaker_arg:
             try:
-                enable_speaker = Confirm.ask("Enable Speaker Recognition?", default=False)
+                enable_speaker = Confirm.ask(
+                    "Enable Speaker Recognition?", default=False
+                )
             except EOFError:
                 self.console.print("Using default: No")
                 enable_speaker = False
@@ -792,7 +766,9 @@ class ChronicleSetup:
                     "http://host.docker.internal:8001",
                 )
                 self.config["SPEAKER_SERVICE_URL"] = speaker_url
-                self.console.print("[green][SUCCESS][/green] Speaker Recognition configured")
+                self.console.print(
+                    "[green][SUCCESS][/green] Speaker Recognition configured"
+                )
                 self.console.print(
                     "[blue][INFO][/blue] Start with: cd ../../extras/speaker-recognition && docker compose up -d"
                 )
@@ -809,12 +785,16 @@ class ChronicleSetup:
         neo4j_password = getattr(self.args, "neo4j_password", None)
 
         if neo4j_password:
-            self.console.print(f"[green]✅[/green] Neo4j: password configured via wizard")
+            self.console.print(
+                f"[green]✅[/green] Neo4j: password configured via wizard"
+            )
         else:
             # Interactive prompt (standalone init.py run)
             self.console.print()
             self.console.print("[bold cyan]Neo4j Configuration[/bold cyan]")
-            self.console.print("Neo4j is used for Knowledge Graph (entity/relationship extraction)")
+            self.console.print(
+                "Neo4j is used for Knowledge Graph (entity/relationship extraction)"
+            )
             self.console.print()
             neo4j_password = self.prompt_with_existing_masked(
                 "Neo4j password (min 8 chars)",
@@ -836,10 +816,14 @@ class ChronicleSetup:
 
         if has_enable:
             enable_obsidian = True
-            self.console.print(f"[green]✅[/green] Obsidian: enabled (configured via wizard)")
+            self.console.print(
+                f"[green]✅[/green] Obsidian: enabled (configured via wizard)"
+            )
         elif has_disable:
             enable_obsidian = False
-            self.console.print(f"[blue][INFO][/blue] Obsidian: disabled (configured via wizard)")
+            self.console.print(
+                f"[blue][INFO][/blue] Obsidian: disabled (configured via wizard)"
+            )
         else:
             # Standalone init.py run — read existing config as default
             full_config = self.config_manager.get_full_config()
@@ -849,7 +833,9 @@ class ChronicleSetup:
 
             self.console.print()
             self.console.print("[bold cyan]Obsidian Integration (Optional)[/bold cyan]")
-            self.console.print("Enable graph-based knowledge management for Obsidian vault notes")
+            self.console.print(
+                "Enable graph-based knowledge management for Obsidian vault notes"
+            )
             self.console.print()
 
             try:
@@ -857,7 +843,9 @@ class ChronicleSetup:
                     "Enable Obsidian integration?", default=existing_enabled
                 )
             except EOFError:
-                self.console.print(f"Using default: {'Yes' if existing_enabled else 'No'}")
+                self.console.print(
+                    f"Using default: {'Yes' if existing_enabled else 'No'}"
+                )
                 enable_obsidian = existing_enabled
 
         if enable_obsidian:
@@ -874,9 +862,12 @@ class ChronicleSetup:
     def setup_knowledge_graph(self):
         """Configure Knowledge Graph (Neo4j-based entity/relationship extraction - enabled by default)"""
         has_enable = (
-            hasattr(self.args, "enable_knowledge_graph") and self.args.enable_knowledge_graph
+            hasattr(self.args, "enable_knowledge_graph")
+            and self.args.enable_knowledge_graph
         )
-        has_disable = hasattr(self.args, "no_knowledge_graph") and self.args.no_knowledge_graph
+        has_disable = (
+            hasattr(self.args, "no_knowledge_graph") and self.args.no_knowledge_graph
+        )
 
         if has_enable:
             enable_kg = True
@@ -892,20 +883,28 @@ class ChronicleSetup:
             # Standalone init.py run — read existing config as default
             full_config = self.config_manager.get_full_config()
             existing_enabled = (
-                full_config.get("memory", {}).get("knowledge_graph", {}).get("enabled", True)
+                full_config.get("memory", {})
+                .get("knowledge_graph", {})
+                .get("enabled", True)
             )
 
             self.console.print()
-            self.console.print("[bold cyan]Knowledge Graph (Entity Extraction)[/bold cyan]")
+            self.console.print(
+                "[bold cyan]Knowledge Graph (Entity Extraction)[/bold cyan]"
+            )
             self.console.print(
                 "Extract people, places, organizations, events, and tasks from conversations"
             )
             self.console.print()
 
             try:
-                enable_kg = Confirm.ask("Enable Knowledge Graph?", default=existing_enabled)
+                enable_kg = Confirm.ask(
+                    "Enable Knowledge Graph?", default=existing_enabled
+                )
             except EOFError:
-                self.console.print(f"Using default: {'Yes' if existing_enabled else 'No'}")
+                self.console.print(
+                    f"Using default: {'Yes' if existing_enabled else 'No'}"
+                )
                 enable_kg = existing_enabled
 
         if enable_kg:
@@ -937,7 +936,9 @@ class ChronicleSetup:
     def setup_langfuse(self):
         """Configure LangFuse observability and prompt management"""
         self.console.print()
-        self.console.print("[bold cyan]LangFuse Observability & Prompt Management[/bold cyan]")
+        self.console.print(
+            "[bold cyan]LangFuse Observability & Prompt Management[/bold cyan]"
+        )
 
         # Check if keys were passed from wizard (langfuse init already ran)
         langfuse_pub = getattr(self.args, "langfuse_public_key", None)
@@ -945,26 +946,39 @@ class ChronicleSetup:
 
         if langfuse_pub and langfuse_sec:
             # Auto-configure from wizard — no prompts needed
-            langfuse_host = getattr(self.args, "langfuse_host", None) or "http://langfuse-web:3000"
+            langfuse_host = (
+                getattr(self.args, "langfuse_host", None) or "http://langfuse-web:3000"
+            )
             self.config["LANGFUSE_HOST"] = langfuse_host
             self.config["LANGFUSE_PUBLIC_KEY"] = langfuse_pub
             self.config["LANGFUSE_SECRET_KEY"] = langfuse_sec
             self.config["LANGFUSE_BASE_URL"] = langfuse_host
 
             # Derive browser-accessible URL for deep-links
-            public_url = getattr(self.args, "langfuse_public_url", None) or "http://localhost:3002"
+            public_url = (
+                getattr(self.args, "langfuse_public_url", None)
+                or "http://localhost:3002"
+            )
             self._save_langfuse_public_url(public_url)
 
             source = "external" if "langfuse-web" not in langfuse_host else "local"
-            self.console.print(f"[green][SUCCESS][/green] LangFuse auto-configured ({source})")
+            self.console.print(
+                f"[green][SUCCESS][/green] LangFuse auto-configured ({source})"
+            )
             self.console.print(f"[blue][INFO][/blue] Host: {langfuse_host}")
             self.console.print(f"[blue][INFO][/blue] Public URL: {public_url}")
-            self.console.print(f"[blue][INFO][/blue] Public key: {self.mask_api_key(langfuse_pub)}")
+            self.console.print(
+                f"[blue][INFO][/blue] Public key: {self.mask_api_key(langfuse_pub)}"
+            )
             return
 
         # Manual configuration (standalone init.py run)
-        self.console.print("Enable LLM tracing, observability, and prompt management with LangFuse")
-        self.console.print("Self-host: cd ../../extras/langfuse && docker compose up -d")
+        self.console.print(
+            "Enable LLM tracing, observability, and prompt management with LangFuse"
+        )
+        self.console.print(
+            "Self-host: cd ../../extras/langfuse && docker compose up -d"
+        )
         self.console.print()
 
         try:
@@ -1039,13 +1053,17 @@ class ChronicleSetup:
         if hasattr(self.args, "enable_https") and self.args.enable_https:
             enable_https = True
             server_ip = getattr(self.args, "server_ip", "localhost")
-            self.console.print(f"[green]✅[/green] HTTPS: {server_ip} (configured via wizard)")
+            self.console.print(
+                f"[green]✅[/green] HTTPS: {server_ip} (configured via wizard)"
+            )
         else:
             # Interactive configuration
             self.print_section("HTTPS Configuration (Optional)")
 
             try:
-                enable_https = Confirm.ask("Enable HTTPS for microphone access?", default=False)
+                enable_https = Confirm.ask(
+                    "Enable HTTPS for microphone access?", default=False
+                )
             except EOFError:
                 self.console.print("Using default: No")
                 enable_https = False
@@ -1059,12 +1077,18 @@ class ChronicleSetup:
                 ts_dns, ts_ip = detect_tailscale_info()
 
                 if ts_dns:
-                    self.console.print(f"[green][AUTO-DETECTED][/green] Tailscale DNS: {ts_dns}")
+                    self.console.print(
+                        f"[green][AUTO-DETECTED][/green] Tailscale DNS: {ts_dns}"
+                    )
                     if ts_ip:
-                        self.console.print(f"[green][AUTO-DETECTED][/green] Tailscale IP:  {ts_ip}")
+                        self.console.print(
+                            f"[green][AUTO-DETECTED][/green] Tailscale IP:  {ts_ip}"
+                        )
                     default_address = ts_dns
                 elif ts_ip:
-                    self.console.print(f"[green][AUTO-DETECTED][/green] Tailscale IP: {ts_ip}")
+                    self.console.print(
+                        f"[green][AUTO-DETECTED][/green] Tailscale IP: {ts_ip}"
+                    )
                     default_address = ts_ip
                 else:
                     self.console.print("[blue][INFO][/blue] Tailscale not detected")
@@ -1073,7 +1097,9 @@ class ChronicleSetup:
                     )
                     default_address = "localhost"
 
-                self.console.print("[blue][INFO][/blue] For local-only access, use 'localhost'")
+                self.console.print(
+                    "[blue][INFO][/blue] For local-only access, use 'localhost'"
+                )
 
                 # Use the new masked prompt function (not masked for IP, but shows existing)
                 server_ip = self.prompt_with_existing_masked(
@@ -1100,7 +1126,9 @@ class ChronicleSetup:
                 )
 
             # Generate Caddyfile from template
-            self.console.print("[blue][INFO][/blue] Creating Caddyfile configuration...")
+            self.console.print(
+                "[blue][INFO][/blue] Creating Caddyfile configuration..."
+            )
             caddyfile_template = script_dir / "Caddyfile.template"
             caddyfile_path = script_dir / "Caddyfile"
 
@@ -1111,8 +1139,12 @@ class ChronicleSetup:
                         self.console.print(
                             "[red]❌ ERROR: 'Caddyfile' exists as a directory![/red]"
                         )
-                        self.console.print("[yellow]   Please remove it manually:[/yellow]")
-                        self.console.print(f"[yellow]   rm -rf {caddyfile_path}[/yellow]")
+                        self.console.print(
+                            "[yellow]   Please remove it manually:[/yellow]"
+                        )
+                        self.console.print(
+                            f"[yellow]   rm -rf {caddyfile_path}[/yellow]"
+                        )
                         self.console.print(
                             "[red]   HTTPS will NOT work without a proper Caddyfile![/red]"
                         )
@@ -1122,7 +1154,9 @@ class ChronicleSetup:
                             caddyfile_content = f.read()
 
                         # Replace TAILSCALE_IP with server_ip
-                        caddyfile_content = caddyfile_content.replace("TAILSCALE_IP", server_ip)
+                        caddyfile_content = caddyfile_content.replace(
+                            "TAILSCALE_IP", server_ip
+                        )
 
                         with open(caddyfile_path, "w") as f:
                             f.write(caddyfile_content)
@@ -1134,14 +1168,18 @@ class ChronicleSetup:
                         self.config["SERVER_IP"] = server_ip
 
                 except Exception as e:
-                    self.console.print(f"[red]❌ ERROR: Caddyfile generation failed: {e}[/red]")
+                    self.console.print(
+                        f"[red]❌ ERROR: Caddyfile generation failed: {e}[/red]"
+                    )
                     self.console.print(
                         "[red]   HTTPS will NOT work without a proper Caddyfile![/red]"
                     )
                     self.config["HTTPS_ENABLED"] = "false"
             else:
                 self.console.print("[red]❌ ERROR: Caddyfile.template not found[/red]")
-                self.console.print("[red]   HTTPS will NOT work without a proper Caddyfile![/red]")
+                self.console.print(
+                    "[red]   HTTPS will NOT work without a proper Caddyfile![/red]"
+                )
                 self.config["HTTPS_ENABLED"] = "false"
         else:
             self.config["HTTPS_ENABLED"] = "false"
@@ -1190,14 +1228,18 @@ class ChronicleSetup:
             and Path("diarization_config.json.template").exists()
         ):
             shutil.copy2("diarization_config.json.template", "diarization_config.json")
-            self.console.print("[green][SUCCESS][/green] diarization_config.json created")
+            self.console.print(
+                "[green][SUCCESS][/green] diarization_config.json created"
+            )
 
     def show_summary(self):
         """Show configuration summary"""
         self.print_section("Configuration Summary")
         self.console.print()
 
-        self.console.print(f"✅ Admin Account: {self.config.get('ADMIN_EMAIL', 'Not configured')}")
+        self.console.print(
+            f"✅ Admin Account: {self.config.get('ADMIN_EMAIL', 'Not configured')}"
+        )
 
         # Get current config from ConfigManager (single source of truth)
         config_yml = self.config_manager.get_full_config()
@@ -1208,8 +1250,14 @@ class ChronicleSetup:
             (m for m in config_yml.get("models", []) if m.get("name") == stt_default),
             None,
         )
-        stt_provider = stt_model.get("model_provider", "unknown") if stt_model else "not configured"
-        self.console.print(f"✅ Transcription: {stt_provider} ({stt_default}) - config.yml")
+        stt_provider = (
+            stt_model.get("model_provider", "unknown")
+            if stt_model
+            else "not configured"
+        )
+        self.console.print(
+            f"✅ Transcription: {stt_provider} ({stt_default}) - config.yml"
+        )
 
         # Show LLM config from config.yml
         llm_default = config_yml.get("defaults", {}).get("llm", "not set")
@@ -1271,7 +1319,9 @@ class ChronicleSetup:
             self.console.print(f"   [cyan]http://localhost:{webui_port}[/cyan]")
             self.console.print()
             self.console.print("3. Check service health:")
-            self.console.print(f"   [cyan]curl http://localhost:{backend_port}/health[/cyan]")
+            self.console.print(
+                f"   [cyan]curl http://localhost:{backend_port}/health[/cyan]"
+            )
 
         if self.config.get("MEMORY_PROVIDER") == "openmemory_mcp":
             self.console.print()
@@ -1296,7 +1346,9 @@ class ChronicleSetup:
         self.console.print(
             "[dim]Safe to run again — it backs up your config and preserves previous values.[/dim]"
         )
-        self.console.print("[dim]When unsure, just press Enter — the defaults will work.[/dim]")
+        self.console.print(
+            "[dim]When unsure, just press Enter — the defaults will work.[/dim]"
+        )
         self.console.print()
 
         try:
@@ -1351,6 +1403,17 @@ class ChronicleSetup:
 
 def main():
     """Main entry point"""
+    # Load catalog for dynamic argparse choices
+    try:
+        _catalog = load_stt_provider_catalog()
+        _transcription_choices = [p["id"] for p in _catalog] + ["none"]
+        _streaming_choices = [
+            p["id"] for p in _catalog if p.get("capabilities", {}).get("streaming")
+        ]
+    except Exception:
+        _transcription_choices = None  # No restriction if catalog unavailable
+        _streaming_choices = None
+
     parser = argparse.ArgumentParser(description="Chronicle Advanced Backend Setup")
     parser.add_argument(
         "--speaker-service-url",
@@ -1361,7 +1424,7 @@ def main():
     )
     parser.add_argument(
         "--transcription-provider",
-        choices=["deepgram", "parakeet", "vibevoice", "qwen3-asr", "smallest", "none"],
+        choices=_transcription_choices,
         help="Transcription provider (default: prompt user)",
     )
     parser.add_argument(
@@ -1383,7 +1446,9 @@ def main():
         action="store_true",
         help="Enable Knowledge Graph entity extraction (default: prompt user)",
     )
-    parser.add_argument("--neo4j-password", help="Neo4j password (default: prompt user)")
+    parser.add_argument(
+        "--neo4j-password", help="Neo4j password (default: prompt user)"
+    )
     parser.add_argument(
         "--ts-authkey",
         help="Tailscale auth key for Docker integration (default: prompt user)",
@@ -1402,7 +1467,7 @@ def main():
     )
     parser.add_argument(
         "--streaming-provider",
-        choices=["deepgram", "smallest", "qwen3-asr"],
+        choices=_streaming_choices,
         help="Streaming provider when different from batch (enables batch re-transcription)",
     )
     parser.add_argument(

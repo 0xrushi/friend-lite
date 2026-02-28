@@ -34,16 +34,38 @@ def _install_rich_stubs():
 
 
 def _install_setup_utils_stub():
+    # Local import: captured in _load_catalog's closure; keeps stub self-contained.
+    import yaml as _yaml
+
+    _catalog_path = (
+        Path(__file__).resolve().parents[2] / "config" / "stt-providers-catalog.yml"
+    )
+
+    def _load_catalog(catalog_path=None):
+        p = catalog_path or _catalog_path
+        with open(p) as f:
+            data = _yaml.safe_load(f)
+        return data.get("providers", [])
+
+    def _get_provider_by_id(provider_id, catalog):
+        for p in catalog:
+            if p["id"] == provider_id:
+                return p
+        return None
+
     setup_utils_mod = types.ModuleType("setup_utils")
     setup_utils_mod.detect_tailscale_info = lambda: (None, None)
     setup_utils_mod.generate_self_signed_certs = lambda *_: True
     setup_utils_mod.generate_tailscale_certs = lambda *_: False
+    setup_utils_mod.get_stt_provider_by_id = _get_provider_by_id
     setup_utils_mod.is_placeholder = lambda value, *placeholders: value in placeholders
+    setup_utils_mod.load_stt_provider_catalog = _load_catalog
     setup_utils_mod.mask_value = lambda value, *_: value
     setup_utils_mod.prompt_password = lambda *_, **__: ""
     setup_utils_mod.prompt_with_existing_masked = (
         lambda *_, existing_value=None, default="", **__: existing_value or default
     )
+    setup_utils_mod.read_config_yml = lambda: {}
     setup_utils_mod.read_env_value = lambda *_: None
     sys.modules.setdefault("setup_utils", setup_utils_mod)
 

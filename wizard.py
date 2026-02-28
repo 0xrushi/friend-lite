@@ -18,41 +18,53 @@ from setup_utils import (
     detect_tailscale_info,
     generate_self_signed_certs,
     generate_tailscale_certs,
+    get_stt_provider_by_id,
     is_placeholder,
+    load_stt_provider_catalog,
     mask_value,
     prompt_password,
     prompt_with_existing_masked,
+    read_config_yml,
     read_env_value,
 )
+
+# Catalog cache — loaded once per process
+_catalog_cache = None
+
+
+def _get_catalog():
+    """Return the STT provider catalog, loading from disk on first call."""
+    global _catalog_cache
+    if _catalog_cache is None:
+        _catalog_cache = load_stt_provider_catalog()
+    return _catalog_cache
+
 
 console = Console()
 
 
 def get_existing_stt_provider(config_yml: dict):
-    """Map config.yml defaults.stt value back to wizard provider name, or None."""
+    """Map config.yml defaults.stt value back to wizard provider id, or None."""
     stt = config_yml.get("defaults", {}).get("stt", "")
-    mapping = {
-        "stt-deepgram": "deepgram",
-        "stt-deepgram-stream": "deepgram",
-        "stt-parakeet-batch": "parakeet",
-        "stt-vibevoice": "vibevoice",
-        "stt-qwen3-asr": "qwen3-asr",
-        "stt-smallest": "smallest",
-        "stt-smallest-stream": "smallest",
-    }
-    return mapping.get(stt)
+    if not stt:
+        return None
+    for p in _get_catalog():
+        defaults = p.get("defaults", {})
+        if defaults.get("batch") == stt or defaults.get("stream") == stt:
+            return p["id"]
+    return None
 
 
 def get_existing_stream_provider(config_yml: dict):
-    """Map config.yml defaults.stt_stream value back to wizard streaming provider name, or None."""
+    """Map config.yml defaults.stt_stream value back to wizard streaming provider id, or None."""
     stt_stream = config_yml.get("defaults", {}).get("stt_stream", "")
-    mapping = {
-        "stt-deepgram-stream": "deepgram",
-        "stt-smallest-stream": "smallest",
-        "stt-qwen3-asr": "qwen3-asr",
-        "stt-qwen3-asr-stream": "qwen3-asr",
-    }
-    return mapping.get(stt_stream)
+    if not stt_stream:
+        return None
+    for p in _get_catalog():
+        defaults = p.get("defaults", {})
+        if defaults.get("stream") == stt_stream or defaults.get("batch") == stt_stream:
+            return p["id"]
+    return None
 
 
 SERVICES = {
@@ -195,8 +207,12 @@ def select_services(transcription_provider=None, config_yml=None, memory_provide
     selected.append("advanced")
 
     # Services that will be auto-added based on transcription provider choice
+    catalog = _get_catalog()
+    local_asr_ids = {
+        p["id"] for p in catalog if p.get("local_asr_service") == "asr-services"
+    }
     auto_added = set()
-    if transcription_provider in ("parakeet", "vibevoice", "qwen3-asr"):
+    if transcription_provider in local_asr_ids:
         auto_added.add("asr-services")
 
     # Optional extras
@@ -204,11 +220,12 @@ def select_services(transcription_provider=None, config_yml=None, memory_provide
     for service_name, service_config in SERVICES["extras"].items():
         # Skip services that will be auto-added based on earlier choices
         if service_name in auto_added:
-            provider_label = {
-                "vibevoice": "VibeVoice",
-                "parakeet": "Parakeet",
-                "qwen3-asr": "Qwen3-ASR",
-            }.get(transcription_provider, transcription_provider)
+            provider_entry = get_stt_provider_by_id(transcription_provider, catalog)
+            provider_label = (
+                provider_entry["display_name"]
+                if provider_entry
+                else transcription_provider
+            )
             console.print(
                 f"  ✅ {service_config['description']} ({provider_label}) [dim](auto-selected)[/dim]"
             )
@@ -405,21 +422,18 @@ def run_service_setup(
 
         # For asr-services, pass provider from wizard's transcription choice and reuse CUDA version
         if service_name == "asr-services":
-            # Map wizard transcription provider to asr-services provider name
-            if hardware_profile == "strixhalo":
-                wizard_to_asr_provider = {
-                    "vibevoice": "vibevoice-strixhalo",
-                    "parakeet": "nemo-strixhalo",
-                    "qwen3-asr": "qwen3-asr",
-                }
-            else:
-                wizard_to_asr_provider = {
-                    "vibevoice": "vibevoice",
-                    "parakeet": "nemo",
-                    "qwen3-asr": "qwen3-asr",
-                }
-            asr_provider = wizard_to_asr_provider.get(transcription_provider)
-            if asr_provider:
+            # Derive ASR provider name from catalog
+            provider_entry = get_stt_provider_by_id(
+                transcription_provider, _get_catalog()
+            )
+            if provider_entry and provider_entry.get("local_asr_provider"):
+                if hardware_profile == "strixhalo":
+                    asr_provider = (
+                        provider_entry.get("local_asr_provider_strixhalo")
+                        or provider_entry["local_asr_provider"]
+                    )
+                else:
+                    asr_provider = provider_entry["local_asr_provider"]
                 cmd.extend(["--provider", asr_provider])
                 console.print(
                     f"[blue][INFO][/blue] Pre-selecting ASR provider: {asr_provider} (from wizard choice: {transcription_provider})"
@@ -793,24 +807,17 @@ def setup_hf_token_if_needed(selected_services):
         return None
 
 
-# Providers that support real-time streaming
-STREAMING_CAPABLE = {"deepgram", "smallest", "qwen3-asr"}
-
-
 def select_transcription_provider(config_yml: dict = None):
     """Ask user which transcription provider they want (batch/primary)."""
     config_yml = config_yml or {}
     existing_provider = get_existing_stt_provider(config_yml)
+    catalog = _get_catalog()
 
-    provider_to_choice = {
-        "deepgram": "1",
-        "parakeet": "2",
-        "vibevoice": "3",
-        "qwen3-asr": "4",
-        "smallest": "5",
-        "none": "6",
-    }
-    choice_to_provider = {v: k for k, v in provider_to_choice.items()}
+    # Build numbered menu from catalog
+    choice_to_provider = {str(i + 1): p["id"] for i, p in enumerate(catalog)}
+    skip_key = str(len(catalog) + 1)
+    choice_to_provider[skip_key] = "none"
+    provider_to_choice = {v: k for k, v in choice_to_provider.items()}
     default_choice = provider_to_choice.get(existing_provider, "1")
 
     console.print("\n🎤 [bold cyan]Transcription Provider[/bold cyan]")
@@ -821,26 +828,15 @@ def select_transcription_provider(config_yml: dict = None):
         "[dim]If it also supports streaming, it will be used for real-time too by default.[/dim]"
     )
     if existing_provider:
-        provider_labels = {
-            "deepgram": "Deepgram",
-            "parakeet": "Parakeet ASR",
-            "vibevoice": "VibeVoice ASR",
-            "qwen3-asr": "Qwen3-ASR",
-            "smallest": "Smallest.ai Pulse",
-        }
-        console.print(
-            f"[blue][INFO][/blue] Current: {provider_labels.get(existing_provider, existing_provider)}"
+        existing_entry = get_stt_provider_by_id(existing_provider, catalog)
+        existing_label = (
+            existing_entry["display_name"] if existing_entry else existing_provider
         )
+        console.print(f"[blue][INFO][/blue] Current: {existing_label}")
     console.print()
 
-    choices = {
-        "1": "Deepgram (cloud, streaming + batch)",
-        "2": "Parakeet ASR (offline, batch only, GPU)",
-        "3": "VibeVoice ASR (offline, batch only, built-in diarization, GPU)",
-        "4": "Qwen3-ASR (offline, streaming + batch, 52 languages, GPU)",
-        "5": "Smallest.ai Pulse (cloud, streaming + batch)",
-        "6": "None (skip transcription setup)",
-    }
+    choices = {str(i + 1): p["wizard_description"] for i, p in enumerate(catalog)}
+    choices[skip_key] = "None (skip transcription setup)"
 
     for key, desc in choices.items():
         marker = " [dim](current)[/dim]" if key == default_choice else ""
@@ -873,11 +869,16 @@ def select_streaming_provider(batch_provider, config_yml: dict = None):
     if batch_provider in ("none", None):
         return None
 
+    catalog = _get_catalog()
     existing_stream = get_existing_stream_provider(config_yml)
 
-    if batch_provider in STREAMING_CAPABLE:
+    # Derive streaming-capable set from catalog
+    streaming_capable = {
+        p["id"] for p in catalog if p.get("capabilities", {}).get("streaming")
+    }
+
+    if batch_provider in streaming_capable:
         # Batch provider can already stream — just confirm
-        # Default to "use different" if a different streaming provider was previously configured
         has_different_stream = bool(
             existing_stream and existing_stream != batch_provider
         )
@@ -899,19 +900,14 @@ def select_streaming_provider(batch_provider, config_yml: dict = None):
             f"{batch_provider} is batch-only. Pick a streaming provider for real-time transcription:"
         )
 
-    # Show streaming-capable providers (excluding the batch provider)
+    # Build menu from streaming-capable providers (excluding the batch provider)
     streaming_choices = {}
     provider_map = {}
     idx = 1
-
-    for name, desc in [
-        ("deepgram", "Deepgram (cloud, streaming)"),
-        ("smallest", "Smallest.ai Pulse (cloud, streaming)"),
-        ("qwen3-asr", "Qwen3-ASR (offline, streaming)"),
-    ]:
-        if name != batch_provider:
-            streaming_choices[str(idx)] = desc
-            provider_map[str(idx)] = name
+    for p in catalog:
+        if p.get("capabilities", {}).get("streaming") and p["id"] != batch_provider:
+            streaming_choices[str(idx)] = f"{p['wizard_description']}"
+            provider_map[str(idx)] = p["id"]
             idx += 1
 
     skip_key = str(idx)
@@ -1044,7 +1040,13 @@ def select_hardware_profile(
     Returns:
         "strixhalo" for AMD Strix Halo profile, otherwise None.
     """
-    strix_capable_providers = {"parakeet", "vibevoice"}
+    catalog = _get_catalog()
+    strix_capable_providers = {
+        p["id"]
+        for p in catalog
+        if p.get("local_asr_provider_strixhalo")
+        and p["local_asr_provider_strixhalo"] != p.get("local_asr_provider")
+    }
     needs_hardware_choice = (
         "speaker-recognition" in selected_services
         or transcription_provider in strix_capable_providers
@@ -1236,7 +1238,9 @@ def main():
     )
 
     # Auto-add asr-services if any local ASR was chosen (batch or streaming)
-    local_asr_providers = ("parakeet", "vibevoice", "qwen3-asr")
+    local_asr_providers = {
+        p["id"] for p in _get_catalog() if p.get("local_asr_service") == "asr-services"
+    }
     needs_asr = transcription_provider in local_asr_providers or (
         streaming_provider and streaming_provider in local_asr_providers
     )

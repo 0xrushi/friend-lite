@@ -463,6 +463,56 @@ def generate_self_signed_certs(server_address: str, certs_dir: str) -> bool:
         return False
 
 
+def load_stt_provider_catalog(catalog_path=None):
+    """Load stt-providers-catalog.yml and return the list of provider dicts.
+
+    Args:
+        catalog_path: Path to the catalog YAML file. Defaults to
+                      <repo-root>/config/stt-providers-catalog.yml.
+
+    Returns:
+        List of provider dicts as defined in the catalog.
+    """
+    import yaml
+
+    if catalog_path is None:
+        catalog_path = Path(__file__).parent / "config" / "stt-providers-catalog.yml"
+    with open(catalog_path, "r") as f:
+        data = yaml.safe_load(f)
+    return data.get("providers", [])
+
+
+def get_stt_provider_by_id(provider_id, catalog):
+    """Find a provider dict by its id field.
+
+    Args:
+        provider_id: The provider id string (e.g. "deepgram", "parakeet").
+        catalog: List of provider dicts from load_stt_provider_catalog().
+
+    Returns:
+        The matching provider dict, or None if not found.
+    """
+    for p in catalog:
+        if p["id"] == provider_id:
+            return p
+    return None
+
+
+def read_config_yml() -> dict:
+    """Read config/config.yml relative to CWD and return parsed YAML as dict.
+
+    Returns an empty dict if the file does not exist or is empty.
+    """
+    import yaml
+
+    config_path = Path("config") / "config.yml"
+    if not config_path.exists():
+        return {}
+    with open(config_path) as f:
+        data = yaml.safe_load(f)
+    return data or {}
+
+
 def detect_cuda_version(default: str = "cu126") -> str:
     """
     Detect system CUDA version from nvidia-smi output.

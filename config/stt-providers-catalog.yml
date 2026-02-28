@@ -1,0 +1,166 @@
+# config/stt-providers-catalog.yml
+# Catalog of STT providers for the Chronicle setup wizard.
+#
+# Adding a new STT provider requires:
+#   1. Add a model definition to config/defaults.yml (for runtime)
+#   2. Add a provider stanza here (for wizard UI and setup)
+# No Python code changes needed in wizard.py or init.py.
+#
+# Fields:
+#   id:                         Unique identifier used in CLI args and config
+#   display_name:               Human-readable name
+#   wizard_description:         Shown in wizard.py's numbered menu
+#   description:                Shown in init.py's interactive menu (platform-agnostic)
+#   description_macos:          Shown in init.py on macOS (overrides description)
+#   description_linux:          Shown in init.py on Linux (overrides description)
+#   type:                       "cloud" or "local"
+#   capabilities.batch:         Supports batch transcription
+#   capabilities.streaming:     Supports real-time streaming
+#   defaults.batch:             config.yml defaults.stt value for this provider
+#   defaults.stream:            config.yml defaults.stt_stream value (null if batch-only)
+#   local_asr_service:          Extra service to auto-add (null for cloud providers)
+#   local_asr_provider:         asr-services --provider value (null for cloud providers)
+#   local_asr_provider_strixhalo: AMD Strix Halo variant (same as local_asr_provider if no variant)
+#   env_vars:                   List of env vars to configure
+#     name:       Environment variable name
+#     prompt:     Prompt text (null = derived, skip in setup_transcription)
+#     description: Optional info line printed before the prompt
+#     required:   If true and empty, skip config_defaults update (cloud providers only)
+#     type:       "secret" | "url" | "url_strip_http" | "derived"
+#     default:    Default value for the prompt
+#     placeholders: List of values treated as "not set"
+#   notes:        Warning messages printed after configuration
+#   setup_notes:  Info messages printed after provider selection, before prompts
+
+providers:
+  - id: deepgram
+    display_name: "Deepgram"
+    wizard_description: "Deepgram (cloud, streaming + batch)"
+    description: "Deepgram (recommended - high quality, cloud-based)"
+    type: cloud
+    capabilities:
+      batch: true
+      streaming: true
+    defaults:
+      batch: stt-deepgram
+      stream: stt-deepgram-stream
+    local_asr_service: null
+    local_asr_provider: null
+    local_asr_provider_strixhalo: null
+    env_vars:
+      - name: DEEPGRAM_API_KEY
+        prompt: "Deepgram API key (leave empty to skip)"
+        description: "Get your API key from: https://console.deepgram.com/"
+        required: true
+        type: secret
+        placeholders:
+          - "your_deepgram_api_key_here"
+          - "your-deepgram-key-here"
+    notes: []
+    setup_notes: []
+
+  - id: parakeet
+    display_name: "Parakeet ASR"
+    wizard_description: "Parakeet ASR (offline, batch only, GPU)"
+    description_macos: "Offline (Parakeet ASR - CPU-based, runs locally)"
+    description_linux: "Offline (Parakeet ASR - GPU recommended, runs locally)"
+    type: local
+    capabilities:
+      batch: true
+      streaming: false
+    defaults:
+      batch: stt-parakeet-batch
+      stream: null
+    local_asr_service: asr-services
+    local_asr_provider: nemo
+    local_asr_provider_strixhalo: nemo-strixhalo
+    env_vars:
+      - name: PARAKEET_ASR_URL
+        prompt: "Parakeet ASR URL"
+        required: false
+        type: url
+        default: "http://host.docker.internal:8767"
+    notes:
+      - "Remember to start Parakeet: cd ../../extras/asr-services && docker compose up nemo-asr"
+    setup_notes: []
+
+  - id: vibevoice
+    display_name: "VibeVoice ASR"
+    wizard_description: "VibeVoice ASR (offline, batch only, built-in diarization, GPU)"
+    description_macos: "Offline (VibeVoice - CPU-based, built-in diarization)"
+    description_linux: "Offline (VibeVoice - GPU recommended, built-in diarization)"
+    type: local
+    capabilities:
+      batch: true
+      streaming: false
+    defaults:
+      batch: stt-vibevoice
+      stream: null
+    local_asr_service: asr-services
+    local_asr_provider: vibevoice
+    local_asr_provider_strixhalo: vibevoice-strixhalo
+    env_vars:
+      - name: VIBEVOICE_ASR_URL
+        prompt: "VibeVoice ASR URL"
+        required: false
+        type: url
+        default: "http://host.docker.internal:8767"
+    notes:
+      - "Remember to start VibeVoice: cd ../../extras/asr-services && docker compose up vibevoice-asr"
+    setup_notes:
+      - "VibeVoice provides built-in speaker diarization - pyannote will be skipped"
+
+  - id: qwen3-asr
+    display_name: "Qwen3-ASR"
+    wizard_description: "Qwen3-ASR (offline, streaming + batch, 52 languages, GPU)"
+    description: "Offline (Qwen3-ASR - GPU required, 52 languages, streaming + batch)"
+    type: local
+    capabilities:
+      batch: true
+      streaming: true
+    defaults:
+      batch: stt-qwen3-asr
+      stream: stt-qwen3-asr-stream
+    local_asr_service: asr-services
+    local_asr_provider: qwen3-asr
+    local_asr_provider_strixhalo: qwen3-asr
+    env_vars:
+      - name: QWEN3_ASR_URL
+        prompt: "Qwen3-ASR URL"
+        required: false
+        type: url_strip_http
+        default: "http://host.docker.internal:8767"
+      - name: QWEN3_ASR_STREAM_URL
+        prompt: null
+        required: false
+        type: derived
+    notes:
+      - "Remember to start Qwen3-ASR: cd ../../extras/asr-services && docker compose up qwen3-asr-wrapper qwen3-asr-bridge -d"
+    setup_notes:
+      - "Qwen3-ASR selected (52 languages, streaming + batch via vLLM)"
+
+  - id: smallest
+    display_name: "Smallest.ai Pulse"
+    wizard_description: "Smallest.ai Pulse (cloud, streaming + batch)"
+    description: "Smallest.ai Pulse (cloud-based, fast, requires API key)"
+    type: cloud
+    capabilities:
+      batch: true
+      streaming: true
+    defaults:
+      batch: stt-smallest
+      stream: stt-smallest-stream
+    local_asr_service: null
+    local_asr_provider: null
+    local_asr_provider_strixhalo: null
+    env_vars:
+      - name: SMALLEST_API_KEY
+        prompt: "Smallest.ai API key (leave empty to skip)"
+        description: "Get your API key from: https://smallest.ai/"
+        required: true
+        type: secret
+        placeholders:
+          - "your_smallest_api_key_here"
+          - "your-smallest-key-here"
+    notes: []
+    setup_notes: []
