@@ -163,7 +163,7 @@ services:
     build:
       context: .
       dockerfile: providers/qwen3_asr/Dockerfile.vllm
-    image: chronicle-asr-qwen3-vllm:latest
+    image: ${CHRONICLE_REGISTRY:-}chronicle-asr-qwen3-vllm:${CHRONICLE_TAG:-latest}
     ports:
       - "${ASR_VLLM_PORT:-8768}:8000"
     volumes:
@@ -240,7 +240,7 @@ services:
     build:
       context: .
       dockerfile: providers/vibevoice/Dockerfile.strixhalo
-    image: chronicle-asr-vibevoice-strixhalo:latest
+    image: ${CHRONICLE_REGISTRY:-}chronicle-asr-vibevoice-strixhalo:${CHRONICLE_TAG:-latest}
     ports:
       - "${ASR_PORT:-8767}:8765"
     volumes:
@@ -285,7 +285,7 @@ services:
     build:
       context: .
       dockerfile: providers/nemo/Dockerfile.strixhalo
-    image: chronicle-asr-nemo-strixhalo:latest
+    image: ${CHRONICLE_REGISTRY:-}chronicle-asr-nemo-strixhalo:${CHRONICLE_TAG:-latest}
     ports:
       - "${ASR_PORT:-8767}:8765"
     volumes:

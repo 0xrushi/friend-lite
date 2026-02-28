@@ -67,7 +67,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.strixhalo
-    image: speaker-recognition-strixhalo:latest
+    image: ${CHRONICLE_REGISTRY:-}chronicle-speaker-strixhalo:${CHRONICLE_TAG:-latest}
     devices:
       - /dev/kfd:/dev/kfd
       - /dev/dri:/dev/dri
