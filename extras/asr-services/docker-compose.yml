@@ -24,7 +24,7 @@ services:
       dockerfile: providers/nemo/Dockerfile
       args:
         PYTORCH_CUDA_VERSION: ${PYTORCH_CUDA_VERSION:-cu126}
-    image: chronicle-asr-nemo:latest
+    image: ${CHRONICLE_REGISTRY:-}chronicle-asr-nemo:${CHRONICLE_TAG:-latest}
     ports:
       - "${ASR_PORT:-8767}:8765"
     volumes:
@@ -58,7 +58,7 @@ services:
     build:
       context: .
       dockerfile: providers/faster_whisper/Dockerfile
-    image: chronicle-asr-faster-whisper:latest
+    image: ${CHRONICLE_REGISTRY:-}chronicle-asr-faster-whisper:${CHRONICLE_TAG:-latest}
     ports:
       - "${ASR_PORT:-8767}:8765"
     volumes:
@@ -92,7 +92,7 @@ services:
       dockerfile: providers/vibevoice/Dockerfile
       args:
         PYTORCH_CUDA_VERSION: ${PYTORCH_CUDA_VERSION:-cu126}
-    image: chronicle-asr-vibevoice:latest
+    image: ${CHRONICLE_REGISTRY:-}chronicle-asr-vibevoice:${CHRONICLE_TAG:-latest}
     ports:
       - "${ASR_PORT:-8767}:8765"
     volumes:
@@ -133,7 +133,7 @@ services:
     build:
       context: .
       dockerfile: providers/transformers/Dockerfile
-    image: chronicle-asr-transformers:latest
+    image: ${CHRONICLE_REGISTRY:-}chronicle-asr-transformers:${CHRONICLE_TAG:-latest}
     ports:
       - "${ASR_PORT:-8767}:8765"
     volumes:
@@ -163,7 +163,7 @@ services:
     build:
       context: .
       dockerfile: providers/qwen3_asr/Dockerfile.vllm
-    image: chronicle-asr-qwen3-vllm:latest
+    image: ${CHRONICLE_REGISTRY:-}chronicle-asr-qwen3-vllm:${CHRONICLE_TAG:-latest}
     ports:
       - "${ASR_VLLM_PORT:-8768}:8000"
     volumes:
@@ -193,7 +193,7 @@ services:
     build:
       context: .
       dockerfile: providers/qwen3_asr/Dockerfile.full
-    image: chronicle-asr-qwen3-wrapper:latest
+    image: ${CHRONICLE_REGISTRY:-}chronicle-asr-qwen3-wrapper:${CHRONICLE_TAG:-latest}
     ports:
       - "${ASR_PORT:-8767}:8765"
     volumes:
@@ -220,7 +220,7 @@ services:
     build:
       context: .
       dockerfile: providers/qwen3_asr/Dockerfile
-    image: chronicle-asr-qwen3-bridge:latest
+    image: ${CHRONICLE_REGISTRY:-}chronicle-asr-qwen3-bridge:${CHRONICLE_TAG:-latest}
     ports:
       - "${ASR_STREAM_PORT:-8769}:8766"
     environment:
@@ -240,7 +240,7 @@ services:
     build:
       context: .
       dockerfile: providers/vibevoice/Dockerfile.strixhalo
-    image: chronicle-asr-vibevoice-strixhalo:latest
+    image: ${CHRONICLE_REGISTRY:-}chronicle-asr-vibevoice-strixhalo:${CHRONICLE_TAG:-latest}
     ports:
       - "${ASR_PORT:-8767}:8765"
     volumes:
@@ -285,7 +285,7 @@ services:
     build:
       context: .
       dockerfile: providers/nemo/Dockerfile.strixhalo
-    image: chronicle-asr-nemo-strixhalo:latest
+    image: ${CHRONICLE_REGISTRY:-}chronicle-asr-nemo-strixhalo:${CHRONICLE_TAG:-latest}
     ports:
       - "${ASR_PORT:-8767}:8765"
     volumes:

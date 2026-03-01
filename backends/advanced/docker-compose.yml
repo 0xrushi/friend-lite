@@ -26,6 +26,7 @@ services:
              socat TCP-LISTEN:18123,fork,reuseaddr TCP:100.99.62.5:8123"
 
   chronicle-backend:
+    image: ${CHRONICLE_REGISTRY:-}chronicle-backend:${CHRONICLE_TAG:-latest}
     build:
       context: .
       dockerfile: Dockerfile
@@ -83,6 +84,7 @@ services:
   # - 1+ Stream workers (conditional based on config.yml - Deepgram/Parakeet)
   # Uses Python orchestrator for process management, health monitoring, and self-healing
   workers:
+    image: ${CHRONICLE_REGISTRY:-}chronicle-backend:${CHRONICLE_TAG:-latest}
     build:
       context: .
       dockerfile: Dockerfile
@@ -131,6 +133,7 @@ services:
   # - Weekly: Fine-tune error detection models using user feedback
   # Set DEV_MODE=true in .env for 1-minute intervals (testing)
   annotation-cron:
+    image: ${CHRONICLE_REGISTRY:-}chronicle-backend:${CHRONICLE_TAG:-latest}
     build:
       context: .
       dockerfile: Dockerfile
@@ -153,6 +156,7 @@ services:
       - annotation  # Optional profile - enable with: docker compose --profile annotation up
 
   webui:
+    image: ${CHRONICLE_REGISTRY:-}chronicle-webui:${CHRONICLE_TAG:-latest}
     build:
       context: ./webui
       dockerfile: Dockerfile
