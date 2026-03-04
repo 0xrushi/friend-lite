@@ -17,4 +17,4 @@ fi
 
 ACTION="${1:-run}"
 cd ..
-exec uv run --group firmware esphome "$ACTION" firmware/voice-tcp.yaml
+exec uv run --group firmware esphome "$ACTION" firmware/voice-chronicle.yaml

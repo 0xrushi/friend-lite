@@ -1,13 +1,18 @@
 /**
- * chronicle.h - Minimal TCP client for streaming to Chronicle relay.
+ * chronicle.h - Wyoming protocol TCP client for Chronicle relay.
  *
- * Sends framed messages over TCP: [type:1][length:2][payload]
- * The relay handles Wyoming protocol + WebSocket + auth.
+ * Sends Wyoming-formatted messages over TCP (JSONL + binary payload).
+ * The relay forwards them to the backend WebSocket as-is.
+ *
+ * Wire format per message:
+ *   JSON line terminated by \n
+ *   If payload_length > 0: raw binary bytes follow
  *
  * All functions are safe to call from ESPHome lambdas.
  */
 #pragma once
 
+#include <cstdio>
 #include <cstring>
 #include "esp_log.h"
 #include <lwip/sockets.h>
@@ -20,14 +25,8 @@ static const char* TAG = "chronicle";
 static int sockfd = -1;
 static bool connected = false;
 
-// Message types
-static const uint8_t MSG_AUDIO  = 0x01;
-static const uint8_t MSG_BUTTON = 0x02;
-
-// Button codes
-static const uint8_t BTN_SINGLE = 0x01;
-static const uint8_t BTN_DOUBLE = 0x02;
-static const uint8_t BTN_LONG   = 0x03;
+// Scratch buffer for JSON lines (256 bytes is plenty for Wyoming headers)
+static char json_buf[256];
 
 // ── connect to relay ────────────────────────────────────────────
 bool connect_relay(const char* ip, int port) {
@@ -65,37 +64,51 @@ void disconnect() {
     connected = false;
 }
 
-// ── send framed message: [type:1][length:2 big-endian][payload] ─
-static bool send_msg(uint8_t type, const uint8_t* data, uint16_t len) {
+// ── internal: send all bytes reliably ───────────────────────────
+static bool send_all(const void* data, size_t len) {
     if (sockfd < 0) return false;
-    uint8_t hdr[3] = {type, (uint8_t)(len >> 8), (uint8_t)(len & 0xFF)};
-    if (lwip_send(sockfd, hdr, 3, 0) != 3) { disconnect(); return false; }
-    if (len > 0) {
-        size_t sent = 0;
-        while (sent < len) {
-            ssize_t n = lwip_send(sockfd, data + sent, len - sent, 0);
-            if (n <= 0) { disconnect(); return false; }
-            sent += n;
-        }
+    const uint8_t* p = (const uint8_t*)data;
+    size_t sent = 0;
+    while (sent < len) {
+        ssize_t n = lwip_send(sockfd, p + sent, len - sent, 0);
+        if (n <= 0) { disconnect(); return false; }
+        sent += n;
     }
     return true;
 }
 
-// ── audio: split into 65535-byte chunks if needed ───────────────
-bool send_audio(const uint8_t* pcm, size_t len) {
-    while (len > 0) {
-        uint16_t chunk = len > 65535 ? 65535 : (uint16_t)len;
-        if (!send_msg(MSG_AUDIO, pcm, chunk)) return false;
-        pcm += chunk;
-        len -= chunk;
-    }
-    return true;
+// ── audio-start: call once after connect ────────────────────────
+bool send_audio_start(int rate, int width, int channels, const char* mode = "streaming") {
+    int n = snprintf(json_buf, sizeof(json_buf),
+        "{\"type\":\"audio-start\",\"data\":{\"rate\":%d,\"width\":%d,\"channels\":%d,\"mode\":\"%s\"},\"payload_length\":0}\n",
+        rate, width, channels, mode);
+    return send_all(json_buf, n);
 }
 
-// ── button ──────────────────────────────────────────────────────
-bool send_button(uint8_t code) {
-    ESP_LOGI(TAG, "Sending button %d", code);
-    return send_msg(MSG_BUTTON, &code, 1);
+// ── audio-chunk: JSON line + binary payload ─────────────────────
+bool send_audio(const uint8_t* pcm, size_t len, int rate, int width, int channels) {
+    int n = snprintf(json_buf, sizeof(json_buf),
+        "{\"type\":\"audio-chunk\",\"data\":{\"rate\":%d,\"width\":%d,\"channels\":%d},\"payload_length\":%u}\n",
+        rate, width, channels, (unsigned)len);
+    if (!send_all(json_buf, n)) return false;
+    return send_all(pcm, len);
+}
+
+// ── audio-stop: signal end of session ───────────────────────────
+bool send_audio_stop() {
+    int n = snprintf(json_buf, sizeof(json_buf),
+        "{\"type\":\"audio-stop\",\"data\":{},\"payload_length\":0}\n");
+    return send_all(json_buf, n);
+}
+
+// ── button event ────────────────────────────────────────────────
+// state: "SINGLE_PRESS", "DOUBLE_PRESS", "LONG_PRESS"
+bool send_button(const char* state) {
+    ESP_LOGI(TAG, "Sending button %s", state);
+    int n = snprintf(json_buf, sizeof(json_buf),
+        "{\"type\":\"button-event\",\"data\":{\"state\":\"%s\"},\"payload_length\":0}\n",
+        state);
+    return send_all(json_buf, n);
 }
 
 }  // namespace chronicle
