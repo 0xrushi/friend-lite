@@ -1,0 +1,564 @@
+# Chronicle firmware for Home Assistant Voice Preview Edition
+#
+# Full-featured firmware combining:
+#   - Microphone input via TCP streaming (for Chronicle audio capture)
+#   - Speaker output via ESPHome API media_player (for TTS playback)
+#   - LED ring status indicators
+#   - HTTP audio source for playing audio from URLs
+#
+# Flash with:
+#   cd extras/havpe-relay/firmware
+#   uv run --group firmware esphome run voice-chronicle.yaml
+#
+# Requires:
+#   - secrets.yaml with wifi_ssid, wifi_password, relay_ip_address
+
+substitutions:
+  device_name: voice-pe-chronicle
+  wifi_ssid: !secret wifi_ssid
+  wifi_pwd: !secret wifi_password
+  server_ip: !secret relay_ip_address
+  server_port: "8989"
+
+esphome:
+  name: ${device_name}
+  friendly_name: Voice PE Chronicle
+  includes:
+    - chronicle-sdk/chronicle.h
+  on_boot:
+    priority: 375
+    then:
+      - switch.turn_on: internal_speaker_amp
+      - globals.set:
+          id: status_led_update
+          value: 'true'
+      - light.turn_on:
+          id: led_ring
+          red: 100%
+          green: 0%
+          blue: 0%
+          brightness: 30%
+      - globals.set:
+          id: status_led_update
+          value: 'false'
+      - delay: 1s
+      - logger.log:
+          tag: chronicle
+          level: INFO
+          format: "Chronicle firmware booted - speaker amp enabled"
+
+esp32:
+  board: esp32-s3-devkitc-1
+  cpu_frequency: 240MHz
+  variant: esp32s3
+  flash_size: 16MB
+  framework:
+    type: esp-idf
+    version: recommended
+    sdkconfig_options:
+      CONFIG_ESP32S3_DATA_CACHE_64KB: "y"
+      CONFIG_ESP32S3_DATA_CACHE_LINE_64B: "y"
+      CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB: "y"
+      CONFIG_SPIRAM_RODATA: "y"
+      CONFIG_SPIRAM_FETCH_INSTRUCTIONS: "y"
+      CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC: "y"
+
+logger:
+  level: INFO
+  baud_rate: 115200
+
+wifi:
+  ssid: ${wifi_ssid}
+  password: ${wifi_pwd}
+  on_connect:
+    then:
+      - logger.log:
+          tag: tcp
+          level: INFO
+          format: "Wi-Fi connected - IP: %s - starting microphone capture"
+          args:
+            - 'esphome::network::get_ip_addresses()[0].str().c_str()'
+      - globals.set:
+          id: status_led_update
+          value: 'true'
+      - light.turn_on:
+          id: led_ring
+          red: 100%
+          green: 50%
+          blue: 0%
+          brightness: 30%
+      - globals.set:
+          id: status_led_update
+          value: 'false'
+      - microphone.capture
+  on_disconnect:
+    then:
+      - logger.log:
+          tag: tcp
+          level: WARN
+          format: "Wi-Fi disconnected"
+      - globals.set:
+          id: status_led_update
+          value: 'true'
+      - light.turn_on:
+          id: led_ring
+          red: 100%
+          green: 0%
+          blue: 0%
+          brightness: 30%
+      - globals.set:
+          id: status_led_update
+          value: 'false'
+      - globals.set:
+          id: tcp_ok
+          value: 'false'
+
+# API without encryption for easy access from Python scripts
+api:
+
+ota:
+  - platform: esphome
+
+psram:
+  mode: octal
+  speed: 80MHz
+  ignore_not_found: false
+
+# ─────────── Globals ───────────
+globals:
+  - id: tcp_ok
+    type: bool
+    initial_value: 'false'
+  # When non-zero, the status LED interval skips its override until millis() passes this value.
+  - id: api_led_override_until
+    type: uint32_t
+    initial_value: '0'
+  # Flag to distinguish status-interval LED updates from API LED commands.
+  - id: status_led_update
+    type: bool
+    initial_value: 'false'
+
+# ─────────── LED Ring (12x WS2812 on GPIO21, power on GPIO45) ───────────
+power_supply:
+  - id: led_power
+    pin: GPIO45
+
+light:
+  - platform: esp32_rmt_led_strip
+    id: led_ring
+    name: "LED Ring"
+    pin: GPIO21
+    chipset: WS2812
+    max_refresh_rate: 15ms
+    num_leds: 12
+    rgb_order: GRB
+    rmt_symbols: 192
+    default_transition_length: 0ms
+    power_supply: led_power
+    on_state:
+      then:
+        - lambda: |-
+            // Only set override if this wasn't triggered by the status interval
+            if (!id(status_led_update)) {
+              float dur = id(led_hold_duration).state;
+              uint32_t hold_ms = 5000;  // default 5s
+              if (!std::isnan(dur) && dur > 0) {
+                hold_ms = (uint32_t)(dur * 1000);
+              }
+              id(api_led_override_until) = millis() + hold_ms;
+            }
+
+# ─────────── Status intervals ───────────
+interval:
+  - interval: 10s
+    then:
+      - logger.log:
+          level: INFO
+          format: "heartbeat - mic: %s, tcp: %s"
+          args:
+            - 'id(mic_in).is_running() ? "yes" : "no"'
+            - 'id(tcp_ok) ? "yes" : "no"'
+
+  # LED ring colour based on connectivity state (skips when API override active)
+  - interval: 2s
+    then:
+      - if:
+          condition:
+            lambda: 'return id(api_led_override_until) > 0 && millis() < id(api_led_override_until);'
+          then:
+            - logger.log:
+                level: DEBUG
+                format: "LED status interval skipped (API override active)"
+          else:
+            - lambda: |-
+                id(api_led_override_until) = 0;
+                id(status_led_update) = true;
+            - if:
+                condition:
+                  not:
+                    wifi.connected:
+                then:
+                  # Red - no Wi-Fi
+                  - light.turn_on:
+                      id: led_ring
+                      red: 100%
+                      green: 0%
+                      blue: 0%
+                      brightness: 30%
+                else:
+                  - if:
+                      condition:
+                        lambda: 'return id(tcp_ok);'
+                      then:
+                        # Blue - Wi-Fi + TCP streaming
+                        - light.turn_on:
+                            id: led_ring
+                            red: 0%
+                            green: 0%
+                            blue: 100%
+                            brightness: 30%
+                      else:
+                        # Orange - Wi-Fi up, TCP disconnected
+                        - light.turn_on:
+                            id: led_ring
+                            red: 100%
+                            green: 50%
+                            blue: 0%
+                            brightness: 30%
+            - lambda: 'id(status_led_update) = false;'
+
+# ─────────── Text Sensors (bridge on-device events to ESPHome API) ───────────
+text_sensor:
+  - platform: template
+    id: button_action
+    name: "Button Action"
+  - platform: template
+    id: dial_action
+    name: "Dial Action"
+
+# ─────────── LED Hold Duration (set by backend before light command) ───────────
+number:
+  - platform: template
+    id: led_hold_duration
+    name: "LED Hold Duration"
+    min_value: 0
+    max_value: 300
+    step: 0.5
+    initial_value: 5
+    restore_value: false
+    optimistic: true
+    unit_of_measurement: "s"
+
+# ─────────── Center Button (GPIO0) ───────────
+binary_sensor:
+  - platform: gpio
+    pin:
+      number: GPIO0
+      inverted: true
+      mode:
+        input: true
+        pullup: true
+    id: center_button
+    name: "Center Button"
+    on_multi_click:
+      - timing:
+          - ON for at most 0.5s
+          - OFF for at least 0.3s
+        then:
+          - text_sensor.template.publish:
+              id: button_action
+              state: "SINGLE_PRESS"
+      - timing:
+          - ON for at most 0.5s
+          - OFF for at most 0.3s
+          - ON for at most 0.5s
+          - OFF for at least 0.3s
+        then:
+          - text_sensor.template.publish:
+              id: button_action
+              state: "DOUBLE_PRESS"
+      - timing:
+          - ON for at least 1s
+        then:
+          - text_sensor.template.publish:
+              id: button_action
+              state: "LONG_PRESS"
+
+# ─────────── Rotary Encoder (GPIO16/GPIO18) ───────────
+sensor:
+  - platform: rotary_encoder
+    id: dial
+    name: "Dial"
+    pin_a:
+      number: GPIO16
+      mode:
+        input: true
+        pullup: true
+    pin_b:
+      number: GPIO18
+      mode:
+        input: true
+        pullup: true
+    resolution: 2
+    on_clockwise:
+      - text_sensor.template.publish:
+          id: dial_action
+          state: "CW"
+    on_anticlockwise:
+      - text_sensor.template.publish:
+          id: dial_action
+          state: "CCW"
+
+# ─────────── I2C Bus (DAC + XMOS Control) ───────────
+i2c:
+  - id: internal_i2c
+    sda: GPIO5
+    scl: GPIO6
+    frequency: 400kHz
+
+# ─────────── XMOS Voice Kit Initialization ───────────
+# Required for AIC3204 DAC and audio hardware to function
+voice_kit:
+  id: voice_kit_component
+  i2c_id: internal_i2c
+  reset_pin: GPIO4
+  channel_0_stage: AGC   # Speech-ready output (AEC→IC→NS→AGC)
+  channel_1_stage: NS    # Pre-AGC tap (useful for wake word or analysis)
+  firmware:
+    url: https://github.com/esphome/voice-kit-xmos-firmware/releases/download/v1.3.1/ffva_v1.3.1_upgrade.bin
+    version: "1.3.1"
+    md5: 964635c5bf125529dab14a2472a15401
+
+# ─────────── Audio DAC ───────────
+audio_dac:
+  - platform: aic3204
+    id: aic3204_dac
+    i2c_id: internal_i2c
+
+# ─────────── Speaker Amplifier ───────────
+switch:
+  - platform: gpio
+    pin: GPIO47
+    id: internal_speaker_amp
+    name: "Speaker Amp"
+    restore_mode: ALWAYS_OFF
+    internal: true
+
+# ─────────── I2S Buses ───────────
+i2s_audio:
+  # Output bus (speaker / audio jack)
+  - id: i2s_output
+    i2s_lrclk_pin:
+      number: GPIO7
+    i2s_bclk_pin:
+      number: GPIO8
+
+  # Input bus (microphone)
+  - id: i2s_input
+    i2s_lrclk_pin:
+      number: GPIO14
+    i2s_bclk_pin:
+      number: GPIO13
+
+# ─────────── Microphone (TCP streaming to relay) ───────────
+# The XMOS voice kit outputs stereo 32-bit I2S (secondary mode). Channel 0
+# (right) carries the fully-processed speech signal (AEC→IC→NS→AGC), while
+# channel 1 (left) is a pre-AGC tap useful for wake-word engines.
+#
+# We match the official HA Voice PE microphone config (stereo, 32-bit) and
+# extract+downconvert in the on_data lambda before sending over TCP.
+#
+# References:
+#   Official Voice PE config:
+#     https://github.com/esphome/home-assistant-voice-pe/blob/dev/home-assistant-voice.yaml
+#   XMOS voice kit audio pipeline:
+#     https://deepwiki.com/esphome/home-assistant-voice-pe/3.2-audio-processing-pipeline
+#   I2S microphone component docs:
+#     https://esphome.io/components/microphone/i2s_audio/
+microphone:
+  - platform: i2s_audio
+    id: mic_in
+    adc_type: external
+    i2s_audio_id: i2s_input
+    i2s_din_pin: GPIO15
+    i2s_mode: secondary
+    sample_rate: 16000
+    bits_per_sample: 32bit
+    channel: stereo
+    on_data:
+      then:
+        - lambda: |-
+            static bool announced = false;
+            static bool session_started = false;
+            static uint32_t last_connect_attempt = 0;
+            id(tcp_ok) = chronicle::is_connected();
+
+            // (Re)open TCP socket if needed - with 3-second cooldown
+            if (!chronicle::is_connected()) {
+              uint32_t now = millis();
+              if (now - last_connect_attempt < 3000) {
+                return;  // wait before retrying
+              }
+              last_connect_attempt = now;
+              session_started = false;
+              announced = false;
+              chronicle::connect_relay("${server_ip}", atoi("${server_port}"));
+              id(tcp_ok) = chronicle::is_connected();
+              return;  // skip sending on the connect attempt frame
+            }
+
+            // Send audio-start once per connection (mono 16-bit after conversion)
+            if (!session_started) {
+              if (!chronicle::send_audio_start(16000, 2, 1)) {
+                id(tcp_ok) = false;
+                return;
+              }
+              session_started = true;
+            }
+
+            // Extract right channel (ch0 = AGC-processed speech) and convert 32→16 bit.
+            // Input: interleaved stereo 32-bit samples [R0, L0, R1, L1, ...]
+            // Output: mono 16-bit samples [R0_16, R1_16, ...]
+            // Each stereo frame = 8 bytes (4 bytes right + 4 bytes left).
+            const int32_t* samples = reinterpret_cast<const int32_t*>(x.data());
+            size_t total_samples = x.size() / sizeof(int32_t);    // total L+R samples
+            size_t num_frames = total_samples / 2;                 // stereo frames
+
+            // Temporary buffer for mono 16-bit output (2 bytes per frame)
+            static std::vector<int16_t> mono_buf;
+            if (mono_buf.size() < num_frames) {
+              mono_buf.resize(num_frames);
+            }
+
+            for (size_t i = 0; i < num_frames; i++) {
+              int32_t right = samples[i * 2];       // channel 0 (right) = AGC output
+              mono_buf[i] = (int16_t)(right >> 16);  // 32→16 bit: take upper 16 bits
+            }
+
+            size_t mono_bytes = num_frames * sizeof(int16_t);
+
+            // Send converted mono 16-bit PCM
+            if (!chronicle::send_audio(reinterpret_cast<const uint8_t*>(mono_buf.data()),
+                                       mono_bytes, 16000, 2, 1)) {
+              announced = false;
+              session_started = false;
+              id(tcp_ok) = false;
+            } else if (!announced) {
+              ESP_LOGI("tcp", "Streaming audio to relay (stereo 32bit → mono 16bit, %d frames)", num_frames);
+              announced = true;
+            }
+
+# ─────────── Speaker Output ───────────
+speaker:
+  # Hardware I2S speaker
+  - platform: i2s_audio
+    id: i2s_audio_speaker
+    sample_rate: 48000
+    i2s_mode: secondary
+    i2s_dout_pin: GPIO10
+    bits_per_sample: 32bit
+    i2s_audio_id: i2s_output
+    dac_type: external
+    channel: stereo
+    timeout: never
+    buffer_duration: 100ms
+    audio_dac: aic3204_dac
+
+  # Mixer: combines announcement + media streams
+  - platform: mixer
+    id: mixing_speaker
+    output_speaker: i2s_audio_speaker
+    num_channels: 2
+    task_stack_in_psram: true
+    source_speakers:
+      - id: announcement_mixing_input
+        timeout: never
+      - id: media_mixing_input
+        timeout: never
+
+  # Resamplers for each pipeline
+  - platform: resampler
+    id: announcement_resampling_speaker
+    output_speaker: announcement_mixing_input
+    sample_rate: 48000
+    bits_per_sample: 16
+  - platform: resampler
+    id: media_resampling_speaker
+    output_speaker: media_mixing_input
+    sample_rate: 48000
+    bits_per_sample: 16
+
+# ─────────── HTTP Request (for fetching audio URLs) ───────────
+http_request:
+
+# ─────────── Media Sources ───────────
+media_source:
+  - platform: http_request
+    id: http_source
+    buffer_size: 500000
+
+# ─────────── Media Player ───────────
+media_player:
+  - platform: speaker_source
+    id: chronicle_media_player
+    name: Media Player
+    announcement_speaker: announcement_resampling_speaker
+    media_speaker: media_resampling_speaker
+    announcement_pipeline:
+      format: FLAC
+      num_channels: 1
+      sample_rate: 48000
+    media_pipeline:
+      format: FLAC
+      num_channels: 2
+      sample_rate: 48000
+    volume_increment: 0.05
+    volume_min: 0.4
+    volume_max: 0.85
+    sources:
+      - http_source
+    on_announcement:
+      - mixer_speaker.apply_ducking:
+          id: media_mixing_input
+          decibel_reduction: 20
+          duration: 0.0s
+    on_state:
+      if:
+        condition:
+          not:
+            media_player.is_announcing: chronicle_media_player
+        then:
+          - mixer_speaker.apply_ducking:
+              id: media_mixing_input
+              decibel_reduction: 0
+              duration: 1.0s
+
+# ─────────── External Components ───────────
+# Refs synced with official HA Voice PE firmware (dev branch)
+# voice_kit: device-specific XMOS/AIC3204 init
+# audio, media_player: updated versions from dev PRs
+# file, http_request, media_source, speaker_source: not yet in mainline
+external_components:
+  - source:
+      type: git
+      url: https://github.com/esphome/home-assistant-voice-pe
+      ref: dev
+    components:
+      - voice_kit
+    refresh: 0s
+  - source:
+      type: git
+      url: https://github.com/esphome/esphome
+      ref: a2d98e1d5e020200db8f3caf27a74a939a661dc4
+    components: [audio]
+  - source:
+      type: git
+      url: https://github.com/esphome/esphome
+      ref: b4b7c5b25ebe0f2ab988f700219fa3c57b2377b7
+    components: [media_player]
+  - source:
+      type: git
+      url: https://github.com/esphome/esphome
+      ref: b49b09b6ae56502aa3ce51be86f90d732d019b2c
+    refresh: 0s
+    components: [file, http_request, media_source, speaker_source]

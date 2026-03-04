@@ -7,6 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from dotenv import dotenv_values
+
 LABEL = "com.chronicle.wearable-client"
 PLIST_PATH = Path.home() / "Library" / "LaunchAgents" / f"{LABEL}.plist"
 LOG_DIR = Path.home() / "Library" / "Logs" / "Chronicle"
@@ -103,11 +105,9 @@ def _build_plist() -> dict:
     # Read .env file for backend config
     env_file = PROJECT_DIR / ".env"
     if env_file.exists():
-        for line in env_file.read_text().splitlines():
-            line = line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                key, _, value = line.partition("=")
-                env[key.strip()] = value.strip()
+        for key, value in dotenv_values(env_file).items():
+            if value is not None:
+                env[key] = value
 
     plist = {
         "Label": LABEL,

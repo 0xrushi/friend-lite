@@ -1,164 +1,183 @@
 # HAVPE Relay (Home Assistant Voice Preview Edition Relay)
 
-TCP-to-WebSocket relay for ESPHome Voice-PE that connects to the Omi advanced backend.
-
-## Features
-
-- **TCP Server**: Listens on port 8989 for ESP32 Voice-PE connections
-- **Audio Format Conversion**: Converts 32-bit PCM to 16-bit PCM using easy-audio-interfaces
-- **WebSocket Client**: Forwards converted audio to backend at `/ws?codec=pcm` endpoint
-- **Graceful Handling**: Supports reconnections and proper cleanup
-- **Configurable**: Command-line options for ports and endpoints
-
-## Audio Processing
-
-- **Input Format**: 32-bit PCM, 16kHz, 2 channels (from ESP32 Voice-PE)
-- **Output Format**: 16-bit PCM, 16kHz, 2 channels (to backend)
-- **Conversion**: Uses easy-audio-interfaces for robust audio processing
-
-## Installation
-
-Make sure you're in the havpe-relay directory:
-
-```bash
-cd havpe-relay
-```
-
-Install dependencies (already configured in pyproject.toml):
-
-```bash
-uv sync
-```
-
-## Usage
-
-### Basic Usage
-
-Start the relay with default settings:
-
-```bash
-uv run main.py
-```
-
-This will:
-- Listen for TCP connections on port 8989
-- Forward to WebSocket at `ws://127.0.0.1:8000/ws?codec=pcm`
-
-### Advanced Usage
-
-```bash
-# Custom TCP port
-uv run main.py --tcp-port 9090
-
-# Custom WebSocket URL
-uv run main.py --ws-url "ws://192.168.1.100:8000/ws?codec=pcm"
-
-# Verbose logging
-uv run main.py -v    # INFO level
-uv run main.py -vv   # DEBUG level
-
-# Full configuration example
-uv run main.py --tcp-port 8989 --ws-url "ws://localhost:8000/ws?codec=pcm" -v
-```
-
-### Command Line Options
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `--tcp-port` | 8989 | TCP port to listen on for ESP32 connections |
-| `--ws-url` | `ws://127.0.0.1:8000/ws?codec=pcm` | WebSocket URL to forward audio to |
-| `-v` / `--verbose` | WARNING | Increase verbosity (-v: INFO, -vv: DEBUG) |
+TCP-to-WebSocket relay that bridges ESP32 Voice-PE devices to the Chronicle backend.
 
 ## Architecture
 
 ```
-ESP32 Voice-PE → TCP:8989 → HAVPE Relay → WebSocket:/ws?codec=pcm → Omi Backend
-     (32-bit PCM)                    (16-bit PCM)
+ESP32 Voice-PE ──TCP:8989──► HAVPE Relay ──WebSocket──► Chronicle Backend
+  (32-bit stereo)            (16-bit mono)               (/ws?codec=pcm)
 ```
 
-## Integration with Backend
+The relay:
+- Listens for raw TCP audio from an ESP32 running ESPHome
+- Converts 32-bit stereo I2S data to 16-bit mono PCM
+- Authenticates with the Chronicle backend (JWT)
+- Streams audio over WebSocket using the Wyoming protocol
 
-The relay automatically includes the following WebSocket parameters when connecting to the backend:
+## Quick Start
 
-- `user_id=esp32_voice_pe` - Identifies the audio source
-- `rate=16000` - Sample rate (16kHz)
-- `width=2` - Sample width (16-bit = 2 bytes)
-- `channels=2` - Stereo audio
-- `src=voice_pe` - Source identifier
+### 1. Configure
 
-Example WebSocket URL sent to backend:
+```bash
+cd extras/havpe-relay
+./init.sh
 ```
-ws://127.0.0.1:8000/ws?codec=pcm?user_id=esp32_voice_pe&rate=16000&width=2&channels=2&src=voice_pe
+
+The setup wizard configures:
+- Backend URL and WebSocket URL
+- Authentication credentials (reads defaults from backend `.env`)
+- Device name and TCP port
+- (Optional) ESP32 firmware WiFi and relay IP secrets
+
+### 2. Flash the ESP32 Firmware
+
+See [Firmware Flashing](#firmware-flashing) below.
+
+### 3. Start the Relay
+
+```bash
+# With Docker
+docker compose up --build -d
+
+# Or run directly
+uv run python main.py
 ```
 
-## Development
+## Firmware Flashing
 
-### Project Structure
+The `firmware/` directory contains the ESPHome configuration for the ESP32-S3 Voice-PE.
+
+### Configure Secrets
+
+If you didn't configure firmware during `./init.sh`, create the secrets file manually:
+
+```bash
+cd firmware
+cp secrets.template.yaml secrets.yaml
+```
+
+Edit `secrets.yaml` with your values:
+
+```yaml
+wifi_ssid: "YourWiFiNetwork"
+wifi_password: "YourWiFiPassword"
+relay_ip_address: "192.168.0.108"   # IP of the machine running this relay
+```
+
+### Flash
+
+Connect the ESP32-S3 Voice-PE via USB, then:
+
+```bash
+./flash.sh
+```
+
+This installs ESPHome via the `firmware` dependency group and runs `esphome run`. On first flash ESPHome will:
+1. Download and compile the ESP-IDF framework (~5 min first time)
+2. Build the firmware
+3. Flash over USB (select the serial port when prompted)
+
+Subsequent flashes are faster (incremental builds) and can be done over WiFi (OTA).
+
+To view device logs:
+
+```bash
+./flash.sh logs
+```
+
+### Hardware Wiring
+
+The ESPHome config (`voice-tcp.yaml`) expects an I2S microphone on these pins:
+
+| Signal | GPIO |
+|--------|------|
+| BCLK   | 13   |
+| LRCLK  | 14   |
+| DIN    | 15   |
+
+These match the default Voice-PE board pinout. If your board differs, edit the pin numbers in `voice-tcp.yaml`.
+
+### Verify Connection
+
+After flashing, the ESP32 will:
+1. Connect to WiFi
+2. Open a TCP socket to `relay_ip_address:8989`
+3. Stream raw I2S audio data
+
+Check the relay logs to confirm audio is flowing:
+
+```bash
+# Docker
+docker compose logs -f
+
+# Direct
+uv run python main.py -v
+```
+
+You should see `TCP client connected` followed by chunk processing messages.
+
+## Configuration
+
+### Environment Variables (`.env`)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `BACKEND_URL` | `http://host.docker.internal:8000` | Backend HTTP URL (for auth) |
+| `BACKEND_WS_URL` | `ws://host.docker.internal:8000` | Backend WebSocket URL |
+| `AUTH_USERNAME` | — | Email address for Chronicle login |
+| `AUTH_PASSWORD` | — | Password for Chronicle login |
+| `DEVICE_NAME` | `havpe` | Device identifier (becomes part of client ID) |
+| `TCP_PORT` | `8989` | TCP port to listen on for ESP32 |
+
+### Command Line Options
+
+```bash
+uv run python main.py --help
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--port` | 8989 | TCP port for ESP32 connections |
+| `--host` | `0.0.0.0` | Host address to bind to |
+| `--backend-url` | from env | Backend API URL |
+| `--backend-ws-url` | from env | Backend WebSocket URL |
+| `--username` | from env | Auth username |
+| `--password` | from env | Auth password |
+| `--debug-audio` | off | Save raw audio to `audio_chunks/` |
+| `-v` / `-vv` | WARNING | Increase log verbosity |
+
+## Project Structure
 
 ```
 havpe-relay/
-├── main.py           # Main relay implementation
-├── pyproject.toml    # Project configuration
-├── uv.lock          # Dependency lock file
-├── README.md        # This file
-├── .python-version  # Python version (3.12)
-└── .venv/           # Virtual environment
+├── main.py                        # Relay server
+├── init.py                        # Setup wizard
+├── init.sh                        # Setup wizard wrapper
+├── flash.sh                       # Firmware flash wrapper
+├── .env.template                  # Environment template
+├── docker-compose.yml             # Docker config
+├── Dockerfile                     # Container build
+├── firmware/
+│   ├── voice-tcp.yaml             # ESPHome config for ESP32-S3
+│   ├── tcp_stream.h               # lwIP socket header
+│   ├── secrets.template.yaml      # Secrets template
+│   └── secrets.yaml               # Your secrets (gitignored)
+└── pyproject.toml                 # Python dependencies
 ```
-
-### Dependencies
-
-- `easy-audio-interfaces>=0.2.6` - Audio processing and format conversion
-- `websockets>=15.0.1` - WebSocket client implementation
-- Python 3.12+ required
-
-### Audio Conversion Details
-
-The relay uses a two-step process for audio conversion:
-
-1. **Input Processing**: Wraps incoming TCP data in `AudioChunk` format
-2. **Format Conversion**: Converts 32-bit float PCM to 16-bit integer PCM
-   - Clamps values to [-1, 1] range
-   - Scales to 16-bit integer range (-32767 to 32767)
-   - Maintains sample rate and channel count
 
 ## Troubleshooting
 
-### Common Issues
+### ESP32 won't connect to relay
+- Verify `relay_ip_address` in `firmware/secrets.yaml` matches this machine's LAN IP
+- Ensure the relay is running and port 8989 is not firewalled
+- Check ESP32 serial logs: `esphome logs firmware/voice-tcp.yaml`
 
-1. **Connection Refused**: Ensure the backend is running on the specified WebSocket URL
-2. **TCP Port in Use**: Another service might be using port 8989
-3. **Audio Quality Issues**: Check that ESP32 is sending 32-bit PCM data
+### Authentication failures
+- Verify credentials: try logging in at `BACKEND_URL/docs` with the same email/password
+- Check the backend is reachable from the relay host
 
-### Debug Mode
-
-Run with debug logging to see detailed audio processing:
-
-```bash
-uv run main.py -vv
-```
-
-This will show:
-- TCP connection details
-- Audio chunk sizes and conversion rates
-- WebSocket message sizes
-- Error details
-
-### Monitoring
-
-Watch the logs for:
-- `TCP client connected` - ESP32 successfully connected
-- `WebSocket connected` - Backend connection established
-- `Relayed X bytes (32-bit) -> Y bytes (16-bit)` - Audio being processed
-- Conversion ratio should be approximately 2:1 (32-bit to 16-bit)
-
-## Testing
-
-You can test the relay using the provided test listener (if needed):
-
-1. Start the test WebSocket listener on port 8000
-2. Start the relay: `uv run main.py -v`
-3. Connect your ESP32 Voice-PE device to the relay on port 8989
-
-## License
-
-This project is part of the chronicle ecosystem.
+### No audio in Chronicle
+- Run with `-v` to confirm chunks are being sent
+- Run with `--debug-audio` to save raw audio locally and verify it's not silence
+- Check backend WebSocket logs for the connection

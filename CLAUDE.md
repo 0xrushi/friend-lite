@@ -574,8 +574,8 @@ For detailed technical documentation, see:
 - **[@Docs/audio-pipeline-architecture.md](Docs/audio-pipeline-architecture.md)**: Audio pipeline design
 - **[@backends/advanced/Docs/auth.md](backends/advanced/Docs/auth.md)**: Authentication architecture
 - **[backends/advanced/Docs/architecture.md](backends/advanced/Docs/architecture.md)**: Backend architecture details
-- **[@backends/advanced/Docs/memories.md](backends/advanced/Docs/memories.md)**: Memory system documentation
-- **[@backends/advanced/Docs/plugin-development-guide.md](backends/advanced/Docs/plugin-development-guide.md)**: Plugin development guide
+- **[backends/advanced/Docs/memories.md](backends/advanced/Docs/memories.md)**: Memory system documentation
+- **[backends/advanced/Docs/plugin-development-guide.md](backends/advanced/Docs/plugin-development-guide.md)**: Plugin development guide
 
 ## Robot Framework Testing
 
