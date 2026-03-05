@@ -1,5 +1,7 @@
 *
 !main.py
+!relay_core.py
+!device_controller.py
 !pyproject.toml
 !uv.lock
 !.env
