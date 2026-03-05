@@ -86,6 +86,7 @@ class RelayManager:
         self.bg = bg
         self.config = RelayConfig.from_env()
         self._server: Optional[asyncio.AbstractServer] = None
+        self._session_tasks: set[asyncio.Task] = set()
 
     def start(self) -> None:
         self.bg.run_coro(self._start_server())
@@ -125,7 +126,7 @@ class RelayManager:
             def on_auth_failure() -> None:
                 state.update(status="listening", device_addr=None, error="Auth failed")
 
-            asyncio.ensure_future(
+            task = asyncio.ensure_future(
                 run_device_session(
                     r, w, config,
                     on_audio_chunk=on_chunk,
@@ -134,6 +135,8 @@ class RelayManager:
                     on_auth_failure=on_auth_failure,
                 )
             )
+            self._session_tasks.add(task)
+            task.add_done_callback(self._session_tasks.discard)
 
         self._server = await asyncio.start_server(_make_handler, "0.0.0.0", RELAY_PORT)
         self.state.update(status="listening", error=None)
@@ -142,9 +145,21 @@ class RelayManager:
     async def _stop_server(self) -> None:
         if self._server is None:
             return
+
+        # Stop accepting new connections
         self._server.close()
+
+        # Cancel active sessions first — their finally blocks close the TCP writers,
+        # which is what allows wait_closed() to return.
+        for task in list(self._session_tasks):
+            task.cancel()
+        if self._session_tasks:
+            await asyncio.gather(*self._session_tasks, return_exceptions=True)
+        self._session_tasks.clear()
+
         await self._server.wait_closed()
         self._server = None
+
         self.state.update(status="idle", device_addr=None, chunks_sent=0)
         logger.info("Relay stopped")
 

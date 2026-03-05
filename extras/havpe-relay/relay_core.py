@@ -219,6 +219,7 @@ async def run_device_session(
     )
 
     device = DeviceController()
+    tasks: list[asyncio.Task] = []
 
     try:
         async with websockets.connect(backend_uri) as ws:
@@ -271,6 +272,9 @@ async def run_device_session(
     except Exception as e:
         logger.error("Session error: %s", e)
     finally:
+        for t in tasks:
+            t.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
         await device.disconnect()
         writer.close()
         if on_session_end:
