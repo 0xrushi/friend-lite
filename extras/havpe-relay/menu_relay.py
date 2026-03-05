@@ -3,11 +3,10 @@
 Runs the TCP-to-WebSocket relay in a background asyncio thread and shows
 connection status in the macOS menu bar. No terminal needed.
 
-Uses the same Wyoming protocol + DeviceController as main.py.
+Uses the shared relay_core module for Wyoming protocol forwarding.
 """
 
 import asyncio
-import json
 import logging
 import os
 import threading
@@ -15,23 +14,14 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 import rumps
-import websockets
 from dotenv import load_dotenv
 
-from device_controller import DeviceController
-from main import get_jwt_token
+from relay_core import RelayConfig, get_jwt_token, run_device_session
 
 logger = logging.getLogger(__name__)
 
 load_dotenv()
 
-# --- Config from .env --------------------------------------------------------
-
-BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
-BACKEND_WS_URL = os.getenv("BACKEND_WS_URL", "ws://localhost:8000")
-AUTH_USERNAME = os.getenv("AUTH_USERNAME")
-AUTH_PASSWORD = os.getenv("AUTH_PASSWORD")
-DEVICE_NAME = os.getenv("DEVICE_NAME", "havpe")
 RELAY_PORT = int(os.getenv("RELAY_PORT", "8989"))
 
 
@@ -86,157 +76,6 @@ class AsyncioThread:
         return asyncio.run_coroutine_threadsafe(coro, self.loop)
 
 
-# --- Relay logic (Wyoming protocol, same as main.py) -------------------------
-
-async def _forward_tcp_to_ws(
-    reader: asyncio.StreamReader,
-    ws,
-    ws_lock: asyncio.Lock,
-    state: SharedState,
-) -> None:
-    """Forward Wyoming messages from device TCP to backend WebSocket."""
-    while True:
-        line = await reader.readline()
-        if not line:
-            break
-
-        line_str = line.decode().strip()
-        if not line_str:
-            continue
-
-        header = json.loads(line_str)
-        payload_length = header.get("payload_length", 0)
-
-        async with ws_lock:
-            await ws.send(line_str)
-            if payload_length > 0:
-                payload = await reader.readexactly(payload_length)
-                await ws.send(payload)
-
-        msg_type = header.get("type", "")
-        if msg_type == "audio-chunk":
-            with state._lock:
-                state.chunks_sent += 1
-        else:
-            logger.info("TCP→WS: %s", msg_type)
-
-
-async def _handle_backend_messages(ws, device: DeviceController) -> None:
-    """Process messages from backend WebSocket, dispatch to device."""
-    async for raw in ws:
-        if isinstance(raw, bytes):
-            continue
-
-        try:
-            msg = json.loads(raw)
-        except (json.JSONDecodeError, TypeError):
-            continue
-
-        msg_type = msg.get("type", "")
-        data = msg.get("data", {})
-
-        if msg_type == "play-audio":
-            url = data.get("url", "")
-            announcement = data.get("announcement", True)
-            logger.info("Backend→device: play-audio %s", url)
-            await device.play_audio(url, announcement=announcement)
-
-        elif msg_type == "led-control":
-            r = float(data.get("r", 0))
-            g = float(data.get("g", 0))
-            b = float(data.get("b", 0))
-            brightness = float(data.get("brightness", 0.3))
-            duration = float(data.get("duration", 5.0))
-            logger.info("Backend→device: led-control rgb=(%.1f,%.1f,%.1f) br=%.1f dur=%.1fs", r, g, b, brightness, duration)
-            await device.set_led(r, g, b, brightness, duration=duration)
-
-
-async def _forward_esphome_events(
-    device: DeviceController,
-    ws,
-    ws_lock: asyncio.Lock,
-) -> None:
-    """Forward button/dial events from ESPHome API to backend WebSocket."""
-    while True:
-        event = await device.get_event()
-        event_type = event.pop("type")
-
-        wyoming_msg = json.dumps({
-            "type": event_type,
-            "data": event,
-            "payload_length": 0,
-        })
-        async with ws_lock:
-            await ws.send(wyoming_msg)
-        logger.info("ESPHome→WS: %s %s", event_type, event)
-
-
-async def handle_device(
-    reader: asyncio.StreamReader,
-    writer: asyncio.StreamWriter,
-    state: SharedState,
-):
-    addr = writer.get_extra_info("peername")
-    device_ip = addr[0]
-    addr_str = f"{addr[0]}:{addr[1]}" if addr else "unknown"
-    logger.info("Device connected from %s", addr_str)
-    state.update(status="connected", device_addr=addr_str, chunks_sent=0)
-
-    token = await get_jwt_token(AUTH_USERNAME, AUTH_PASSWORD, BACKEND_URL)
-    if not token:
-        logger.error("Auth failed, dropping connection")
-        state.update(status="listening", device_addr=None, error="Auth failed")
-        writer.close()
-        return
-
-    backend_uri = f"{BACKEND_WS_URL}/ws?codec=pcm&token={token}&device_name={DEVICE_NAME}"
-
-    device = DeviceController()
-
-    try:
-        async with websockets.connect(backend_uri) as ws:
-            logger.info("Backend WS connected, starting bidirectional bridge")
-
-            api_ok = await device.connect(device_ip)
-            if api_ok:
-                logger.info("ESPHome API connected — button/dial/LED/speaker enabled")
-            else:
-                logger.info("ESPHome API unavailable — audio-only mode")
-
-            ws_lock = asyncio.Lock()
-            tasks = [
-                asyncio.create_task(_forward_tcp_to_ws(reader, ws, ws_lock, state), name="tcp→ws"),
-                asyncio.create_task(_handle_backend_messages(ws, device), name="ws→device"),
-            ]
-            if api_ok:
-                tasks.append(
-                    asyncio.create_task(_forward_esphome_events(device, ws, ws_lock), name="esphome→ws")
-                )
-
-            done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-
-            for t in done:
-                if t.exception():
-                    logger.error("Task %s failed: %s", t.get_name(), t.exception())
-                else:
-                    logger.info("Task %s finished", t.get_name())
-
-            for t in pending:
-                t.cancel()
-
-    except asyncio.IncompleteReadError:
-        logger.info("Device disconnected (incomplete read)")
-    except websockets.ConnectionClosed as e:
-        logger.info("Backend WS closed: %s", e)
-    except Exception as e:
-        logger.error("Session error: %s", e)
-    finally:
-        await device.disconnect()
-        writer.close()
-        state.update(status="listening", device_addr=None)
-        logger.info("Session ended")
-
-
 # --- Relay manager ------------------------------------------------------------
 
 class RelayManager:
@@ -245,6 +84,7 @@ class RelayManager:
     def __init__(self, state: SharedState, bg: AsyncioThread) -> None:
         self.state = state
         self.bg = bg
+        self.config = RelayConfig.from_env()
         self._server: Optional[asyncio.AbstractServer] = None
 
     def start(self) -> None:
@@ -257,19 +97,45 @@ class RelayManager:
         if self._server is not None:
             return
 
-        if not AUTH_USERNAME or not AUTH_PASSWORD:
+        if not self.config.auth_username or not self.config.auth_password:
             self.state.update(status="error", error="AUTH_USERNAME/AUTH_PASSWORD not set in .env")
             return
 
-        token = await get_jwt_token(AUTH_USERNAME, AUTH_PASSWORD, BACKEND_URL)
+        token = await get_jwt_token(
+            self.config.auth_username, self.config.auth_password, self.config.backend_url,
+        )
         if not token:
             self.state.update(status="error", error="Backend auth failed")
             return
 
-        def client_handler(r, w):
-            asyncio.ensure_future(handle_device(r, w, self.state))
+        state = self.state
+        config = self.config
 
-        self._server = await asyncio.start_server(client_handler, "0.0.0.0", RELAY_PORT)
+        def _make_handler(r, w):
+            def on_chunk(_payload: bytes, _length: int) -> None:
+                with state._lock:
+                    state.chunks_sent += 1
+
+            def on_session_start(addr_str: str) -> None:
+                state.update(status="connected", device_addr=addr_str, chunks_sent=0)
+
+            def on_session_end() -> None:
+                state.update(status="listening", device_addr=None)
+
+            def on_auth_failure() -> None:
+                state.update(status="listening", device_addr=None, error="Auth failed")
+
+            asyncio.ensure_future(
+                run_device_session(
+                    r, w, config,
+                    on_audio_chunk=on_chunk,
+                    on_session_start=on_session_start,
+                    on_session_end=on_session_end,
+                    on_auth_failure=on_auth_failure,
+                )
+            )
+
+        self._server = await asyncio.start_server(_make_handler, "0.0.0.0", RELAY_PORT)
         self.state.update(status="listening", error=None)
         logger.info("Relay listening on :%d", RELAY_PORT)
 
