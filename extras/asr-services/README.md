@@ -61,6 +61,14 @@ docker compose up -d vibevoice-asr
 
 ## Available Models
 
+### DGX Spark (NeMo)
+
+On ARM64 machines with an NVIDIA GB10 GPU, NeMo automatically disables CUDA
+graph decoding to avoid a CUDA bindings compatibility error during transcription.
+The checkpoint is restored on CPU before moving to GPU to reduce GPU allocation
+pressure during startup. Inference still runs on the GPU, but decoding may be
+slower. Other GPUs and architectures keep NeMo's default decoding configuration.
+
 ### Faster-Whisper Provider (Recommended for General Use)
 
 | Model | Description | Speed |

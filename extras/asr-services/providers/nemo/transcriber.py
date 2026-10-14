@@ -8,10 +8,10 @@ timestamp support. NeMo handles long audio internally.
 import asyncio
 import logging
 import os
+import platform
 from typing import Optional, cast
 
 import torch
-
 from common.response_models import TranscriptionResult, Word
 
 logger = logging.getLogger(__name__)
@@ -63,10 +63,39 @@ class NemoTranscriber:
 
         import nemo.collections.asr as nemo_asr
 
+        is_dgx_spark = (
+            platform.machine().lower() in {"aarch64", "arm64"}
+            and torch.cuda.is_available()
+            and "GB10" in torch.cuda.get_device_name()
+        )
+        # Restore on CPU first on Spark to avoid simultaneously allocating the
+        # checkpoint and model on its GPU under shared-memory pressure.
+        load_options = {"map_location": "cpu"} if is_dgx_spark else {}
         self.model = cast(
             nemo_asr.models.ASRModel,
-            nemo_asr.models.ASRModel.from_pretrained(model_name=self.model_id),
+            nemo_asr.models.ASRModel.from_pretrained(
+                model_name=self.model_id, **load_options
+            ),
         )
+        if is_dgx_spark:
+            self.model = self.model.to("cuda")
+
+        # DGX Spark's GB10/ARM64 stack currently hits a CUDA bindings tuple
+        # mismatch in NeMo's graph decoder. Keep GPU inference, but use eager
+        # decoding on this hardware only; preserve defaults everywhere else.
+        if (
+            is_dgx_spark
+            and hasattr(self.model, "change_decoding_strategy")
+            and "decoding" in self.model.cfg
+            and "greedy" in self.model.cfg.decoding
+        ):
+            from omegaconf import OmegaConf, open_dict
+
+            decoding = OmegaConf.create(OmegaConf.to_container(self.model.cfg.decoding))
+            with open_dict(decoding):
+                decoding.greedy.use_cuda_graph_decoder = False
+            self.model.change_decoding_strategy(decoding)
+            logger.info("DGX Spark detected: CUDA graph decoding disabled for GB10")
 
         self._is_loaded = True
         logger.info("Model loaded successfully")

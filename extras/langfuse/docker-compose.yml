@@ -107,7 +107,8 @@ services:
       start_period: 1s
 
   minio:
-    image: docker.io/minio/minio:RELEASE.2025-01-20T14-49-07Z
+    # Mirror of the original release; upstream Docker Hub and Quay pulls are unavailable.
+    image: docker.io/netiedge/minio:RELEASE.2025-01-20T14-49-07Z@sha256:e6c282005f6c8496256f8fd07e9a8b82073344c217ea87436d9af888db67eb0e
     restart: always
     entrypoint: sh
     command: -c 'mkdir -p /data/langfuse && minio server --address ":9000" --console-address ":9001" /data'
